@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Ironsmith",
+            "type": "swift",
+            "request": "launch",
+            "program": "${workspaceFolder}/dist/debug/Ironsmith.app/Contents/MacOS/Ironsmith",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Ironsmith: Build Debug App"
+        }
+    ]
+}

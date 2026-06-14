@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and package release
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v5
+        with:
+          p12-file-base64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          p12-password: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+
+      - name: Install create-dmg
+        run: npm install --global create-dmg
+
+      - name: Write App Store Connect API key
+        env:
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$APP_STORE_CONNECT_API_KEY_BASE64" | /usr/bin/base64 -D > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Build release app
+        run: |
+          set -euo pipefail
+          script/build.sh --release \
+            --version "${GITHUB_REF_NAME#v}" \
+            --build-number "$GITHUB_RUN_NUMBER" \
+            --supabase-url "${{ vars.IRONSMITH_SUPABASE_URL }}" \
+            --supabase-publishable-key "${{ vars.IRONSMITH_SUPABASE_PUBLISHABLE_KEY }}" \
+            --api-base-url "${{ vars.IRONSMITH_API_BASE_URL }}" \
+            --sign-identity "${{ vars.DEVELOPER_ID_SIGN_IDENTITY }}"
+
+      - name: Package and notarize DMG
+        run: |
+          set -euo pipefail
+          script/package.sh \
+            --output dist/release/Ironsmith.dmg \
+            --notary-key "$RUNNER_TEMP/AuthKey.p8" \
+            --notary-key-id "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
+            --notary-issuer-id "${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}"
+
+      - name: Create draft GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          generate_release_notes: true
+          name: ${{ github.ref_name }}
+          files: dist/release/Ironsmith.dmg
+          fail_on_unmatched_files: true
+          overwrite_files: true
+

@@ -1,0 +1,264 @@
+import AnyLanguageModel
+import Foundation
+
+struct ToolGenerationRuntimeContext {
+    let languageModel: any LanguageModel
+    let metadataLanguageModel: any LanguageModel
+    let generationOptions: GenerationOptions
+    let repairStrategy: ToolRepairStrategy
+    let toolsDirectoryURL: URL
+    let fileClient: AgentFileClient
+    let processClient: SwiftPackageProcessClient
+    let appBundleClient: ToolAppBundleClient
+    let metadataClient: ToolMetadataClient
+    let promptRefinementClient: ToolPromptRefinementClient
+    let promptRefinementEnabled: Bool
+    let versionBackupClient: ToolVersionBackupClient
+    let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
+
+    init(
+        languageModel: any LanguageModel,
+        metadataLanguageModel: (any LanguageModel)?,
+        generationOptions: GenerationOptions,
+        repairStrategy: ToolRepairStrategy,
+        toolsDirectoryURL: URL,
+        fileClient: AgentFileClient,
+        processClient: SwiftPackageProcessClient,
+        appBundleClient: ToolAppBundleClient,
+        metadataClient: ToolMetadataClient = .fallback(),
+        promptRefinementClient: ToolPromptRefinementClient = .disabled(),
+        promptRefinementEnabled: Bool = true,
+        versionBackupClient: ToolVersionBackupClient,
+        afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
+    ) {
+        self.languageModel = languageModel
+        self.metadataLanguageModel = metadataLanguageModel ?? AnyLanguageModel.SystemLanguageModel.default
+        self.generationOptions = generationOptions
+        self.repairStrategy = repairStrategy
+        self.toolsDirectoryURL = toolsDirectoryURL
+        self.fileClient = fileClient
+        self.processClient = processClient
+        self.appBundleClient = appBundleClient
+        self.metadataClient = metadataClient
+        self.promptRefinementClient = promptRefinementClient
+        self.promptRefinementEnabled = promptRefinementEnabled
+        self.versionBackupClient = versionBackupClient
+        self.afterLanguageModelInvocation = afterLanguageModelInvocation
+    }
+
+    init(
+        languageModel: any LanguageModel,
+        generationOptions: GenerationOptions,
+        repairStrategy: ToolRepairStrategy,
+        toolsDirectoryURL: URL,
+        fileClient: AgentFileClient,
+        processClient: SwiftPackageProcessClient,
+        appBundleClient: ToolAppBundleClient,
+        metadataClient: ToolMetadataClient = .fallback(),
+        promptRefinementClient: ToolPromptRefinementClient = .disabled(),
+        promptRefinementEnabled: Bool = true,
+        versionBackupClient: ToolVersionBackupClient,
+        afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
+    ) {
+        self.init(
+            languageModel: languageModel,
+            metadataLanguageModel: nil,
+            generationOptions: generationOptions,
+            repairStrategy: repairStrategy,
+            toolsDirectoryURL: toolsDirectoryURL,
+            fileClient: fileClient,
+            processClient: processClient,
+            appBundleClient: appBundleClient,
+            metadataClient: metadataClient,
+            promptRefinementClient: promptRefinementClient,
+            promptRefinementEnabled: promptRefinementEnabled,
+            versionBackupClient: versionBackupClient,
+            afterLanguageModelInvocation: afterLanguageModelInvocation
+        )
+    }
+
+    func respond<Content, PromptContent>(
+        in session: LanguageModelSession,
+        to prompt: PromptContent,
+        generating type: Content.Type = Content.self
+    ) async throws -> LanguageModelSession.Response<Content>
+    where Content: Generable, PromptContent: PromptRepresentable {
+        do {
+            let response = try await session.respond(
+                to: Prompt(prompt),
+                generating: type,
+                options: generationOptions
+            )
+            await afterLanguageModelInvocation()
+            return response
+        } catch {
+            await afterLanguageModelInvocation()
+            throw error
+        }
+    }
+
+    func makeUniquePackageRoot(displayName: String) throws -> URL {
+        try fileClient.createDirectory(toolsDirectoryURL)
+
+        let slug = ToolNameSanitizer.slug(from: displayName)
+        var candidate = toolsDirectoryURL.appendingPathComponent(slug, isDirectory: true)
+        var suffix = 2
+        while fileClient.fileExists(candidate) {
+            candidate = toolsDirectoryURL.appendingPathComponent("\(slug)-\(suffix)", isDirectory: true)
+            suffix += 1
+        }
+        return candidate
+    }
+
+    func loadManifest(at url: URL) throws -> ToolManifest {
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(ToolManifest.self, from: data)
+    }
+
+    func writeManifest(_ manifest: ToolManifest, packageRootURL: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(manifest)
+        guard let string = String(data: data, encoding: .utf8) else {
+            throw ToolGenerationError.couldNotEncodeManifest
+        }
+        try write(string, to: ToolPackageLayout.agentManifestFilename, packageRootURL: packageRootURL)
+    }
+
+    func write(
+        _ content: String,
+        to path: String,
+        packageRootURL: URL
+    ) throws {
+        try fileClient.writeString(content, packageFileURL(for: path, packageRootURL: packageRootURL))
+    }
+
+    func readIfPresent(_ path: String, packageRootURL: URL) throws -> String {
+        let url = try packageFileURL(for: path, packageRootURL: packageRootURL)
+        guard fileClient.fileExists(url) else { return "" }
+        return try fileClient.readString(url)
+    }
+
+    func packageFileURL(for path: String, packageRootURL: URL) throws -> URL {
+        try ToolPackageLayout.packageFileURL(for: path, packageRootURL: packageRootURL)
+    }
+
+    func jsonString(_ value: some Encodable) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(value)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    static func cleanedText(_ response: String) -> String {
+        response.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func cleanedSource(_ response: String) -> String {
+        let strippedThinking = stripThinkingBlocks(from: response)
+        let trimmed = strippedThinking.trimmingCharacters(in: .whitespacesAndNewlines)
+        let unfenced: String
+        if trimmed.hasPrefix("```") {
+            let lines = trimmed.components(separatedBy: .newlines)
+            var remaining = Array(lines.dropFirst())
+            if let last = remaining.last, last.trimmingCharacters(in: .whitespacesAndNewlines) == "```" {
+                remaining.removeLast()
+            }
+            unfenced = remaining.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            unfenced = trimmed
+        }
+
+        let lines = unfenced.components(separatedBy: .newlines)
+        if let startIndex = lines.firstIndex(where: { isLikelySwiftSourceLine($0) }) {
+            return lines[startIndex...]
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return unfenced
+    }
+
+    private static func stripThinkingBlocks(from response: String) -> String {
+        var cleaned = response
+        let patterns = [
+            #"<think>[\s\S]*?</think>"#,
+            #"<thinking>[\s\S]*?</thinking>"#,
+            #"<reasoning>[\s\S]*?</reasoning>"#,
+            #"<\|channel\>(thought|analysis)[\s\S]*?<channel\|>"#
+        ]
+
+        for pattern in patterns {
+            cleaned = cleaned.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
+        return cleaned
+    }
+
+    private static func isLikelySwiftSourceLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return false
+        }
+
+        return trimmed.hasPrefix("import ")
+            || trimmed.hasPrefix("@main")
+            || trimmed.hasPrefix("struct ")
+            || trimmed.hasPrefix("final class ")
+            || trimmed.hasPrefix("class ")
+            || trimmed.hasPrefix("enum ")
+            || trimmed.hasPrefix("protocol ")
+            || trimmed.hasPrefix("actor ")
+            || trimmed.hasPrefix("extension ")
+            || trimmed.hasPrefix("typealias ")
+            || trimmed.hasPrefix("func ")
+            || trimmed.hasPrefix("//")
+            || trimmed.hasPrefix("#if")
+    }
+}
+
+enum ToolGenerationError: LocalizedError, Equatable {
+    case emptyPrompt
+    case compileFailed(String)
+    case couldNotEncodeManifest
+    case invalidRepairPatch
+    case noRepairPatchCandidate
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyPrompt:
+            return "Enter a prompt before building an app."
+        case .compileFailed(let output):
+            return output.isEmpty ? "The generated package did not compile." : output
+        case .couldNotEncodeManifest:
+            return "Ironsmith could not encode the generated app manifest."
+        case .invalidRepairPatch:
+            return "The repair model returned an invalid patch."
+        case .noRepairPatchCandidate:
+            return "No deterministic repair patch was available."
+        }
+    }
+
+    static func isContextWindowExceeded(_ error: any Error) -> Bool {
+        let description = error.localizedDescription.lowercased()
+        let reflected = String(reflecting: error).lowercased()
+        return Self.contextWindowNeedles.contains { needle in
+            description.contains(needle) || reflected.contains(needle)
+        }
+    }
+
+    private static let contextWindowNeedles = [
+        "context window",
+        "context length",
+        "context size",
+        "maximum context",
+        "exceeds context",
+        "exceeded context",
+        "too many tokens",
+        "token limit"
+    ]
+}

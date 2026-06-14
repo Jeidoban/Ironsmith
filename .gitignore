@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Xcode local state
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcbkptlist
+
+# VS Code local state
+.vscode/*
+!.vscode/launch.json.example
+!.vscode/tasks.json.example
+
+# Local build logs
+xcodebuild.log
+
+# SwiftPM and script outputs
+.build/
+.swiftpm/
+dist/
+
+# Local app configuration values
+Config/*.local.xcconfig
+Config/*.env
+!Config/.env.example
+script/*.local.sh
