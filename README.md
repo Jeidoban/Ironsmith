@@ -4,7 +4,7 @@
 
 <h1 align="center">Ironsmith</h1>
 
-Ironsmith is a free, open-source macOS menu bar app for making small, personal Mac apps with AI. Describe what you want, and Ironsmith generates, builds, and saves a native SwiftUI app you can launch, edit, and export to your Applications folder.
+[Ironsmith](https://ironsmith.app) is a free, open-source macOS menu bar app for making small, personal Mac apps with AI. Describe what you want, and Ironsmith generates, builds, and saves a native SwiftUI app you can launch, edit, and export to your Applications folder.
 
 <br>
 
