@@ -58,12 +58,25 @@ extension InferenceStore {
             try repository.save()
             try refreshData()
 
-            await refreshDiscoveredModels(for: provider)
-            if selectedModelID == nil {
-                selectModel(
-                    remoteModels.first(where: { $0.providerIdentifier == provider.identifier })?
-                        .selectionIdentifier
-                )
+            if provider.kind == .ironsmith {
+                await refreshDiscoveredModels(for: provider)
+                if selectedModelID == nil {
+                    selectModel(
+                        remoteModels.first(where: { $0.providerIdentifier == provider.identifier })?
+                            .selectionIdentifier
+                    )
+                }
+            } else {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await refreshDiscoveredModels(for: provider)
+                    if selectedModelID == nil {
+                        selectModel(
+                            remoteModels.first(where: { $0.providerIdentifier == provider.identifier })?
+                                .selectionIdentifier
+                        )
+                    }
+                }
             }
             return true
         } catch {
@@ -114,8 +127,11 @@ extension InferenceStore {
         do {
             try repository.save()
             try refreshData(reconcileSelection: false)
-            await refreshDiscoveredModels(for: provider)
-            reconcileSelectedModel()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await refreshDiscoveredModels(for: provider)
+                reconcileSelectedModel()
+            }
             return true
         } catch {
             repository.rollback()
@@ -276,7 +292,7 @@ extension InferenceStore {
     private func validateProviderCanBeAdded(
         _ provider: ProviderConfig
     ) async throws {
-        guard provider.kind == .ollama, provider.hasLocalServerBaseURL else {
+        guard provider.kind == .ollama, provider.hasLoopbackServerBaseURL else {
             return
         }
 
@@ -314,8 +330,8 @@ extension InferenceStore {
 }
 
 extension ProviderConfig {
-    var hasLocalServerBaseURL: Bool {
-        ProviderBaseURLValidator.usesAllowedLocalHost(baseURLString)
+    var hasLoopbackServerBaseURL: Bool {
+        ProviderBaseURLValidator.usesLoopbackHost(baseURLString)
     }
 }
 

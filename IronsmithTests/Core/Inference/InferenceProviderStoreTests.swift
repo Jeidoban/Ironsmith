@@ -23,8 +23,46 @@ extension InferenceTests {
 
         let persistedModels = try context.fetch(FetchDescriptor<ModelConfig>())
         #expect(didAdd)
+        await Self.eventually {
+            inferenceStore.remoteModels.map(\.identifier) == ["gpt-test"]
+        }
         #expect(inferenceStore.remoteModels.map(\.identifier) == ["gpt-test"])
         #expect(persistedModels.allSatisfy { $0.source != .remote })
+    }
+
+    @MainActor
+    @Test
+    func addingProviderDoesNotWaitForRemoteModelDiscovery() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let discoveryGate = RemoteDiscoveryGate()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(
+                remoteDiscoveryHook: {
+                    await discoveryGate.wait()
+                }
+            )
+        )
+
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        var didAdd: Bool?
+        Task { @MainActor in
+            didAdd = await inferenceStore.addProvider(
+                choice: .init(descriptor: ProviderCatalog.descriptor(for: .customOpenAICompatible)!),
+                apiKey: "",
+                displayName: "LAN Server",
+                baseURLString: "http://192.168.1.103:8000/v1"
+            )
+        }
+
+        await Self.eventually {
+            didAdd != nil
+        }
+
+        #expect(didAdd == true)
+        #expect(inferenceStore.providers.contains { $0.displayName == "LAN Server" })
+        await discoveryGate.open()
     }
 
     @MainActor
@@ -61,8 +99,39 @@ extension InferenceTests {
         await inferenceStore.loadIfNeeded(modelContext: context)
         await inferenceStore.loadIfNeeded(modelContext: context)
 
+        await Self.eventually {
+            inferenceStore.remoteModels.map(\.identifier) == ["gpt-test"]
+        }
         #expect(await counter.count == 1)
         #expect(inferenceStore.remoteModels.map(\.identifier) == ["gpt-test"])
+    }
+
+    @MainActor
+    @Test
+    func startupDoesNotWaitForUnselectedProviderDiscovery() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let provider = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        provider.identifier = "custom.unreachable"
+        provider.displayName = "Unreachable"
+        provider.baseURLString = "http://192.168.1.103:8000/v1"
+        context.insert(provider)
+        try context.save()
+
+        let discoveryGate = RemoteDiscoveryGate()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(
+                remoteDiscoveryHook: {
+                    await discoveryGate.wait()
+                }
+            )
+        )
+
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        #expect(inferenceStore.hasLoadedModels)
+        #expect(inferenceStore.selectedModel?.source == .appleFoundation)
+        await discoveryGate.open()
     }
 
     @MainActor
@@ -129,12 +198,15 @@ extension InferenceTests {
         #expect(customProviders.count == 2)
         #expect(Set(customProviders.map(\.identifier)).count == 2)
         #expect(customProviders.allSatisfy { $0.origin == .custom })
+        await Self.eventually {
+            inferenceStore.remoteModels.contains { $0.identifier == "llama3.1:8b" }
+        }
         #expect(inferenceStore.remoteModels.contains { $0.identifier == "llama3.1:8b" })
     }
 
     @MainActor
     @Test
-    func inferenceStoreRejectsUnsafeConfigurableProviderBaseURLs() async throws {
+    func inferenceStoreAcceptsHTTPAndRejectsUnsupportedProviderBaseURLSchemes() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
         let inferenceStore = InferenceStore(dependencies: Self.dependencies())
@@ -157,9 +229,11 @@ extension InferenceTests {
             baseURLString: "file:///tmp/model"
         )
 
-        #expect(!(didAddRemoteHTTP))
+        #expect(didAddRemoteHTTP)
         #expect(!(didAddFileURL))
-        #expect(inferenceStore.providers.allSatisfy { $0.kind != .customOpenAICompatible })
+        #expect(inferenceStore.providers.contains {
+            $0.displayName == "Remote HTTP" && $0.baseURLString == "http://example.com/v1"
+        })
 
         let didAddLocal = await inferenceStore.addProvider(
             choice: customChoice,
@@ -168,6 +242,12 @@ extension InferenceTests {
             baseURLString: "http://localhost:11434/v1"
         )
         let provider = try #require(inferenceStore.providers.first { $0.kind == .customOpenAICompatible })
+        let didAddLANServer = await inferenceStore.addProvider(
+            choice: customChoice,
+            apiKey: "",
+            displayName: "LAN Server",
+            baseURLString: "http://192.168.1.103:8000/v1"
+        )
         let didSaveRemoteHTTP = await inferenceStore.saveProviderEdits(
             provider: provider,
             apiKey: "",
@@ -176,9 +256,14 @@ extension InferenceTests {
         )
 
         #expect(didAddLocal)
-        #expect(!(didSaveRemoteHTTP))
-        #expect(provider.displayName == "Local")
-        #expect(provider.baseURLString == "http://localhost:11434/v1")
+        #expect(didAddLANServer)
+        #expect(inferenceStore.providers.contains {
+            $0.displayName == "LAN Server"
+                && $0.baseURLString == "http://192.168.1.103:8000/v1"
+        })
+        #expect(didSaveRemoteHTTP)
+        #expect(provider.displayName == "Remote HTTP")
+        #expect(provider.baseURLString == "http://example.com/v1")
     }
 
     @MainActor
@@ -214,6 +299,9 @@ extension InferenceTests {
         #expect(didSave)
         #expect(savedProvider.displayName == "Local LM Studio")
         #expect(savedProvider.baseURLString == "http://localhost:1234/v1")
+        await Self.eventually {
+            inferenceStore.remoteModels.contains { $0.identifier == "qwen2.5-coder" }
+        }
         #expect(inferenceStore.remoteModels.contains { $0.identifier == "qwen2.5-coder" })
     }
 
@@ -240,6 +328,9 @@ extension InferenceTests {
         let provider = try #require(inferenceStore.providers.first { $0.kind == .customOpenAICompatible })
 
         #expect(didAdd)
+        await Self.eventually {
+            inferenceStore.connectionIssue(for: provider) != nil
+        }
         #expect(inferenceStore.presentedErrorMessage == nil)
         #expect(inferenceStore.connectionIssue(for: provider)?.message == "Could not connect to the server.")
         #expect(!(inferenceStore.remoteModels.contains { $0.providerIdentifier == provider.identifier }))
@@ -276,6 +367,9 @@ extension InferenceTests {
         #expect(didSave)
         #expect(savedProvider.displayName == "Ollama")
         #expect(savedProvider.baseURLString == "http://localhost:11435")
+        await Self.eventually {
+            inferenceStore.remoteModels.contains { $0.identifier == "gemma4:e2b" }
+        }
         #expect(inferenceStore.remoteModels.contains { $0.identifier == "gemma4:e2b" })
         #expect(inferenceStore.apiKey(for: savedProvider) == "ollama-key")
     }
@@ -329,6 +423,9 @@ extension InferenceTests {
         let provider = try #require(inferenceStore.providers.first { $0.kind == .ollama })
 
         #expect(didAdd)
+        await Self.eventually {
+            inferenceStore.connectionIssue(for: provider) != nil
+        }
         #expect(inferenceStore.presentedErrorMessage == nil)
         #expect(inferenceStore.connectionIssue(for: provider)?.message == "Could not connect to Ollama.")
         #expect(try context.fetch(FetchDescriptor<ProviderConfig>()).contains { $0.kind == .ollama })

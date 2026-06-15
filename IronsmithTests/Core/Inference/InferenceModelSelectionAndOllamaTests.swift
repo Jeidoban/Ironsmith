@@ -267,6 +267,9 @@ extension InferenceTests {
         try context.save()
 
         await store.loadIfNeeded(modelContext: context)
+        await Self.eventually {
+            store.remoteModels.contains { $0.identifier == "gemma4:e2b" }
+        }
         #expect(store.remoteModels.contains { $0.identifier == "gemma4:e2b" })
         #expect(store.connectionIssue(for: provider) == nil)
 

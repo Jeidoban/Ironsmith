@@ -100,12 +100,29 @@ final class InferenceStore {
         }
 
         ironsmithSession = dependencies.accountClient.currentSession()
-        for provider in providers where provider.kind != .local {
-            await refreshDiscoveredModels(for: provider)
+        let selectedRemoteProvider = providers.first { provider in
+            provider.kind != .local
+                && selectedModelID?.hasPrefix("\(provider.identifier)::") == true
+        }
+        if let selectedRemoteProvider {
+            await refreshDiscoveredModels(for: selectedRemoteProvider)
         }
 
         reconcileSelectedModel()
         hasLoaded = true
+
+        let backgroundProviders = providers.filter {
+            $0.kind != .local && $0.identifier != selectedRemoteProvider?.identifier
+        }
+        guard !backgroundProviders.isEmpty else { return }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for provider in backgroundProviders {
+                await refreshDiscoveredModels(for: provider)
+            }
+            reconcileSelectedModel()
+        }
     }
 
     func prepareSettings(modelContext: ModelContext) async {

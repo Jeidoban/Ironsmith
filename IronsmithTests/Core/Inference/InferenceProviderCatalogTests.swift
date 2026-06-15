@@ -90,23 +90,31 @@ extension InferenceTests {
         #expect(ollamaRequest.value(forHTTPHeaderField: "Authorization") == "Bearer ollama-key")
         #expect(customRequest.url?.absoluteString == "http://localhost:11434/v1/models")
         #expect(customRequest.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(customRequest.timeoutInterval == RemoteModelClient.discoveryTimeout)
     }
 
     @Test
-    func providerBaseURLValidationAllowsHTTPSAndLocalHTTPOnly() throws {
+    func providerBaseURLValidationAllowsAnyHTTPOrHTTPSHost() throws {
         let acceptedURLs = [
             "https://api.example.com",
+            "http://example.com",
+            "http://203.0.113.10:8000/v1",
+            "http://models.internal.example:8000/v1",
             "http://localhost",
             "http://127.0.0.1",
             "http://[::1]",
             "http://studio.localhost:11434/v1",
+            "http://10.0.0.2:8000/v1",
+            "http://172.16.0.2:8000/v1",
+            "http://172.31.255.254:8000/v1",
+            "http://192.168.1.103:8000/v1",
+            "http://169.254.10.20:8000/v1",
         ]
         for urlString in acceptedURLs {
             #expect(try ProviderBaseURLValidator.validatedURL(from: urlString).absoluteString == urlString)
         }
 
         let rejectedURLs = [
-            "http://example.com",
             "file:///tmp/model",
             "data:text/plain,hello",
             "ftp://example.com",
@@ -121,7 +129,7 @@ extension InferenceTests {
     }
 
     @Test
-    func providerRequestBuildersRejectUnsafeBaseURLs() throws {
+    func providerRequestBuildersAllowHTTPAndRejectUnsupportedSchemes() throws {
         let remoteProvider = ProviderConfig(
             identifier: "custom.remote-http",
             displayName: "Remote HTTP",
@@ -129,14 +137,37 @@ extension InferenceTests {
             authMode: .apiKey,
             origin: .custom
         )
-        #expect(throws: RemoteModelDiscoveryError.self) {
-            try RemoteModelClient.makeModelListRequest(for: remoteProvider, apiKey: nil)
-        }
-
-        #expect(throws: OllamaClientError.self) {
-            try OllamaClient.makeTagsRequest(baseURLString: "http://example.com", apiKey: nil)
-        }
+        #expect(try RemoteModelClient.makeModelListRequest(
+            for: remoteProvider,
+            apiKey: nil
+        ).url?.absoluteString == "http://example.com/v1/models")
+        #expect(try OllamaClient.makeTagsRequest(
+            baseURLString: "http://example.com",
+            apiKey: nil
+        ).url?.absoluteString == "http://example.com/api/tags")
         #expect(try OllamaClient.makeTagsRequest(baseURLString: "http://127.0.0.1:11434", apiKey: nil).url?.absoluteString == "http://127.0.0.1:11434/api/tags")
+        #expect(try RemoteModelClient.makeModelListRequest(
+            for: ProviderConfig(
+                identifier: "custom.lan",
+                displayName: "LAN Server",
+                baseURLString: "http://192.168.1.103:8000/v1",
+                authMode: .apiKey,
+                origin: .custom
+            ),
+            apiKey: nil
+        ).url?.absoluteString == "http://192.168.1.103:8000/v1/models")
+        #expect(throws: RemoteModelDiscoveryError.self) {
+            try RemoteModelClient.makeModelListRequest(
+                for: ProviderConfig(
+                    identifier: "custom.file",
+                    displayName: "File",
+                    baseURLString: "file:///tmp/model",
+                    authMode: .apiKey,
+                    origin: .custom
+                ),
+                apiKey: nil
+            )
+        }
     }
 
     @Test

@@ -6,7 +6,7 @@ extension InferenceStore {
     }
 
     func canStartOllama(for provider: ProviderConfig) -> Bool {
-        provider.kind == .ollama && provider.hasLocalServerBaseURL
+        provider.kind == .ollama && provider.hasLoopbackServerBaseURL
     }
 
     func refreshOllamaInstallationStatus() {
