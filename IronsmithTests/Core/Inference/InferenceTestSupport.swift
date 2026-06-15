@@ -289,6 +289,24 @@ actor RemoteDiscoveryCounter {
     }
 }
 
+actor RemoteDiscoveryGate {
+    private var isOpen = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation {
+            continuation = $0
+        }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 actor RemoteDiscoveryScript {
     private var results: [Result<[String], Error>]
     private var requestCount = 0

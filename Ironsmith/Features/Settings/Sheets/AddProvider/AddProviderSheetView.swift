@@ -156,7 +156,7 @@ struct AddProviderSheetView: View {
         if isOllama {
             let trimmedBaseURLString = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmedBaseURLString.isEmpty
-                || (ProviderBaseURLValidator.usesAllowedLocalHost(trimmedBaseURLString)
+                || (ProviderBaseURLValidator.usesLoopbackHost(trimmedBaseURLString)
                     && inferenceStore.ollamaInstallationStatus != .installed)
         }
 

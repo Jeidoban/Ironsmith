@@ -5,6 +5,8 @@ struct RemoteModelClient {
 }
 
 extension RemoteModelClient {
+    static let discoveryTimeout: TimeInterval = 10
+
     static func live(accountClient: IronsmithAccountClient = .unconfigured) -> Self {
         Self { provider, apiKey in
             if provider.kind == .ironsmith {
@@ -45,6 +47,7 @@ extension RemoteModelClient {
 
         var request = URLRequest(url: baseURL.appendingPathComponent(modelsPath))
         request.httpMethod = "GET"
+        request.timeoutInterval = discoveryTimeout
 
         if let apiKey, !apiKey.isEmpty {
             switch descriptor.responseFormat {

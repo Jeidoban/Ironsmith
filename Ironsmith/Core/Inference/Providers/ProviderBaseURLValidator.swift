@@ -13,16 +13,14 @@ nonisolated enum ProviderBaseURLValidator {
         }
 
         switch scheme {
-        case "https":
-            return url
-        case "http" where isAllowedLocalHTTPHost(rawHost):
+        case "http", "https":
             return url
         default:
             throw ProviderBaseURLValidationError.disallowedURL
         }
     }
 
-    static func isAllowedLocalHTTPHost(_ rawHost: String) -> Bool {
+    private static func isLoopbackHost(_ rawHost: String) -> Bool {
         let host = rawHost
             .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
             .lowercased()
@@ -34,7 +32,7 @@ nonisolated enum ProviderBaseURLValidator {
             || host.hasSuffix(".localhost")
     }
 
-    static func usesAllowedLocalHost(_ rawValue: String) -> Bool {
+    static func usesLoopbackHost(_ rawValue: String) -> Bool {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowercased = trimmed.lowercased()
         if lowercased.hasPrefix("http://[::1]")
@@ -49,7 +47,7 @@ nonisolated enum ProviderBaseURLValidator {
             return false
         }
 
-        return isAllowedLocalHTTPHost(rawHost)
+        return isLoopbackHost(rawHost)
     }
 }
 
