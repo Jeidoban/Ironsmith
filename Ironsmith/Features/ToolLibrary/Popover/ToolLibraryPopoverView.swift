@@ -89,6 +89,16 @@ struct ToolLibraryPopoverView: View {
                                         await toolLibraryStore.viewSource(tool)
                                     }
                                 },
+                                onContinue: {
+                                    toolLibraryStore.continueGeneration(
+                                        tool,
+                                        modelContext: modelContext,
+                                        inferenceStore: inferenceStore
+                                    )
+                                },
+                                onDiscard: {
+                                    toolLibraryStore.discardGeneration(tool, in: modelContext)
+                                },
                                 onDelete: {
                                     toolPendingDeletion = tool
                                 }

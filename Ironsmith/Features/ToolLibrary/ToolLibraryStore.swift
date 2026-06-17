@@ -11,6 +11,14 @@ enum ToolLibraryPresentedErrorAction: Equatable {
     case buyIronsmithCredits
 }
 
+private final class BindingBox<Value> {
+    var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+}
+
 @MainActor
 @Observable
 final class ToolLibraryStore {
@@ -60,6 +68,7 @@ final class ToolLibraryStore {
     }
 
     func selectForEditing(_ tool: Tool) {
+        guard tool.isGenerationReady else { return }
         selectedToolID = tool.id
         selectedToolName = tool.name
         sandboxEnabled = tool.sandboxEnabled
@@ -83,6 +92,10 @@ final class ToolLibraryStore {
             clearSelection()
             return
         }
+        guard selectedTool.isGenerationReady else {
+            clearSelection()
+            return
+        }
 
         selectedToolName = selectedTool.name
         sandboxEnabled = selectedTool.sandboxEnabled
@@ -93,6 +106,7 @@ final class ToolLibraryStore {
     }
 
     func delete(_ tool: Tool, in modelContext: ModelContext) {
+        guard !isGenerating else { return }
         handleDeletedTool(tool)
         modelContext.delete(tool)
 
@@ -105,7 +119,7 @@ final class ToolLibraryStore {
     }
 
     func canRestorePreviousVersion(_ tool: Tool) -> Bool {
-        restorableToolIDs.contains(tool.id)
+        tool.isGenerationReady && restorableToolIDs.contains(tool.id)
     }
 
     func refreshRestoreAvailability(for tools: [Tool]) async {
@@ -148,8 +162,42 @@ final class ToolLibraryStore {
         generationTask?.cancel()
     }
 
+    func continueGeneration(
+        _ tool: Tool,
+        modelContext: ModelContext,
+        inferenceStore: InferenceStore
+    ) {
+        guard canContinueGeneration(tool), generationTask == nil else { return }
+        generationTask = Task { @MainActor in
+            await resumeGeneration(tool, modelContext: modelContext, inferenceStore: inferenceStore)
+            generationTask = nil
+        }
+    }
+
+    func discardGeneration(_ tool: Tool, in modelContext: ModelContext) {
+        guard !isGenerating, canContinueGeneration(tool) else { return }
+        let packageRootURL = tool.packageRootURL
+        removePendingDraft(for: tool)
+
+        do {
+            switch tool.generationMode ?? .create {
+            case .create:
+                handleDeletedTool(tool)
+                modelContext.delete(tool)
+                try modelContext.save()
+                try removePackageIfExists(packageRootURL)
+            case .edit:
+                clearPendingGeneration(on: tool)
+                try modelContext.save()
+            }
+        } catch {
+            modelContext.rollback()
+            presentError(error.localizedDescription)
+        }
+    }
+
     func restorePreviousVersion(_ tool: Tool, in modelContext: ModelContext) async {
-        guard !isGenerating else { return }
+        guard !isGenerating, tool.isGenerationReady else { return }
         isGenerating = true
         clearPresentedErrorState()
         generationStatus = "Restoring \(tool.name)"
@@ -166,6 +214,7 @@ final class ToolLibraryStore {
             generationStatus = "Building \(tool.name)"
             try await dependencies.buildClient.buildTool(tool)
             tool.lastPromptSummary = "Reverted to previous version"
+            clearPendingGeneration(on: tool)
             tool.updatedAt = .now
             try modelContext.save()
             generationStatus = nil
@@ -182,12 +231,14 @@ final class ToolLibraryStore {
         let submittedSelectedToolID = selectedToolID
         let submittedToolName = selectedToolName
         let submittedSandboxEnabled = sandboxEnabled
+        var activeTool: Tool?
         isGenerating = true
         clearPresentedErrorState()
         generationStatus = submittedToolName.map { "Preparing \($0)" } ?? "Preparing new app"
 
         do {
             let selectedTool = try fetchSelectedTool(in: modelContext)
+            activeTool = selectedTool
             if submittedSelectedToolID != nil {
                 clearSelection()
             }
@@ -196,6 +247,25 @@ final class ToolLibraryStore {
             let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext()
             let sandboxPermissions = inferenceStore.generationPreferences.generatedAppSandboxPermissions
             let resourcePermissions = inferenceStore.generationPreferences.generatedAppResourcePermissions
+            if let selectedTool {
+                markToolGenerating(
+                    selectedTool,
+                    mode: .edit,
+                    phase: .planning,
+                    prompt: trimmedPrompt,
+                    refinedPrompt: nil
+                )
+                try modelContext.save()
+            }
+
+            let activeToolBox = BindingBox(activeTool)
+            let lifecycle = generationLifecycle(
+                modelContext: modelContext,
+                activeTool: activeToolBox
+            ) { tool in
+                activeTool = tool
+                activeToolBox.value = tool
+            }
 
             let result = try await dependencies.generationClient.generateTool(
                 trimmedPrompt,
@@ -203,18 +273,18 @@ final class ToolLibraryStore {
                 submittedSandboxEnabled,
                 sandboxPermissions,
                 resourcePermissions,
-                languageModelContext
+                languageModelContext,
+                lifecycle: lifecycle
             ) { status in
                 self.generationStatus = status
             }
-            try Task.checkCancellation()
 
-            if let selectedTool {
-                selectedTool.executableName = result.executableName
-                selectedTool.bundleIdentifier = result.bundleIdentifier
-                selectedTool.sandboxEnabled = result.sandboxEnabled
-                selectedTool.lastPromptSummary = Self.promptSummary(for: trimmedPrompt)
-                selectedTool.updatedAt = .now
+            if let completedTool = selectedTool ?? activeTool {
+                applyCompletedGenerationResult(
+                    result,
+                    to: completedTool,
+                    prompt: trimmedPrompt
+                )
                 try modelContext.save()
             } else {
                 let tool = Tool(
@@ -223,7 +293,9 @@ final class ToolLibraryStore {
                     bundleIdentifier: result.bundleIdentifier,
                     sandboxEnabled: result.sandboxEnabled,
                     packageRootPath: result.packageRootURL.path,
-                    lastPromptSummary: Self.promptSummary(for: trimmedPrompt)
+                    lastPromptSummary: Self.promptSummary(for: trimmedPrompt),
+                    generationState: .ready,
+                    generationPhase: .completed
                 )
                 let repository = ToolRepository(modelContext: modelContext)
                 repository.insert(tool)
@@ -234,16 +306,32 @@ final class ToolLibraryStore {
             generationStatus = nil
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch where IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
-            modelContext.rollback()
+            if let activeTool {
+                markToolStopped(activeTool)
+                try? modelContext.save()
+            } else {
+                modelContext.rollback()
+            }
             clearPresentedErrorState()
             generationStatus = nil
         } catch {
-            modelContext.rollback()
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
+                if let activeTool {
+                    markToolStopped(activeTool)
+                    try? modelContext.save()
+                } else {
+                    modelContext.rollback()
+                }
                 clearPresentedErrorState()
                 generationStatus = nil
             } else {
+                if let activeTool {
+                    markToolFailed(activeTool, error: error)
+                    try? modelContext.save()
+                } else {
+                    modelContext.rollback()
+                }
                 AgentDiagnosticsLog.append(
                     """
                     Tool generation failed.
@@ -319,6 +407,7 @@ final class ToolLibraryStore {
     }
 
     func viewSource(_ tool: Tool) async {
+        guard tool.isGenerationReady else { return }
         do {
             let contentViewURL = try Self.contentViewURL(for: tool)
             try await dependencies.finderClient.openURL(contentViewURL)
@@ -328,7 +417,7 @@ final class ToolLibraryStore {
     }
 
     func run(_ tool: Tool) async {
-        guard runningToolID == nil else { return }
+        guard tool.isGenerationReady, runningToolID == nil else { return }
         runningToolID = tool.id
         defer { runningToolID = nil }
 
@@ -340,7 +429,7 @@ final class ToolLibraryStore {
     }
 
     func export(_ tool: Tool) async {
-        guard exportingToolID == nil, !isGenerating else { return }
+        guard tool.isGenerationReady, exportingToolID == nil, !isGenerating else { return }
         exportingToolID = tool.id
         generationStatus = "Exporting \(tool.name)"
         defer {
@@ -397,11 +486,208 @@ final class ToolLibraryStore {
         return try modelContext.fetch(descriptor).first
     }
 
+    private func resumeGeneration(
+        _ tool: Tool,
+        modelContext: ModelContext,
+        inferenceStore: InferenceStore
+    ) async {
+        guard canContinueGeneration(tool) else { return }
+        let resumePrompt = (tool.pendingPrompt ?? tool.lastPromptSummary ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !resumePrompt.isEmpty else {
+            presentError("Ironsmith does not have enough saved prompt context to continue this generation.")
+            return
+        }
+
+        isGenerating = true
+        clearPresentedErrorState()
+        generationStatus = "Continuing \(tool.name)"
+        let activeToolBox = BindingBox<Tool?>(tool)
+        let lifecycle = generationLifecycle(
+            modelContext: modelContext,
+            activeTool: activeToolBox
+        ) { _ in }
+
+        do {
+            try await inferenceStore.prepareSelectedModelForGeneration()
+            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext()
+            let sandboxPermissions = inferenceStore.generationPreferences.generatedAppSandboxPermissions
+            let resourcePermissions = inferenceStore.generationPreferences.generatedAppResourcePermissions
+            markToolGenerating(
+                tool,
+                mode: tool.generationMode ?? .create,
+                phase: tool.generationPhase ?? .planning,
+                prompt: resumePrompt,
+                refinedPrompt: tool.pendingRefinedPrompt
+            )
+            try modelContext.save()
+
+            let result = try await dependencies.generationClient.generateTool(
+                resumePrompt,
+                tool,
+                tool.sandboxEnabled,
+                sandboxPermissions,
+                resourcePermissions,
+                languageModelContext,
+                lifecycle: lifecycle
+            ) { status in
+                self.generationStatus = status
+            }
+            applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
+            try modelContext.save()
+            try Task.checkCancellation()
+            generationStatus = nil
+            await refreshIronsmithCreditsIfNeeded(inferenceStore)
+        } catch where IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
+            markToolStopped(tool)
+            try? modelContext.save()
+            clearPresentedErrorState()
+            generationStatus = nil
+        } catch {
+            await refreshIronsmithCreditsIfNeeded(inferenceStore)
+            if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
+                markToolStopped(tool)
+                try? modelContext.save()
+                clearPresentedErrorState()
+                generationStatus = nil
+            } else {
+                markToolFailed(tool, error: error)
+                try? modelContext.save()
+                presentGenerationError(error)
+            }
+        }
+
+        isGenerating = false
+        if presentedErrorMessage != nil {
+            generationStatus = nil
+        }
+    }
+
+    private func generationLifecycle(
+        modelContext: ModelContext,
+        activeTool: BindingBox<Tool?>,
+        onPrepared: @escaping (Tool) -> Void = { _ in }
+    ) -> ToolGenerationLifecycle {
+        ToolGenerationLifecycle(
+            preservesCreatedPackageOnCancellation: true,
+            prepareCreatedTool: { preparedTool, prompt, refinedPrompt in
+                try await MainActor.run {
+                    let tool = Tool(
+                        name: preparedTool.name,
+                        executableName: preparedTool.executableName,
+                        bundleIdentifier: preparedTool.bundleIdentifier,
+                        sandboxEnabled: preparedTool.sandboxEnabled,
+                        packageRootPath: preparedTool.packageRootURL.path,
+                        lastPromptSummary: Self.promptSummary(for: prompt),
+                        generationState: .generating,
+                        generationPhase: .generatingSource,
+                        generationMode: .create,
+                        pendingPrompt: prompt,
+                        pendingRefinedPrompt: refinedPrompt
+                    )
+                    modelContext.insert(tool)
+                    try modelContext.save()
+                    activeTool.value = tool
+                    onPrepared(tool)
+                }
+            },
+            updatePhase: { state, phase, errorSummary in
+                try await MainActor.run {
+                    guard let tool = activeTool.value else { return }
+                    tool.generationState = state
+                    tool.generationPhase = phase
+                    if let errorSummary {
+                        tool.generationErrorSummary = Self.shortSummary(for: errorSummary)
+                    } else if state == .generating {
+                        tool.generationErrorSummary = nil
+                    }
+                    tool.updatedAt = .now
+                    try modelContext.save()
+                }
+            }
+        )
+    }
+
+    private func markToolGenerating(
+        _ tool: Tool,
+        mode: ToolGenerationMode,
+        phase: ToolGenerationPhase,
+        prompt: String,
+        refinedPrompt: String?
+    ) {
+        tool.generationState = .generating
+        tool.generationPhase = phase
+        tool.generationMode = mode
+        tool.pendingPrompt = prompt
+        tool.pendingRefinedPrompt = refinedPrompt
+        tool.generationErrorSummary = nil
+        tool.updatedAt = .now
+    }
+
+    private func markToolStopped(_ tool: Tool) {
+        tool.generationState = .stopped
+        tool.generationErrorSummary = nil
+        tool.updatedAt = .now
+    }
+
+    private func markToolFailed(_ tool: Tool, error: Error) {
+        tool.generationState = .failed
+        tool.generationErrorSummary = Self.shortSummary(for: generationErrorMessage(for: error))
+        tool.updatedAt = .now
+    }
+
+    private func applyCompletedGenerationResult(
+        _ result: ToolGenerationResult,
+        to tool: Tool,
+        prompt: String
+    ) {
+        tool.name = result.toolName
+        tool.executableName = result.executableName
+        tool.bundleIdentifier = result.bundleIdentifier
+        tool.sandboxEnabled = result.sandboxEnabled
+        tool.packageRootPath = result.packageRootURL.path
+        tool.lastPromptSummary = Self.promptSummary(for: prompt)
+        clearPendingGeneration(on: tool)
+    }
+
+    private func clearPendingGeneration(on tool: Tool) {
+        tool.generationState = .ready
+        tool.generationPhase = .completed
+        tool.generationMode = nil
+        tool.pendingPrompt = nil
+        tool.pendingRefinedPrompt = nil
+        tool.generationErrorSummary = nil
+        removePendingDraft(for: tool)
+        tool.updatedAt = .now
+    }
+
+    private func canContinueGeneration(_ tool: Tool) -> Bool {
+        !isGenerating && (tool.generationState == .stopped || tool.generationState == .failed)
+    }
+
+    private func removePendingDraft(for tool: Tool) {
+        let draftURL = ToolPackageLayout.pendingContentViewDraftURL(for: tool.packageRootURL)
+        guard FileManager.default.fileExists(atPath: draftURL.path) else { return }
+        try? FileManager.default.removeItem(at: draftURL)
+    }
+
+    private func removePackageIfExists(_ packageRootURL: URL) throws {
+        guard FileManager.default.fileExists(atPath: packageRootURL.path) else { return }
+        try FileManager.default.removeItem(at: packageRootURL)
+    }
+
     private static func promptSummary(for prompt: String) -> String {
         let singleLine = prompt
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return String(singleLine.prefix(160))
+    }
+
+    private static func shortSummary(for message: String) -> String {
+        let singleLine = message
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(singleLine.prefix(240))
     }
 
     private static func contentViewPath(for tool: Tool) throws -> String {

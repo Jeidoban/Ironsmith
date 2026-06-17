@@ -162,6 +162,8 @@ struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let agentManifestFilename = "ironsmith-manifest.json"
     nonisolated static let packageMetadataDirectoryName = ".ironsmith"
     nonisolated static let versionsDirectoryName = "versions"
+    nonisolated static let pendingContentViewDraftFilename = "pending-ContentView.swift"
+    nonisolated static let pendingContentViewDraftPath = "\(packageMetadataDirectoryName)/\(pendingContentViewDraftFilename)"
     nonisolated static let pendingContentViewVersionFilename = "pending-ContentView.swift"
     nonisolated static let previousContentViewVersionFilename = "previous-ContentView.swift"
 
@@ -182,6 +184,10 @@ struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var versionsDirectoryURL: URL {
         Self.versionsDirectoryURL(for: packageRootURL)
+    }
+
+    nonisolated var pendingContentViewDraftURL: URL {
+        Self.pendingContentViewDraftURL(for: packageRootURL)
     }
 
     nonisolated var pendingContentViewVersionURL: URL {
@@ -262,6 +268,11 @@ struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static func versionsDirectoryURL(for packageRootURL: URL) -> URL {
         packageMetadataDirectoryURL(for: packageRootURL)
             .appendingPathComponent(versionsDirectoryName, isDirectory: true)
+    }
+
+    nonisolated static func pendingContentViewDraftURL(for packageRootURL: URL) -> URL {
+        packageMetadataDirectoryURL(for: packageRootURL)
+            .appendingPathComponent(pendingContentViewDraftFilename)
     }
 
     nonisolated static func pendingContentViewVersionURL(for packageRootURL: URL) -> URL {

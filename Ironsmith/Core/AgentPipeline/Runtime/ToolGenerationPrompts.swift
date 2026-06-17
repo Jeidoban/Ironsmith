@@ -127,6 +127,46 @@ enum ToolGenerationPrompts {
         """
     }
 
+    static func sourceContinuationPrompt(
+        originalPrompt: String,
+        partialSource: String
+    ) -> String {
+        """
+        Continue the exact Swift source response that was interrupted.
+        Return only the next characters of ContentView.swift.
+        Do not repeat any text from the partial source.
+        Do not include markdown fences, explanations, or labels.
+
+        Original request context:
+        \(originalPrompt)
+
+        Partial ContentView.swift already generated:
+        ```swift
+        \(partialSource)
+        ```
+        """
+    }
+
+    static func diffContinuationPrompt(
+        originalPrompt: String,
+        partialDiff: String
+    ) -> String {
+        """
+        Continue the exact unified diff response that was interrupted.
+        Return only the next characters of the diff.
+        Do not repeat any text from the partial diff.
+        Do not include markdown fences, explanations, or labels.
+
+        Original request context:
+        \(originalPrompt)
+
+        Partial unified diff already generated:
+        ```diff
+        \(partialDiff)
+        ```
+        """
+    }
+
     static func conversationalRepairPrompt(
         diagnostics: [SwiftCompilerDiagnostic],
         source: String?,

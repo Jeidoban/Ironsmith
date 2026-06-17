@@ -6,6 +6,29 @@
 import Foundation
 import SwiftData
 
+enum ToolGenerationState: String, Codable, CaseIterable, Equatable, Sendable {
+    case ready
+    case generating
+    case stopped
+    case failed
+}
+
+enum ToolGenerationPhase: String, Codable, CaseIterable, Equatable, Sendable {
+    case initializing
+    case planning
+    case generatingSource
+    case generatingEditDiff
+    case generatingRepairDiff
+    case repairing
+    case packaging
+    case completed
+}
+
+enum ToolGenerationMode: String, Codable, CaseIterable, Equatable, Sendable {
+    case create
+    case edit
+}
+
 @Model
 final class Tool {
     @Attribute(.unique) var id: UUID
@@ -15,6 +38,12 @@ final class Tool {
     var sandboxEnabled: Bool
     var packageRootPath: String
     var lastPromptSummary: String?
+    var generationStateRawValue: String = ToolGenerationState.ready.rawValue
+    var generationPhaseRawValue: String? = ToolGenerationPhase.completed.rawValue
+    var generationModeRawValue: String?
+    var pendingPrompt: String?
+    var pendingRefinedPrompt: String?
+    var generationErrorSummary: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -26,6 +55,12 @@ final class Tool {
         sandboxEnabled: Bool = true,
         packageRootPath: String,
         lastPromptSummary: String? = nil,
+        generationState: ToolGenerationState = .ready,
+        generationPhase: ToolGenerationPhase? = .completed,
+        generationMode: ToolGenerationMode? = nil,
+        pendingPrompt: String? = nil,
+        pendingRefinedPrompt: String? = nil,
+        generationErrorSummary: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -37,12 +72,45 @@ final class Tool {
         self.sandboxEnabled = sandboxEnabled
         self.packageRootPath = packageRootPath
         self.lastPromptSummary = lastPromptSummary
+        self.generationStateRawValue = generationState.rawValue
+        self.generationPhaseRawValue = generationPhase?.rawValue
+        self.generationModeRawValue = generationMode?.rawValue
+        self.pendingPrompt = pendingPrompt
+        self.pendingRefinedPrompt = pendingRefinedPrompt
+        self.generationErrorSummary = generationErrorSummary
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 }
 
 extension Tool {
+    var generationState: ToolGenerationState {
+        get { ToolGenerationState(rawValue: generationStateRawValue) ?? .ready }
+        set { generationStateRawValue = newValue.rawValue }
+    }
+
+    var generationPhase: ToolGenerationPhase? {
+        get {
+            generationPhaseRawValue.flatMap(ToolGenerationPhase.init(rawValue:))
+        }
+        set {
+            generationPhaseRawValue = newValue?.rawValue
+        }
+    }
+
+    var generationMode: ToolGenerationMode? {
+        get {
+            generationModeRawValue.flatMap(ToolGenerationMode.init(rawValue:))
+        }
+        set {
+            generationModeRawValue = newValue?.rawValue
+        }
+    }
+
+    var isGenerationReady: Bool {
+        generationState == .ready
+    }
+
     var packageRootURL: URL {
         URL(fileURLWithPath: packageRootPath, isDirectory: true)
     }

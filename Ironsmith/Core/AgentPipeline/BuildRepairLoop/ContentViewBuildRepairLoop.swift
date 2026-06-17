@@ -8,6 +8,7 @@ struct ContentViewBuildRepairLoop {
     let contentViewPath: String
     let regenerationThreshold: Int
     let maximumGenerationAttempts: Int
+    let lifecycle: ToolGenerationLifecycle
 
     struct SourceCandidate {
         let source: String

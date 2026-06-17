@@ -97,6 +97,32 @@ struct ToolGenerationRuntimeContext {
         }
     }
 
+    func streamText<PromptContent>(
+        in session: LanguageModelSession,
+        to prompt: PromptContent,
+        onSnapshot: @escaping @MainActor (String) throws -> Void
+    ) async throws -> String where PromptContent: PromptRepresentable {
+        var latest = ""
+        do {
+            let stream = session.streamResponse(
+                to: Prompt(prompt),
+                generating: String.self,
+                options: generationOptions
+            )
+            for try await snapshot in stream {
+                latest = snapshot.content
+                try await MainActor.run {
+                    try onSnapshot(latest)
+                }
+            }
+            await afterLanguageModelInvocation()
+            return latest
+        } catch {
+            await afterLanguageModelInvocation()
+            throw error
+        }
+    }
+
     func makeUniquePackageRoot(displayName: String) throws -> URL {
         try fileClient.createDirectory(toolsDirectoryURL)
 

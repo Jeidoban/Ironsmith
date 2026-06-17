@@ -350,4 +350,80 @@ extension ToolLibraryTests {
         #expect(await capture.openedURL == nil)
         #expect(store.presentedErrorMessage?.contains("outside the generated package") == true)
     }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreDiscardRemovesIncompleteCreateToolAndPackage() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("IncompleteCreate", isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "IncompleteCreate")
+        try FileManager.default.createDirectory(at: layout.packageMetadataDirectoryURL, withIntermediateDirectories: true)
+        try "partial source".write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let tool = Tool(
+            name: "Incomplete Create",
+            executableName: "IncompleteCreate",
+            packageRootPath: packageRoot.path,
+            generationState: .failed,
+            generationPhase: .generatingSource,
+            generationMode: .create,
+            pendingPrompt: "Build an incomplete create"
+        )
+        context.insert(tool)
+        try context.save()
+
+        let store = ToolLibraryStore()
+        store.discardGeneration(tool, in: context)
+
+        #expect(try context.fetch(FetchDescriptor<StoredTool>()).isEmpty)
+        #expect(!(FileManager.default.fileExists(atPath: packageRoot.path)))
+        #expect(store.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreDiscardClearsIncompleteEditAndKeepsPackage() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("IncompleteEdit", isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "IncompleteEdit")
+        let contentViewURL = layout.sourceDirectoryURL.appendingPathComponent(layout.defaultContentViewFileName)
+        try FileManager.default.createDirectory(at: layout.sourceDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: layout.packageMetadataDirectoryURL, withIntermediateDirectories: true)
+        try #"Text("last ready")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
+        try "partial diff".write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let tool = Tool(
+            name: "Incomplete Edit",
+            executableName: "IncompleteEdit",
+            packageRootPath: packageRoot.path,
+            generationState: .stopped,
+            generationPhase: .generatingEditDiff,
+            generationMode: .edit,
+            pendingPrompt: "Edit this app",
+            generationErrorSummary: "Stopped"
+        )
+        context.insert(tool)
+        try context.save()
+
+        let store = ToolLibraryStore()
+        store.discardGeneration(tool, in: context)
+
+        #expect(tool.generationState == .ready)
+        #expect(tool.generationPhase == .completed)
+        #expect(tool.generationMode == nil)
+        #expect(tool.pendingPrompt == nil)
+        #expect(tool.generationErrorSummary == nil)
+        #expect(FileManager.default.fileExists(atPath: packageRoot.path))
+        #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
+        #expect(try String(contentsOf: contentViewURL, encoding: .utf8) == #"Text("last ready")"#)
+        #expect(store.presentedErrorMessage == nil)
+    }
 }
