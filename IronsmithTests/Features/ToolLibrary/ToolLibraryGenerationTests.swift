@@ -27,7 +27,6 @@ extension ToolLibraryTests {
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         #expect(store.presentedErrorMessage == nil)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 
@@ -56,7 +55,6 @@ extension ToolLibraryTests {
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         #expect(store.presentedErrorMessage == nil)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 
@@ -73,7 +71,6 @@ extension ToolLibraryTests {
 
         #expect(store.presentedErrorMessage == InferenceMessages.noAvailableModels)
         #expect(store.presentedErrorAction == nil)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 
@@ -114,7 +111,6 @@ extension ToolLibraryTests {
 
         #expect(store.presentedErrorMessage == InferenceStoreError.insufficientIronsmithCredits.localizedDescription)
         #expect(store.presentedErrorAction == .buyIronsmithCredits)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 
@@ -154,7 +150,6 @@ extension ToolLibraryTests {
 
         #expect(store.presentedErrorMessage == "There was an error generating your app. Please try again.")
         #expect(store.presentedErrorAction == nil)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 

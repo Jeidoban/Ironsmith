@@ -75,6 +75,57 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func toolLibraryStoreDeletesReadyToolWhileAnotherToolIsGenerating() throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let readyTool = Tool(name: "Ready Tool", packageRootPath: "/tmp/ready-tool")
+        let generatingTool = Tool(
+            name: "Generating Tool",
+            packageRootPath: "/tmp/generating-tool",
+            generationState: .generating,
+            generationPhase: .generatingSource,
+            generationMode: .create
+        )
+        context.insert(readyTool)
+        context.insert(generatingTool)
+        try context.save()
+
+        let store = ToolLibraryStore()
+        store.isGenerating = true
+        store.delete(readyTool, in: context)
+
+        let tools = try context.fetch(FetchDescriptor<StoredTool>())
+        #expect(!tools.contains { $0.id == readyTool.id })
+        #expect(tools.contains { $0.id == generatingTool.id })
+        #expect(store.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreDoesNotDeleteActiveGeneratingTool() throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let generatingTool = Tool(
+            name: "Generating Tool",
+            packageRootPath: "/tmp/generating-tool",
+            generationState: .generating,
+            generationPhase: .generatingSource,
+            generationMode: .create
+        )
+        context.insert(generatingTool)
+        try context.save()
+
+        let store = ToolLibraryStore()
+        store.isGenerating = true
+        store.delete(generatingTool, in: context)
+
+        let tools = try context.fetch(FetchDescriptor<StoredTool>())
+        #expect(tools.contains { $0.id == generatingTool.id })
+        #expect(store.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStoreManualRunCallsRunner() async {
         let tool = Tool(name: "Runner", packageRootPath: "/tmp/runner")
         let runCapture = ToolRunCapture()
@@ -174,7 +225,6 @@ extension ToolLibraryTests {
         #expect(swappedPreviousSource == #"Text("current")"#)
         #expect(await buildCapture.builtPackageRoot == packageRoot)
         #expect(tool.generationState == .ready)
-        #expect(store.generationStatus == nil)
     }
 
     @MainActor
@@ -217,7 +267,6 @@ extension ToolLibraryTests {
         #expect(await capture.exportedToolID == tool.id)
         #expect(await finderCapture.openedURL == URL(fileURLWithPath: "/Applications/Exporter.app", isDirectory: true))
         #expect(store.exportingToolID == nil)
-        #expect(store.generationStatus == nil)
         #expect(store.presentedErrorMessage == nil)
     }
 

@@ -24,7 +24,6 @@ private final class BindingBox<Value> {
 final class ToolLibraryStore {
     // Tool-library UI state: which tool is selected, and what the composer should say.
     var prompt: String
-    var generationStatus: String?
     var presentedErrorMessage: String?
     var presentedErrorAction: ToolLibraryPresentedErrorAction?
     var isGenerating = false
@@ -106,7 +105,7 @@ final class ToolLibraryStore {
     }
 
     func delete(_ tool: Tool, in modelContext: ModelContext) {
-        guard !isGenerating else { return }
+        guard !(isGenerating && tool.generationState == .generating) else { return }
         handleDeletedTool(tool)
         modelContext.delete(tool)
 
@@ -158,7 +157,6 @@ final class ToolLibraryStore {
     func cancelGeneration() {
         guard isGenerating else { return }
         clearPresentedErrorState()
-        generationStatus = "Stopping"
         generationTask?.cancel()
     }
 
@@ -200,23 +198,17 @@ final class ToolLibraryStore {
         guard !isGenerating, tool.isGenerationReady else { return }
         isGenerating = true
         clearPresentedErrorState()
-        generationStatus = "Restoring \(tool.name)"
         defer {
             isGenerating = false
-            if presentedErrorMessage != nil {
-                generationStatus = nil
-            }
         }
 
         do {
             let contentViewPath = try Self.contentViewPath(for: tool)
             try dependencies.versionBackupClient.restorePreviousVersion(tool.packageRootURL, contentViewPath)
-            generationStatus = "Building \(tool.name)"
             try await dependencies.buildClient.buildTool(tool)
             clearPendingGeneration(on: tool)
             tool.updatedAt = .now
             try modelContext.save()
-            generationStatus = nil
         } catch {
             modelContext.rollback()
             presentError(error.localizedDescription)
@@ -233,7 +225,6 @@ final class ToolLibraryStore {
         var activeTool: Tool?
         isGenerating = true
         clearPresentedErrorState()
-        generationStatus = submittedToolName.map { "Preparing \($0)" } ?? "Preparing new app"
 
         do {
             let selectedTool = try fetchSelectedTool(in: modelContext)
@@ -273,9 +264,7 @@ final class ToolLibraryStore {
                 resourcePermissions,
                 languageModelContext,
                 lifecycle: lifecycle
-            ) { status in
-                self.generationStatus = status
-            }
+            ) { _ in }
 
             if let completedTool = selectedTool ?? activeTool {
                 applyCompletedGenerationResult(
@@ -300,29 +289,12 @@ final class ToolLibraryStore {
             }
             try Task.checkCancellation()
             prompt = Self.defaultPrompt
-            generationStatus = nil
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
-        } catch where IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
-            if let activeTool {
-                markToolStopped(activeTool)
-                try? modelContext.save()
-            } else {
-                modelContext.rollback()
-            }
-            clearPresentedErrorState()
-            generationStatus = nil
         } catch {
-            await refreshIronsmithCreditsIfNeeded(inferenceStore)
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
-                if let activeTool {
-                    markToolStopped(activeTool)
-                    try? modelContext.save()
-                } else {
-                    modelContext.rollback()
-                }
-                clearPresentedErrorState()
-                generationStatus = nil
+                handleGenerationCancellation(activeTool, in: modelContext)
             } else {
+                await refreshIronsmithCreditsIfNeeded(inferenceStore)
                 if let activeTool {
                     markToolFailed(activeTool, error: error)
                     try? modelContext.save()
@@ -343,9 +315,6 @@ final class ToolLibraryStore {
         }
 
         isGenerating = false
-        if presentedErrorMessage != nil {
-            generationStatus = nil
-        }
     }
 
     private func refreshIronsmithCreditsIfNeeded(_ inferenceStore: InferenceStore) async {
@@ -428,19 +397,13 @@ final class ToolLibraryStore {
     func export(_ tool: Tool) async {
         guard tool.isGenerationReady, exportingToolID == nil, !isGenerating else { return }
         exportingToolID = tool.id
-        generationStatus = "Exporting \(tool.name)"
         defer {
             exportingToolID = nil
-            if presentedErrorMessage != nil {
-                generationStatus = nil
-            }
         }
 
         do {
             let exportedAppURL = try await dependencies.exportClient.exportTool(tool)
-            generationStatus = "Opening Applications"
             try await dependencies.finderClient.revealURL(exportedAppURL)
-            generationStatus = nil
         } catch {
             presentError(error.localizedDescription)
         }
@@ -498,7 +461,6 @@ final class ToolLibraryStore {
 
         isGenerating = true
         clearPresentedErrorState()
-        generationStatus = "Continuing \(tool.name)"
         let activeToolBox = BindingBox<Tool?>(tool)
         let lifecycle = generationLifecycle(
             modelContext: modelContext,
@@ -526,27 +488,16 @@ final class ToolLibraryStore {
                 resourcePermissions,
                 languageModelContext,
                 lifecycle: lifecycle
-            ) { status in
-                self.generationStatus = status
-            }
+            ) { _ in }
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
             try modelContext.save()
             try Task.checkCancellation()
-            generationStatus = nil
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
-        } catch where IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
-            markToolStopped(tool)
-            try? modelContext.save()
-            clearPresentedErrorState()
-            generationStatus = nil
         } catch {
-            await refreshIronsmithCreditsIfNeeded(inferenceStore)
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
-                markToolStopped(tool)
-                try? modelContext.save()
-                clearPresentedErrorState()
-                generationStatus = nil
+                handleGenerationCancellation(tool, in: modelContext)
             } else {
+                await refreshIronsmithCreditsIfNeeded(inferenceStore)
                 markToolFailed(tool, error: error)
                 try? modelContext.save()
                 presentGenerationError(error)
@@ -554,9 +505,16 @@ final class ToolLibraryStore {
         }
 
         isGenerating = false
-        if presentedErrorMessage != nil {
-            generationStatus = nil
+    }
+
+    private func handleGenerationCancellation(_ tool: Tool?, in modelContext: ModelContext) {
+        if let tool {
+            markToolStopped(tool)
+            try? modelContext.save()
+        } else {
+            modelContext.rollback()
         }
+        clearPresentedErrorState()
     }
 
     private func generationLifecycle(
@@ -568,18 +526,35 @@ final class ToolLibraryStore {
             preservesCreatedPackageOnCancellation: true,
             prepareCreatedTool: { preparedTool, prompt in
                 try await MainActor.run {
-                    let tool = Tool(
-                        name: preparedTool.name,
-                        executableName: preparedTool.executableName,
-                        bundleIdentifier: preparedTool.bundleIdentifier,
-                        sandboxEnabled: preparedTool.sandboxEnabled,
-                        packageRootPath: preparedTool.packageRootURL.path,
-                        generationState: .generating,
-                        generationPhase: .generatingIcon,
-                        generationMode: .create,
-                        pendingPrompt: prompt
-                    )
-                    modelContext.insert(tool)
+                    let tool: Tool
+                    if let activePreparedTool = activeTool.value {
+                        tool = activePreparedTool
+                        tool.name = preparedTool.name
+                        tool.executableName = preparedTool.executableName
+                        tool.bundleIdentifier = preparedTool.bundleIdentifier
+                        tool.sandboxEnabled = preparedTool.sandboxEnabled
+                        tool.packageRootPath = preparedTool.packageRootURL.path
+                        tool.generationState = .generating
+                        tool.generationPhase = .planning
+                        tool.generationMode = .create
+                        tool.pendingPrompt = prompt
+                        tool.generationErrorSummary = nil
+                        tool.generationRepairErrorCount = nil
+                        tool.updatedAt = .now
+                    } else {
+                        tool = Tool(
+                            name: preparedTool.name,
+                            executableName: preparedTool.executableName,
+                            bundleIdentifier: preparedTool.bundleIdentifier,
+                            sandboxEnabled: preparedTool.sandboxEnabled,
+                            packageRootPath: preparedTool.packageRootURL.path,
+                            generationState: .generating,
+                            generationPhase: .planning,
+                            generationMode: .create,
+                            pendingPrompt: prompt
+                        )
+                        modelContext.insert(tool)
+                    }
                     try modelContext.save()
                     activeTool.value = tool
                     onPrepared(tool)
@@ -593,11 +568,22 @@ final class ToolLibraryStore {
                     try modelContext.save()
                 }
             },
+            updateRepairErrorCount: { count in
+                try await MainActor.run {
+                    guard let tool = activeTool.value else { return }
+                    tool.generationRepairErrorCount = count
+                    tool.updatedAt = .now
+                    try modelContext.save()
+                }
+            },
             updatePhase: { state, phase, errorSummary in
                 try await MainActor.run {
                     guard let tool = activeTool.value else { return }
                     tool.generationState = state
                     tool.generationPhase = phase
+                    if phase != .generatingRepairDiff && phase != .repairing {
+                        tool.generationRepairErrorCount = nil
+                    }
                     if let errorSummary {
                         tool.generationErrorSummary = Self.shortSummary(for: errorSummary)
                     } else if state == .generating {
@@ -621,18 +607,21 @@ final class ToolLibraryStore {
         tool.generationMode = mode
         tool.pendingPrompt = prompt
         tool.generationErrorSummary = nil
+        tool.generationRepairErrorCount = nil
         tool.updatedAt = .now
     }
 
     private func markToolStopped(_ tool: Tool) {
         tool.generationState = .stopped
         tool.generationErrorSummary = nil
+        tool.generationRepairErrorCount = nil
         tool.updatedAt = .now
     }
 
     private func markToolFailed(_ tool: Tool, error: Error) {
         tool.generationState = .failed
         tool.generationErrorSummary = Self.shortSummary(for: generationErrorMessage(for: error))
+        tool.generationRepairErrorCount = nil
         tool.updatedAt = .now
     }
 
@@ -655,6 +644,7 @@ final class ToolLibraryStore {
         tool.generationMode = nil
         tool.pendingPrompt = nil
         tool.generationErrorSummary = nil
+        tool.generationRepairErrorCount = nil
         removePendingDraft(for: tool)
         tool.updatedAt = .now
     }

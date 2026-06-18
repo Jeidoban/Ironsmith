@@ -143,6 +143,39 @@ struct SingleFileToolGenerationRuntime {
         )
     }
 
+    private func preparePlaceholderCreateTool(
+        prompt: String,
+        sandboxEnabled: Bool,
+        lifecycle: ToolGenerationLifecycle
+    ) async throws {
+        let displayName = "New App"
+        let executableName = ToolNameSanitizer.executableName(from: displayName)
+        let packageRootURL = try context.makeUniquePackageRoot(displayName: displayName)
+        let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
+        let contentViewPath = layout.sourcePath(for: layout.defaultContentViewFileName)
+        let manifest = ToolManifest(
+            displayName: displayName,
+            executableName: executableName,
+            files: [
+                ToolManifestFile(
+                    path: contentViewPath,
+                    description: "Primary SwiftUI screen and supporting app logic."
+                )
+            ]
+        )
+        try await lifecycle.prepareCreatedTool(
+            ToolGenerationPreparedTool(
+                name: displayName,
+                executableName: executableName,
+                bundleIdentifier: ToolBundleIdentifier.make(executableName: executableName),
+                sandboxEnabled: sandboxEnabled,
+                packageRootURL: packageRootURL,
+                manifest: manifest
+            ),
+            prompt
+        )
+    }
+
     private func createTool(
         prompt: String,
         existingTool: Tool? = nil,
@@ -158,6 +191,13 @@ struct SingleFileToolGenerationRuntime {
             setup = resumedSetup
         } else {
             status("Naming app")
+            if existingTool == nil {
+                try await preparePlaceholderCreateTool(
+                    prompt: prompt,
+                    sandboxEnabled: sandboxEnabled,
+                    lifecycle: lifecycle
+                )
+            }
             try await lifecycle.updatePhase(.generating, .planning, nil)
             try Task.checkCancellation()
             let metadata = await context.metadataClient.suggestMetadata(

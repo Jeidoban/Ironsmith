@@ -16,6 +16,7 @@ struct ToolGenerationLifecycle {
         _ prompt: String
     ) async throws -> Void
     nonisolated(unsafe) let updatePendingPrompt: (_ prompt: String) async throws -> Void
+    nonisolated(unsafe) let updateRepairErrorCount: (_ count: Int?) async throws -> Void
     nonisolated(unsafe) let updatePhase: (
         _ state: ToolGenerationState,
         _ phase: ToolGenerationPhase?,
@@ -29,6 +30,7 @@ struct ToolGenerationLifecycle {
             _ prompt: String
         ) async throws -> Void = { _, _ in },
         updatePendingPrompt: @escaping (_ prompt: String) async throws -> Void = { _ in },
+        updateRepairErrorCount: @escaping (_ count: Int?) async throws -> Void = { _ in },
         updatePhase: @escaping (
             _ state: ToolGenerationState,
             _ phase: ToolGenerationPhase?,
@@ -38,6 +40,7 @@ struct ToolGenerationLifecycle {
         self.preservesCreatedPackageOnCancellation = preservesCreatedPackageOnCancellation
         self.prepareCreatedTool = prepareCreatedTool
         self.updatePendingPrompt = updatePendingPrompt
+        self.updateRepairErrorCount = updateRepairErrorCount
         self.updatePhase = updatePhase
     }
 

@@ -21,6 +21,7 @@ extension ContentViewBuildRepairLoop {
             guard !state.contentViewErrors.isEmpty else {
                 return .failed(state)
             }
+            try await lifecycle.updateRepairErrorCount(state.contentViewErrors.count)
             status(repairStatus(errorCount: state.contentViewErrors.count))
             let originalSource = state.source
             let contentViewErrors = state.contentViewErrors

@@ -7,6 +7,69 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
+    func createGenerationPersistsPlaceholderToolBeforeMetadataCompletes() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let metadataGate = MetadataGenerationGate()
+        defer {
+            Task {
+                await metadataGate.release()
+            }
+        }
+
+        let generationClient = ToolGenerationClient.live(
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            appBundleClient: .noOp(),
+            iconClient: .noOp,
+            metadataClient: ToolMetadataClient { _ in
+                await metadataGate.waitForRelease()
+                return ToolMetadataSuggestion(displayName: "Named Later", iconPrompt: "")
+            },
+            promptRefinementClient: .disabled()
+        )
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: generationClient,
+                runnerClient: ToolRunnerClient { _ in }
+            )
+        )
+        let inferenceStore = Self.inferenceStore(
+            languageModel: StubAgentLanguageModel.fixed(Self.simpleContentViewSource(text: "ready"))
+        )
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+
+        let prompt = "Build a named later app"
+        store.prompt = prompt
+        store.startPromptSubmission(modelContext: context, inferenceStore: inferenceStore)
+
+        let placeholderTool = try await waitForFirstTool(in: context) { tool in
+            tool.name == "New App"
+                && tool.generationState == .generating
+                && tool.generationPhase == .planning
+                && tool.generationMode == .create
+        }
+
+        #expect(placeholderTool.pendingPrompt == prompt)
+        #expect(!(FileManager.default.fileExists(atPath: placeholderTool.packageManifestURL.path)))
+
+        await metadataGate.release()
+        let completedTool = try await waitForFirstTool(in: context) { tool in
+            tool.id == placeholderTool.id && tool.generationState == .ready
+        }
+
+        #expect(completedTool.name == "Named Later")
+        #expect(completedTool.executableName == "NamedLater")
+        #expect(completedTool.packageRootURL.lastPathComponent == "named-later")
+        #expect(FileManager.default.fileExists(atPath: completedTool.packageManifestURL.path))
+        #expect(store.presentedErrorMessage == nil)
+        #expect(!(store.isGenerating))
+    }
+
+    @MainActor
+    @Test
     func createGenerationPersistsStoppedToolAndDraftWhenCancelledDuringSourceStream() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
@@ -69,7 +132,6 @@ extension AgentPipelineTests {
         #expect(stoppedTool.pendingPrompt == prompt)
         #expect(FileManager.default.fileExists(atPath: draftURL.path))
         #expect(store.presentedErrorMessage == nil)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 
@@ -219,5 +281,24 @@ extension AgentPipelineTests {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         return try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
+    }
+}
+
+private actor MetadataGenerationGate {
+    private var isReleased = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func waitForRelease() async {
+        guard !isReleased else { return }
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func release() {
+        guard !isReleased else { return }
+        isReleased = true
+        continuation?.resume()
+        continuation = nil
     }
 }

@@ -44,6 +44,7 @@ final class Tool {
     var generationModeRawValue: String?
     var pendingPrompt: String?
     var generationErrorSummary: String?
+    var generationRepairErrorCount: Int? = nil
     var createdAt: Date
     var updatedAt: Date
 
@@ -59,6 +60,7 @@ final class Tool {
         generationMode: ToolGenerationMode? = nil,
         pendingPrompt: String? = nil,
         generationErrorSummary: String? = nil,
+        generationRepairErrorCount: Int? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -74,6 +76,7 @@ final class Tool {
         self.generationModeRawValue = generationMode?.rawValue
         self.pendingPrompt = pendingPrompt
         self.generationErrorSummary = generationErrorSummary
+        self.generationRepairErrorCount = generationRepairErrorCount
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

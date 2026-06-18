@@ -99,6 +99,9 @@ struct ToolLibraryPopoverView: View {
                                 onDiscard: {
                                     toolLibraryStore.discardGeneration(tool, in: modelContext)
                                 },
+                                onStop: {
+                                    toolLibraryStore.cancelGeneration()
+                                },
                                 onDelete: {
                                     toolPendingDeletion = tool
                                 }

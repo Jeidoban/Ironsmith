@@ -193,6 +193,9 @@ struct ContentViewBuildRepairLoop {
                 }
                 state = stableState
                 lastFailedState = state
+                try await lifecycle.updateRepairErrorCount(
+                    state.contentViewErrors.isEmpty ? nil : state.contentViewErrors.count
+                )
 
                 recordBestCandidate(from: state, phase: phase, bestCandidate: &bestCandidate)
                 if state.contentViewErrors.isEmpty {
