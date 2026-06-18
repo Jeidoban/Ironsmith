@@ -106,6 +106,7 @@ final class ToolLibraryStore {
 
     func delete(_ tool: Tool, in modelContext: ModelContext) {
         guard !(isGenerating && tool.generationState == .generating) else { return }
+        let packageRootURL = tool.packageRootURL
         handleDeletedTool(tool)
         modelContext.delete(tool)
 
@@ -114,6 +115,13 @@ final class ToolLibraryStore {
         } catch {
             modelContext.rollback()
             presentError(error.localizedDescription)
+            return
+        }
+
+        do {
+            try removePackageIfExists(packageRootURL)
+        } catch {
+            presentError("Deleted app from the library, but could not remove its files: \(error.localizedDescription)")
         }
     }
 

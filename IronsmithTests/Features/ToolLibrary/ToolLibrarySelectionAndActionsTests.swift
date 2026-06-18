@@ -102,6 +102,34 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func toolLibraryStoreDeleteRemovesReadyToolPackage() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("ReadyTool", isDirectory: true)
+        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+        try "package".write(
+            to: packageRoot.appendingPathComponent("Package.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let tool = Tool(name: "Ready Tool", packageRootPath: packageRoot.path)
+        context.insert(tool)
+        try context.save()
+
+        let store = ToolLibraryStore()
+        store.delete(tool, in: context)
+
+        #expect(try context.fetch(FetchDescriptor<StoredTool>()).isEmpty)
+        #expect(!(FileManager.default.fileExists(atPath: packageRoot.path)))
+        #expect(store.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStoreDoesNotDeleteActiveGeneratingTool() throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
