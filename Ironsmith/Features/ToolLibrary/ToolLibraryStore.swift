@@ -295,7 +295,6 @@ final class ToolLibraryStore {
                 repository.insert(tool)
                 try repository.save()
             }
-            try Task.checkCancellation()
             prompt = Self.defaultPrompt
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
@@ -499,7 +498,6 @@ final class ToolLibraryStore {
             ) { _ in }
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
             try modelContext.save()
-            try Task.checkCancellation()
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
