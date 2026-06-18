@@ -42,6 +42,53 @@ struct PersistenceTests {
         #expect(tool.appBundleURL.lastPathComponent == "Clipboard Cleaner.app")
     }
 
+    @MainActor
+    @Test
+    func diskBackedModelContainerReopensCurrentToolSchema() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ironsmith-persistence-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let storeURL = root.appendingPathComponent("ironsmith.sqlite")
+        let config = ModelConfiguration(url: storeURL)
+
+        do {
+            let container = try ModelContainer(
+                for: Tool.self,
+                ModelConfig.self,
+                ProviderConfig.self,
+                configurations: config
+            )
+            let context = ModelContext(container)
+            context.insert(
+                Tool(
+                    name: "Incomplete",
+                    packageRootPath: "/tmp/incomplete",
+                    generationState: .stopped,
+                    generationPhase: .generatingSource,
+                    generationMode: .create,
+                    pendingPrompt: "Build a resumable app"
+                )
+            )
+            try context.save()
+        }
+
+        do {
+            let container = try ModelContainer(
+                for: Tool.self,
+                ModelConfig.self,
+                ProviderConfig.self,
+                configurations: config
+            )
+            let context = ModelContext(container)
+            let tool = try #require(try context.fetch(FetchDescriptor<Tool>()).first)
+            #expect(tool.generationState == .stopped)
+            #expect(tool.generationPhase == .generatingSource)
+            #expect(tool.generationMode == .create)
+            #expect(tool.pendingPrompt == "Build a resumable app")
+        }
+    }
+
     @Test
     func generatedBundleIdentifiersUseASCIISafeComponents() throws {
         let id = try #require(UUID(uuidString: "11111111-2222-3333-4444-555555555555"))

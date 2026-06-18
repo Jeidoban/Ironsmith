@@ -89,6 +89,19 @@ struct ToolLibraryPopoverView: View {
                                         await toolLibraryStore.viewSource(tool)
                                     }
                                 },
+                                onContinue: {
+                                    toolLibraryStore.continueGeneration(
+                                        tool,
+                                        modelContext: modelContext,
+                                        inferenceStore: inferenceStore
+                                    )
+                                },
+                                onDiscard: {
+                                    toolLibraryStore.discardGeneration(tool, in: modelContext)
+                                },
+                                onStop: {
+                                    toolLibraryStore.cancelGeneration()
+                                },
                                 onDelete: {
                                     toolPendingDeletion = tool
                                 }
@@ -104,21 +117,6 @@ struct ToolLibraryPopoverView: View {
             .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
             .task(id: restoreAvailabilityRefreshID) {
                 await toolLibraryStore.refreshRestoreAvailability(for: tools)
-            }
-
-            if let generationStatus = toolLibraryStore.generationStatus {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("Generating app")
-
-                    Text(generationStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    Spacer()
-                }
             }
 
             PromptComposerView(

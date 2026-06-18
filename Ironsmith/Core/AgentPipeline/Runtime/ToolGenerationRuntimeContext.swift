@@ -10,6 +10,7 @@ struct ToolGenerationRuntimeContext {
     let fileClient: AgentFileClient
     let processClient: SwiftPackageProcessClient
     let appBundleClient: ToolAppBundleClient
+    let iconClient: ToolIconClient
     let metadataClient: ToolMetadataClient
     let promptRefinementClient: ToolPromptRefinementClient
     let promptRefinementEnabled: Bool
@@ -25,6 +26,7 @@ struct ToolGenerationRuntimeContext {
         fileClient: AgentFileClient,
         processClient: SwiftPackageProcessClient,
         appBundleClient: ToolAppBundleClient,
+        iconClient: ToolIconClient = .noOp,
         metadataClient: ToolMetadataClient = .fallback(),
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         promptRefinementEnabled: Bool = true,
@@ -39,6 +41,7 @@ struct ToolGenerationRuntimeContext {
         self.fileClient = fileClient
         self.processClient = processClient
         self.appBundleClient = appBundleClient
+        self.iconClient = iconClient
         self.metadataClient = metadataClient
         self.promptRefinementClient = promptRefinementClient
         self.promptRefinementEnabled = promptRefinementEnabled
@@ -54,6 +57,7 @@ struct ToolGenerationRuntimeContext {
         fileClient: AgentFileClient,
         processClient: SwiftPackageProcessClient,
         appBundleClient: ToolAppBundleClient,
+        iconClient: ToolIconClient = .noOp,
         metadataClient: ToolMetadataClient = .fallback(),
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         promptRefinementEnabled: Bool = true,
@@ -69,6 +73,7 @@ struct ToolGenerationRuntimeContext {
             fileClient: fileClient,
             processClient: processClient,
             appBundleClient: appBundleClient,
+            iconClient: iconClient,
             metadataClient: metadataClient,
             promptRefinementClient: promptRefinementClient,
             promptRefinementEnabled: promptRefinementEnabled,
@@ -91,6 +96,32 @@ struct ToolGenerationRuntimeContext {
             )
             await afterLanguageModelInvocation()
             return response
+        } catch {
+            await afterLanguageModelInvocation()
+            throw error
+        }
+    }
+
+    func streamText<PromptContent>(
+        in session: LanguageModelSession,
+        to prompt: PromptContent,
+        onSnapshot: @escaping @MainActor (String) throws -> Void
+    ) async throws -> String where PromptContent: PromptRepresentable {
+        var latest = ""
+        do {
+            let stream = session.streamResponse(
+                to: Prompt(prompt),
+                generating: String.self,
+                options: generationOptions
+            )
+            for try await snapshot in stream {
+                latest = snapshot.content
+                try await MainActor.run {
+                    try onSnapshot(latest)
+                }
+            }
+            await afterLanguageModelInvocation()
+            return latest
         } catch {
             await afterLanguageModelInvocation()
             throw error

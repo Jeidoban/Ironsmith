@@ -370,7 +370,6 @@ struct ToolAppBundleClient {
             let sourceURL = try await iconClient.ensureIconAssets(
                 ToolIconRequest(
                     displayName: request.displayName,
-                    promptSummary: request.promptSummary,
                     iconPrompt: request.iconPrompt,
                     layout: request.layout
                 )

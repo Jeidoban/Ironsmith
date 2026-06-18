@@ -101,14 +101,22 @@ extension ContentViewBuildRepairLoop {
         let diff: String
         do {
             try Task.checkCancellation()
-            let response = try await context.respond(
+            try await lifecycle.updatePhase(.generating, .generatingRepairDiff, nil)
+            let draftPath = ToolPackageLayout.pendingContentViewDraftPath
+            let response = try await context.streamText(
                 in: repairConversation.session,
-                to: prompt,
-                generating: String.self
-            )
+                to: prompt
+            ) { partialDiff in
+                try context.write(
+                    partialDiff,
+                    to: draftPath,
+                    packageRootURL: layout.packageRootURL
+                )
+            }
             try Task.checkCancellation()
-            diff = response.content
+            diff = response
         } catch {
+            try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             AgentDiagnosticsLog.append(
                 """
                 Model repair request failed.

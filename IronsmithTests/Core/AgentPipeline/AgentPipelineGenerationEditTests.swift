@@ -72,7 +72,7 @@ extension AgentPipelineTests {
         let tools = try context.fetch(FetchDescriptor<StoredTool>())
         #expect(tools.count == 1)
         #expect(tools.first?.id == existingTool.id)
-        #expect(tools.first?.lastPromptSummary == "Add down payment support")
+        #expect(tools.first?.pendingPrompt == nil)
         #expect(!(tools.first?.sandboxEnabled ?? false))
         #expect(await capture.existingToolID == existingTool.id)
         #expect(!((await capture.sandboxEnabled) ?? false))

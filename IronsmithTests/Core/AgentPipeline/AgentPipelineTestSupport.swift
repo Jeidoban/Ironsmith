@@ -337,6 +337,10 @@ actor PromptCapture {
     func record(_ prompt: Prompt) {
         prompts.append(String(describing: prompt))
     }
+
+    func record(_ promptDescription: String) {
+        prompts.append(promptDescription)
+    }
 }
 
 actor GenerationOptionsCapture {
@@ -679,24 +683,98 @@ struct StubAgentLanguageModel: LanguageModel {
         options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
         let responseProvider = self.responseProvider
+        let yieldState = SingleYieldState()
+        let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error>(
+            unfolding: {
+                guard await yieldState.claim() else { return nil }
+                guard type == String.self else {
+                    throw FakeAgentError.unsupportedStructuredGeneration
+                }
+                let text = try await responseProvider(prompt, options)
+                return .init(
+                    content: (text as! Content).asPartiallyGenerated(),
+                    rawContent: GeneratedContent(text)
+                )
+            }
+        )
+        return LanguageModelSession.ResponseStream(stream: stream)
+    }
+}
+
+private actor SingleYieldState {
+    private var hasYielded = false
+
+    func claim() -> Bool {
+        guard !hasYielded else { return false }
+        hasYielded = true
+        return true
+    }
+}
+
+actor StreamingResponseProbe {
+    private(set) var prompts: [String] = []
+    private(set) var didStart = false
+    private(set) var didCancel = false
+
+    func recordStart(promptDescription: String) {
+        didStart = true
+        prompts.append(promptDescription)
+    }
+
+    func recordCancel() {
+        didCancel = true
+    }
+}
+
+struct PartialThenSuspendingLanguageModel: LanguageModel {
+    typealias UnavailableReason = Never
+
+    let partialResponse: String
+    let probe: StreamingResponseProbe
+
+    func respond<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        throw FakeAgentError.expected
+    }
+
+    func streamResponse<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
+        let partialResponse = self.partialResponse
+        let probe = self.probe
+        let promptDescription = String(describing: prompt)
         let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> {
             continuation in
-            Task {
+            let task = Task {
                 do {
                     guard type == String.self else {
                         throw FakeAgentError.unsupportedStructuredGeneration
                     }
-                    let text = try await responseProvider(prompt, options)
+                    await probe.recordStart(promptDescription: promptDescription)
                     continuation.yield(
                         .init(
-                            content: (text as! Content).asPartiallyGenerated(),
-                            rawContent: GeneratedContent(text)
+                            content: (partialResponse as! Content).asPartiallyGenerated(),
+                            rawContent: GeneratedContent(partialResponse)
                         )
                     )
+                    try await Task.sleep(nanoseconds: 10_000_000_000)
                     continuation.finish()
                 } catch {
+                    await probe.recordCancel()
                     continuation.finish(throwing: error)
                 }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
             }
         }
         return LanguageModelSession.ResponseStream(stream: stream)

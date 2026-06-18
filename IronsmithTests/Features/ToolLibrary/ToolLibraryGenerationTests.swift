@@ -27,7 +27,6 @@ extension ToolLibraryTests {
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         #expect(store.presentedErrorMessage == nil)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 
@@ -56,8 +55,116 @@ extension ToolLibraryTests {
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         #expect(store.presentedErrorMessage == nil)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreKeepsLateCanceledSuccessfulCreateReady() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let inferenceStore = InferenceStore(dependencies: Self.inferenceDependencies())
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        let packageRoot = root.appendingPathComponent("LateCreate", isDirectory: true)
+        let manifest = ToolManifest(displayName: "Late Create", executableName: "LateCreate", files: [])
+        let gate = LateGenerationCompletionGate()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient(withLifecycle: { prompt, _, sandboxEnabled, _, _, _, lifecycle, _ in
+                    try await lifecycle.prepareCreatedTool(
+                        ToolGenerationPreparedTool(
+                            name: "Late Create",
+                            executableName: "LateCreate",
+                            bundleIdentifier: ToolBundleIdentifier.make(executableName: "LateCreate"),
+                            sandboxEnabled: sandboxEnabled,
+                            packageRootURL: packageRoot,
+                            manifest: manifest
+                        ),
+                        prompt
+                    )
+                    await gate.startAndWaitForRelease()
+                    return ToolGenerationResult(
+                        toolName: "Late Create",
+                        executableName: "LateCreate",
+                        packageRootURL: packageRoot,
+                        manifest: manifest
+                    )
+                }),
+                runnerClient: ToolRunnerClient { _ in }
+            )
+        )
+        store.prompt = "Build a late finishing create"
+        store.startPromptSubmission(modelContext: context, inferenceStore: inferenceStore)
+
+        await gate.waitForStart()
+        store.cancelGeneration()
+        await gate.release()
+        await Self.waitForIdle(store)
+
+        let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
+        #expect(tool.generationState == .ready)
+        #expect(tool.generationPhase == .completed)
+        #expect(tool.generationMode == nil)
+        #expect(tool.pendingPrompt == nil)
+        #expect(store.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreKeepsLateCanceledSuccessfulResumeReady() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let inferenceStore = InferenceStore(dependencies: Self.inferenceDependencies())
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        let packageRoot = root.appendingPathComponent("LateResume", isDirectory: true)
+        let manifest = ToolManifest(displayName: "Late Resume", executableName: "LateResume", files: [])
+        let tool = StoredTool(
+            name: "Late Resume",
+            executableName: "LateResume",
+            packageRootPath: packageRoot.path,
+            generationState: .stopped,
+            generationPhase: .generatingSource,
+            generationMode: .create,
+            pendingPrompt: "Resume a late finishing app"
+        )
+        context.insert(tool)
+        try context.save()
+
+        let gate = LateGenerationCompletionGate()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient(withLifecycle: { _, _, _, _, _, _, _, _ in
+                    await gate.startAndWaitForRelease()
+                    return ToolGenerationResult(
+                        toolName: "Late Resume",
+                        executableName: "LateResume",
+                        packageRootURL: packageRoot,
+                        manifest: manifest
+                    )
+                }),
+                runnerClient: ToolRunnerClient { _ in }
+            )
+        )
+        store.continueGeneration(tool, modelContext: context, inferenceStore: inferenceStore)
+
+        await gate.waitForStart()
+        store.cancelGeneration()
+        await gate.release()
+        await Self.waitForIdle(store)
+
+        #expect(tool.generationState == .ready)
+        #expect(tool.generationPhase == .completed)
+        #expect(tool.generationMode == nil)
+        #expect(tool.pendingPrompt == nil)
+        #expect(store.presentedErrorMessage == nil)
     }
 
     @MainActor
@@ -73,7 +180,6 @@ extension ToolLibraryTests {
 
         #expect(store.presentedErrorMessage == InferenceMessages.noAvailableModels)
         #expect(store.presentedErrorAction == nil)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 
@@ -114,7 +220,6 @@ extension ToolLibraryTests {
 
         #expect(store.presentedErrorMessage == InferenceStoreError.insufficientIronsmithCredits.localizedDescription)
         #expect(store.presentedErrorAction == .buyIronsmithCredits)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 
@@ -154,7 +259,6 @@ extension ToolLibraryTests {
 
         #expect(store.presentedErrorMessage == "There was an error generating your app. Please try again.")
         #expect(store.presentedErrorAction == nil)
-        #expect(store.generationStatus == nil)
         #expect(!(store.isGenerating))
     }
 
@@ -205,5 +309,47 @@ extension ToolLibraryTests {
         #expect(inferenceStore.ironsmithAccountSummary?.credits.balanceCredits == 84)
         #expect(store.presentedErrorMessage == nil)
         #expect(!(store.isGenerating))
+    }
+}
+
+private actor LateGenerationCompletionGate {
+    private var isStarted = false
+    private var isReleased = false
+    private var startContinuations: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func startAndWaitForRelease() async {
+        isStarted = true
+        startContinuations.forEach { $0.resume() }
+        startContinuations.removeAll()
+
+        guard !isReleased else { return }
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    func waitForStart() async {
+        guard !isStarted else { return }
+        await withCheckedContinuation { continuation in
+            startContinuations.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !isReleased else { return }
+        isReleased = true
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+extension ToolLibraryTests {
+    @MainActor
+    static func waitForIdle(_ store: ToolLibraryStore) async {
+        let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
+        while store.isGenerating && DispatchTime.now().uptimeNanoseconds < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
     }
 }

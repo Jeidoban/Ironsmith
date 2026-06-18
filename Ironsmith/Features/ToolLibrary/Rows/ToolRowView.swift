@@ -18,6 +18,9 @@ struct ToolRowView: View {
     let onExport: () -> Void
     let onShowInFinder: () -> Void
     let onViewSource: () -> Void
+    let onContinue: () -> Void
+    let onDiscard: () -> Void
+    let onStop: () -> Void
     let onDelete: () -> Void
     @State private var isHoveringRow = false
 
@@ -26,10 +29,19 @@ struct ToolRowView: View {
             HStack(spacing: 10) {
                 icon
 
-                Text(tool.name)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tool.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    if let generationStatusText {
+                        Text(generationStatusText)
+                            .font(.caption)
+                            .foregroundStyle(statusStyle)
+                            .lineLimit(1)
+                    }
+                }
 
                 Spacer()
 
@@ -47,19 +59,25 @@ struct ToolRowView: View {
             .overlay {
                 ToolRowClickHandlingView(
                     ignoredLeadingWidth: 64,
-                    onSelect: onSelect,
-                    onRun: onRun
+                    onSelect: tool.isGenerationReady ? onSelect : {},
+                    onRun: tool.isGenerationReady ? onRun : {}
                 )
             }
 
             Menu {
                 Button("Go Back to Previous Version", action: onRevert)
-                    .disabled(!canRevert)
+                    .disabled(!tool.isGenerationReady || !canRevert)
                 Button("Export App", action: onExport)
+                    .disabled(!tool.isGenerationReady)
                 Button("View Source", action: onViewSource)
+                    .disabled(!tool.isGenerationReady)
                 Button("Show in Finder", action: onShowInFinder)
                 Divider()
-                Button("Delete App", role: .destructive, action: onDelete)
+                if shouldDiscardFromMenu {
+                    Button("Discard Edit", role: .destructive, action: onDiscard)
+                } else {
+                    Button("Delete App", role: .destructive, action: onDelete)
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 18, weight: .semibold))
@@ -82,13 +100,31 @@ struct ToolRowView: View {
             ToolIconImageView(tool: tool)
                 .frame(width: 42, height: 42)
 
-            if isRunning {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 42, height: 42)
-                    .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 9))
-                    .accessibilityLabel("Running \(tool.name)")
-            } else if isHoveringRow {
+            if tool.generationState == .generating && isHoveringRow {
+                Button(action: onStop) {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(RunToolButtonStyle())
+                .help("Stop \(tool.name)")
+                .accessibilityLabel("Stop \(tool.name)")
+                .accessibilityIdentifier("stop-tool-\(tool.id.uuidString)")
+            } else if tool.generationState == .generating {
+                iconProgressOverlay("Generating \(tool.name)")
+            } else if isRunning {
+                iconProgressOverlay("Running \(tool.name)")
+            } else if isHoveringRow && canContinue {
+                Button(action: onContinue) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(RunToolButtonStyle())
+                .help("Continue \(tool.name)")
+                .accessibilityLabel("Continue \(tool.name)")
+                .accessibilityIdentifier("continue-tool-\(tool.id.uuidString)")
+            } else if isHoveringRow && tool.isGenerationReady {
                 Button(action: onRun) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 15, weight: .bold))
@@ -102,9 +138,78 @@ struct ToolRowView: View {
         }
     }
 
+    private func iconProgressOverlay(_ accessibilityLabel: String) -> some View {
+        IconProgressBadge(accessibilityLabel: accessibilityLabel)
+    }
+
+    private var generationStatusText: String? {
+        switch tool.generationState {
+        case .ready:
+            return nil
+        case .generating:
+            return phaseStatusText
+        case .stopped:
+            return "Stopped"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    private var phaseStatusText: String {
+        switch tool.generationPhase {
+        case .initializing:
+            return "Initializing"
+        case .planning:
+            return "Naming app"
+        case .generatingIcon:
+            return "Generating icon"
+        case .refiningPrompt:
+            return "Enhancing prompt"
+        case .generatingSource:
+            return "Generating source"
+        case .generatingEditDiff:
+            return "Editing source"
+        case .generatingRepairDiff:
+            return repairStatusText ?? "Repairing"
+        case .repairing:
+            return repairStatusText ?? "Building"
+        case .packaging:
+            return "Packaging"
+        case .completed, nil:
+            return "Finishing"
+        }
+    }
+
+    private var repairStatusText: String? {
+        guard let count = tool.generationRepairErrorCount, count > 0 else { return nil }
+        let errorLabel = count == 1 ? "error" : "errors"
+        return "Repairing \(count) \(errorLabel)"
+    }
+
+    private var canContinue: Bool {
+        tool.generationState == .stopped || tool.generationState == .failed
+    }
+
+    private var shouldDiscardFromMenu: Bool {
+        canContinue && tool.generationMode == .edit
+    }
+
+    private var statusStyle: some ShapeStyle {
+        switch tool.generationState {
+        case .ready, .generating, .stopped:
+            return AnyShapeStyle(.secondary)
+        case .failed:
+            return AnyShapeStyle(.red)
+        }
+    }
+
     private var backgroundStyle: some ShapeStyle {
         if isSelected {
             return AnyShapeStyle(.tint.opacity(0.28))
+        }
+
+        if !tool.isGenerationReady {
+            return AnyShapeStyle(.quaternary.opacity(0.52))
         }
 
         if isRunning {
@@ -138,6 +243,9 @@ struct ToolRowView: View {
         onExport: {},
         onShowInFinder: {},
         onViewSource: {},
+        onContinue: {},
+        onDiscard: {},
+        onStop: {},
         onDelete: {}
     )
     .padding()
@@ -241,6 +349,40 @@ private struct RunToolButtonStyle: ButtonStyle {
             .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 9))
             .scaleEffect(configuration.isPressed ? 0.88 : 1)
             .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+}
+
+private struct IconProgressBadge: View {
+    let accessibilityLabel: String
+    @State private var isSpinning = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(.white.opacity(0.92))
+                .frame(width: 24, height: 24)
+                .shadow(color: .black.opacity(0.38), radius: 3, y: 1)
+
+            Circle()
+                .trim(from: 0.18, to: 0.84)
+                .stroke(
+                    .black.opacity(0.78),
+                    style: StrokeStyle(lineWidth: 2.4, lineCap: .round)
+                )
+                .frame(width: 14, height: 14)
+                .rotationEffect(.degrees(isSpinning ? 360 : 0))
+        }
+        .frame(width: 42, height: 42)
+        .accessibilityLabel(accessibilityLabel)
+        .onAppear {
+            isSpinning = false
+            withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
+                isSpinning = true
+            }
+        }
+        .onDisappear {
+            isSpinning = false
+        }
     }
 }
 

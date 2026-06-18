@@ -203,8 +203,7 @@ extension AgentPipelineTests {
             bundleIdentifier: "com.ironsmith.tests.sandboxed-tool",
             packageRootURL: packageRoot,
             sandboxEnabled: true,
-            resourcePermissions: GeneratedAppResourcePermissions(GeneratedAppResourcePermission.allCases),
-            promptSummary: "Build a sandboxed tool"
+            resourcePermissions: GeneratedAppResourcePermissions(GeneratedAppResourcePermission.allCases)
         )
 
         let appURL = try await client.buildInternalApp(request)
@@ -271,8 +270,7 @@ extension AgentPipelineTests {
                 bundleIdentifier: "com.ironsmith.tests.\(executableName.lowercased())",
                 packageRootURL: packageRoot,
                 sandboxEnabled: true,
-                sandboxPermissions: sandboxPermissions,
-                promptSummary: nil
+                sandboxPermissions: sandboxPermissions
             )
             let client = ToolAppBundleClient.live(
                 processClient: processClient,
@@ -399,8 +397,7 @@ extension AgentPipelineTests {
             bundleIdentifier: "com.ironsmith.tests.exported-tool",
             packageRootURL: packageRoot,
             sandboxEnabled: false,
-            resourcePermissions: GeneratedAppResourcePermissions([.contacts, .photoLibrary, .appleEvents]),
-            promptSummary: nil
+            resourcePermissions: GeneratedAppResourcePermissions([.contacts, .photoLibrary, .appleEvents])
         )
 
         let appURL = try await client.exportApp(request, applicationsDirectory)
@@ -479,8 +476,7 @@ extension AgentPipelineTests {
             executableName: "RestoredTool",
             bundleIdentifier: "com.ironsmith.tests.restored-tool",
             packageRootURL: packageRoot,
-            sandboxEnabled: false,
-            promptSummary: nil
+            sandboxEnabled: false
         )
 
         do {
@@ -541,8 +537,7 @@ extension AgentPipelineTests {
             executableName: "NoIconTool",
             bundleIdentifier: "com.ironsmith.tests.no-icon-tool",
             packageRootURL: packageRoot,
-            sandboxEnabled: true,
-            promptSummary: nil
+            sandboxEnabled: true
         )
 
         let appURL = try await client.buildInternalApp(request)
@@ -589,7 +584,6 @@ extension AgentPipelineTests {
         let iconURL = try await client.ensureIconAssets(
             ToolIconRequest(
                 displayName: "Fallback Icon",
-                promptSummary: "Build a test tool",
                 iconPrompt: iconPrompt,
                 layout: layout
             )
@@ -628,14 +622,12 @@ extension AgentPipelineTests {
         _ = try await client.ensureIconAssets(
             ToolIconRequest(
                 displayName: "Amber Oak",
-                promptSummary: nil,
                 layout: amberLayout
             )
         )
         _ = try await client.ensureIconAssets(
             ToolIconRequest(
                 displayName: "Azure Opal",
-                promptSummary: nil,
                 layout: azureLayout
             )
         )

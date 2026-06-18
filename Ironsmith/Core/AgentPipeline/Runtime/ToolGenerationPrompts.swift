@@ -58,6 +58,7 @@ enum ToolGenerationPrompts {
     Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
     \(validUnifiedDiffShapeExample)
     Keep the edit focused on the user's requested change.
+    Prefer several small, focused hunks over one large hunk when multiple areas need changes.
     """
 
     static func singleFileCreatePrompt(
@@ -118,11 +119,52 @@ enum ToolGenerationPrompts {
         \(diffHunkLimitInstruction(maximumDiffHunks))
         The diff must patch ContentView.swift only.
         Include enough unchanged context in each hunk to make it uniquely applicable.
+        Prefer small focused hunks instead of one broad rewrite.
         Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
         Do not rewrite the entire file unless the whole file is malformed.
         Current authoritative ContentView.swift:
         ```swift
         \(existingSource)
+        ```
+        """
+    }
+
+    static func sourceContinuationPrompt(
+        originalPrompt: String,
+        partialSource: String
+    ) -> String {
+        """
+        Continue the exact Swift source response that was interrupted.
+        Return only the next characters of ContentView.swift.
+        Do not repeat any text from the partial source.
+        Do not include markdown fences, explanations, or labels.
+
+        Original request context:
+        \(originalPrompt)
+
+        Partial ContentView.swift already generated:
+        ```swift
+        \(partialSource)
+        ```
+        """
+    }
+
+    static func diffContinuationPrompt(
+        originalPrompt: String,
+        partialDiff: String
+    ) -> String {
+        """
+        Continue the exact unified diff response that was interrupted.
+        Return only the next characters of the diff.
+        Do not repeat any text from the partial diff.
+        Do not include markdown fences, explanations, or labels.
+
+        Original request context:
+        \(originalPrompt)
+
+        Partial unified diff already generated:
+        ```diff
+        \(partialDiff)
         ```
         """
     }

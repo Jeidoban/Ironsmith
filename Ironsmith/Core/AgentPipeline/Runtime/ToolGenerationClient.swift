@@ -1,15 +1,87 @@
 import Foundation
 
+struct ToolGenerationPreparedTool {
+    let name: String
+    let executableName: String
+    let bundleIdentifier: String
+    let sandboxEnabled: Bool
+    let packageRootURL: URL
+    let manifest: ToolManifest
+}
+
+struct ToolGenerationLifecycle {
+    let preservesCreatedPackageOnCancellation: Bool
+    nonisolated(unsafe) let prepareCreatedTool: (
+        _ preparedTool: ToolGenerationPreparedTool,
+        _ prompt: String
+    ) async throws -> Void
+    nonisolated(unsafe) let updatePendingPrompt: (_ prompt: String) async throws -> Void
+    nonisolated(unsafe) let updateRepairErrorCount: (_ count: Int?) async throws -> Void
+    nonisolated(unsafe) let updatePhase: (
+        _ state: ToolGenerationState,
+        _ phase: ToolGenerationPhase?,
+        _ errorSummary: String?
+    ) async throws -> Void
+
+    nonisolated init(
+        preservesCreatedPackageOnCancellation: Bool = false,
+        prepareCreatedTool: @escaping (
+            _ preparedTool: ToolGenerationPreparedTool,
+            _ prompt: String
+        ) async throws -> Void = { _, _ in },
+        updatePendingPrompt: @escaping (_ prompt: String) async throws -> Void = { _ in },
+        updateRepairErrorCount: @escaping (_ count: Int?) async throws -> Void = { _ in },
+        updatePhase: @escaping (
+            _ state: ToolGenerationState,
+            _ phase: ToolGenerationPhase?,
+            _ errorSummary: String?
+        ) async throws -> Void = { _, _, _ in }
+    ) {
+        self.preservesCreatedPackageOnCancellation = preservesCreatedPackageOnCancellation
+        self.prepareCreatedTool = prepareCreatedTool
+        self.updatePendingPrompt = updatePendingPrompt
+        self.updateRepairErrorCount = updateRepairErrorCount
+        self.updatePhase = updatePhase
+    }
+
+    nonisolated static var noop: ToolGenerationLifecycle {
+        ToolGenerationLifecycle()
+    }
+}
+
 struct ToolGenerationClient {
-    var generateTool: (
+    private var generateToolWithLifecycle: (
         _ prompt: String,
         _ existingTool: Tool?,
         _ sandboxEnabled: Bool,
         _ sandboxPermissions: GeneratedAppSandboxPermissions,
         _ resourcePermissions: GeneratedAppResourcePermissions,
         _ languageModelContext: AgentLanguageModelContext,
+        _ lifecycle: ToolGenerationLifecycle,
         _ status: @escaping @MainActor (String) -> Void
     ) async throws -> ToolGenerationResult
+
+    func generateTool(
+        _ prompt: String,
+        _ existingTool: Tool?,
+        _ sandboxEnabled: Bool,
+        _ sandboxPermissions: GeneratedAppSandboxPermissions,
+        _ resourcePermissions: GeneratedAppResourcePermissions,
+        _ languageModelContext: AgentLanguageModelContext,
+        lifecycle: ToolGenerationLifecycle = .noop,
+        status: @escaping @MainActor (String) -> Void
+    ) async throws -> ToolGenerationResult {
+        try await generateToolWithLifecycle(
+            prompt,
+            existingTool,
+            sandboxEnabled,
+            sandboxPermissions,
+            resourcePermissions,
+            languageModelContext,
+            lifecycle,
+            status
+        )
+    }
 
     init(
         _ generateTool: @escaping (
@@ -22,7 +94,40 @@ struct ToolGenerationClient {
             _ status: @escaping @MainActor (String) -> Void
         ) async throws -> ToolGenerationResult
     ) {
-        self.generateTool = generateTool
+        self.generateToolWithLifecycle = {
+            prompt,
+            existingTool,
+            sandboxEnabled,
+            sandboxPermissions,
+            resourcePermissions,
+            languageModelContext,
+            _,
+            status in
+            try await generateTool(
+                prompt,
+                existingTool,
+                sandboxEnabled,
+                sandboxPermissions,
+                resourcePermissions,
+                languageModelContext,
+                status
+            )
+        }
+    }
+
+    init(
+        withLifecycle generateTool: @escaping (
+            _ prompt: String,
+            _ existingTool: Tool?,
+            _ sandboxEnabled: Bool,
+            _ sandboxPermissions: GeneratedAppSandboxPermissions,
+            _ resourcePermissions: GeneratedAppResourcePermissions,
+            _ languageModelContext: AgentLanguageModelContext,
+            _ lifecycle: ToolGenerationLifecycle,
+            _ status: @escaping @MainActor (String) -> Void
+        ) async throws -> ToolGenerationResult
+    ) {
+        self.generateToolWithLifecycle = generateTool
     }
 
     static func live(
@@ -30,11 +135,12 @@ struct ToolGenerationClient {
         fileClient: AgentFileClient = .live,
         processClient: SwiftPackageProcessClient = .live,
         appBundleClient: ToolAppBundleClient = .live(),
+        iconClient: ToolIconClient = .live(),
         metadataClient: ToolMetadataClient = .live(),
         promptRefinementClient: ToolPromptRefinementClient = .live(),
         versionBackupClient: ToolVersionBackupClient = .live
     ) -> Self {
-        Self { prompt, existingTool, sandboxEnabled, sandboxPermissions, resourcePermissions, languageModelContext, status in
+        Self(withLifecycle: { prompt, existingTool, sandboxEnabled, sandboxPermissions, resourcePermissions, languageModelContext, lifecycle, status in
             let context = ToolGenerationRuntimeContext(
                 languageModel: languageModelContext.languageModel,
                 metadataLanguageModel: languageModelContext.metadataLanguageModel,
@@ -44,6 +150,7 @@ struct ToolGenerationClient {
                 fileClient: fileClient,
                 processClient: processClient,
                 appBundleClient: appBundleClient,
+                iconClient: iconClient,
                 metadataClient: metadataClient,
                 promptRefinementClient: promptRefinementClient,
                 promptRefinementEnabled: languageModelContext.promptRefinementEnabled,
@@ -57,9 +164,10 @@ struct ToolGenerationClient {
                 sandboxEnabled: sandboxEnabled,
                 sandboxPermissions: sandboxPermissions,
                 resourcePermissions: resourcePermissions,
+                lifecycle: lifecycle,
                 status: status
             )
-        }
+        })
     }
 }
 

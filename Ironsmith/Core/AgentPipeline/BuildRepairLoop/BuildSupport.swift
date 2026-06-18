@@ -90,6 +90,34 @@ extension ContentViewBuildRepairLoop {
         throw ToolGenerationError.compileFailed("ContentView.swift did not compile after generation and repair attempts.")
     }
 
+    func restoreInterruptedSource(
+        _ bestCandidate: SourceCandidate?,
+        failureRecovery: FailureRecovery
+    ) throws {
+        switch failureRecovery {
+        case .restoreBestCandidate:
+            if let bestCandidate {
+                try context.write(bestCandidate.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
+                AgentDiagnosticsLog.append(
+                    """
+                    Restored best ContentView.swift candidate after interruption.
+                    packageRoot: \(layout.packageRootURL.path)
+                    phase: \(bestCandidate.phase)
+                    contentViewErrorCount: \(bestCandidate.contentViewErrorCount)
+                    """
+                )
+            }
+        case .restoreOriginalSource(let originalSource):
+            try context.write(originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            AgentDiagnosticsLog.append(
+                """
+                Restored original ContentView.swift after interrupted edit.
+                packageRoot: \(layout.packageRootURL.path)
+                """
+            )
+        }
+    }
+
     static func isRetryableCandidateFailure(_ error: any Error) -> Bool {
         guard let generationError = error as? ToolGenerationError else {
             return false

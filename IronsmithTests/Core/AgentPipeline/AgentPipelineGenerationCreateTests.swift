@@ -12,23 +12,15 @@ extension AgentPipelineTests {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
-        let cancellationCapture = CancellationCapture()
-        let model = StubAgentLanguageModel { _, _ in
-            await cancellationCapture.recordStarted()
-            do {
-                try await Task.sleep(nanoseconds: 10_000_000_000)
-            } catch is CancellationError {
-                await cancellationCapture.recordCancelled()
-                throw CancellationError()
-            }
-            return """
+        let probe = StreamingResponseProbe()
+        let model = PartialThenSuspendingLanguageModel(
+            partialResponse: """
             import SwiftUI
 
             struct ContentView: View {
-                var body: some View { Text("Too late") }
-            }
-            """
-        }
+            """,
+            probe: probe
+        )
         let runtime = Self.makeRuntime(
             languageModel: model,
             generationOptions: GenerationOptions(),
@@ -45,7 +37,7 @@ extension AgentPipelineTests {
             try await runtime.generateTool(for: "Build a cancellable tool", status: { _ in })
         }
         await Self.eventually {
-            await cancellationCapture.hasStarted
+            await probe.didStart
         }
         task.cancel()
 
@@ -57,7 +49,6 @@ extension AgentPipelineTests {
         }
 
         let packageRoot = toolsDirectory.appendingPathComponent("cancel-tool", isDirectory: true)
-        #expect(await cancellationCapture.wasCancelled)
         #expect(!(FileManager.default.fileExists(atPath: packageRoot.path)))
     }
 
@@ -86,6 +77,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
+            iconClient: .noOp,
             metadataClient: .fallback()
         )
         let store = ToolLibraryStore(
@@ -165,6 +157,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: appBundleClient,
+            iconClient: .noOp,
             metadataClient: ToolMetadataClient { _ in
                 ToolMetadataSuggestion(
                     displayName: "Focus Pad",
@@ -202,7 +195,7 @@ extension AgentPipelineTests {
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
         #expect(tool.name == "Focus Pad")
         #expect(tool.executableName == "FocusPad")
-        #expect(tool.lastPromptSummary == "Build a focused notes helper with quick tags")
+        #expect(tool.pendingPrompt == nil)
         #expect(tool.packageRootURL.lastPathComponent == "focus-pad")
         #expect(FileManager.default.fileExists(atPath: tool.packageRootURL.appendingPathComponent("Sources/FocusPad/FocusPad.swift").path))
         #expect(await appBundleCapture.builtRequests.first?.iconPrompt == iconPrompt)
@@ -246,6 +239,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
+            iconClient: .noOp,
             metadataClient: .fallback()
         )
         let store = ToolLibraryStore(
@@ -311,6 +305,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
+            iconClient: .noOp,
             metadataClient: .fallback()
         )
         let store = ToolLibraryStore(
