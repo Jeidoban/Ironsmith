@@ -173,7 +173,7 @@ extension ToolLibraryTests {
         #expect(restoredSource == #"Text("previous")"#)
         #expect(swappedPreviousSource == #"Text("current")"#)
         #expect(await buildCapture.builtPackageRoot == packageRoot)
-        #expect(tool.lastPromptSummary == "Reverted to previous version")
+        #expect(tool.generationState == .ready)
         #expect(store.generationStatus == nil)
     }
 

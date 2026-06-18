@@ -16,6 +16,8 @@ enum ToolGenerationState: String, Codable, CaseIterable, Equatable, Sendable {
 enum ToolGenerationPhase: String, Codable, CaseIterable, Equatable, Sendable {
     case initializing
     case planning
+    case generatingIcon
+    case refiningPrompt
     case generatingSource
     case generatingEditDiff
     case generatingRepairDiff
@@ -37,12 +39,10 @@ final class Tool {
     var bundleIdentifier: String
     var sandboxEnabled: Bool
     var packageRootPath: String
-    var lastPromptSummary: String?
     var generationStateRawValue: String = ToolGenerationState.ready.rawValue
     var generationPhaseRawValue: String? = ToolGenerationPhase.completed.rawValue
     var generationModeRawValue: String?
     var pendingPrompt: String?
-    var pendingRefinedPrompt: String?
     var generationErrorSummary: String?
     var createdAt: Date
     var updatedAt: Date
@@ -54,12 +54,10 @@ final class Tool {
         bundleIdentifier: String? = nil,
         sandboxEnabled: Bool = true,
         packageRootPath: String,
-        lastPromptSummary: String? = nil,
         generationState: ToolGenerationState = .ready,
         generationPhase: ToolGenerationPhase? = .completed,
         generationMode: ToolGenerationMode? = nil,
         pendingPrompt: String? = nil,
-        pendingRefinedPrompt: String? = nil,
         generationErrorSummary: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -71,12 +69,10 @@ final class Tool {
         self.bundleIdentifier = bundleIdentifier ?? ToolBundleIdentifier.make(executableName: resolvedExecutableName)
         self.sandboxEnabled = sandboxEnabled
         self.packageRootPath = packageRootPath
-        self.lastPromptSummary = lastPromptSummary
         self.generationStateRawValue = generationState.rawValue
         self.generationPhaseRawValue = generationPhase?.rawValue
         self.generationModeRawValue = generationMode?.rawValue
         self.pendingPrompt = pendingPrompt
-        self.pendingRefinedPrompt = pendingRefinedPrompt
         self.generationErrorSummary = generationErrorSummary
         self.createdAt = createdAt
         self.updatedAt = updatedAt

@@ -116,21 +116,6 @@ struct ToolLibraryPopoverView: View {
                 await toolLibraryStore.refreshRestoreAvailability(for: tools)
             }
 
-            if let generationStatus = toolLibraryStore.generationStatus {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("Generating app")
-
-                    Text(generationStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    Spacer()
-                }
-            }
-
             PromptComposerView(
                 prompt: $toolLibraryStore.prompt,
                 sandboxEnabled: $toolLibraryStore.sandboxEnabled,

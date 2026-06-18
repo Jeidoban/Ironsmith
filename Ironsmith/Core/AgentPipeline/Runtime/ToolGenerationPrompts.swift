@@ -58,6 +58,7 @@ enum ToolGenerationPrompts {
     Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
     \(validUnifiedDiffShapeExample)
     Keep the edit focused on the user's requested change.
+    Prefer several small, focused hunks over one large hunk when multiple areas need changes.
     """
 
     static func singleFileCreatePrompt(
@@ -118,6 +119,7 @@ enum ToolGenerationPrompts {
         \(diffHunkLimitInstruction(maximumDiffHunks))
         The diff must patch ContentView.swift only.
         Include enough unchanged context in each hunk to make it uniquely applicable.
+        Prefer small focused hunks instead of one broad rewrite.
         Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
         Do not rewrite the entire file unless the whole file is malformed.
         Current authoritative ContentView.swift:

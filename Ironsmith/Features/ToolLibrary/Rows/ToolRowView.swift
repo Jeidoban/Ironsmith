@@ -63,12 +63,11 @@ struct ToolRowView: View {
                 )
             }
 
+            if canContinue {
+                generationActionButtons
+            }
+
             Menu {
-                if canContinue {
-                    Button("Continue Generation", action: onContinue)
-                    Button("Discard Generation", role: .destructive, action: onDiscard)
-                    Divider()
-                }
                 Button("Go Back to Previous Version", action: onRevert)
                     .disabled(!tool.isGenerationReady || !canRevert)
                 Button("Export App", action: onExport)
@@ -112,6 +111,16 @@ struct ToolRowView: View {
                     .frame(width: 42, height: 42)
                     .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 9))
                     .accessibilityLabel("Running \(tool.name)")
+            } else if isHoveringRow && canContinue {
+                Button(action: onContinue) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(RunToolButtonStyle())
+                .help("Continue \(tool.name)")
+                .accessibilityLabel("Continue \(tool.name)")
+                .accessibilityIdentifier("continue-tool-\(tool.id.uuidString)")
             } else if isHoveringRow && tool.isGenerationReady {
                 Button(action: onRun) {
                     Image(systemName: "play.fill")
@@ -126,20 +135,91 @@ struct ToolRowView: View {
         }
     }
 
+    private var generationActionButtons: some View {
+        HStack(spacing: 4) {
+            Button(action: onContinue) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.borderless)
+            .help("Continue generation")
+            .accessibilityLabel("Continue generation for \(tool.name)")
+
+            Button(role: .destructive, action: onDiscard) {
+                Image(systemName: "trash")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.borderless)
+            .help("Discard generation")
+            .accessibilityLabel("Discard generation for \(tool.name)")
+        }
+        .fixedSize()
+    }
+
     private var generationStatusText: String? {
         switch tool.generationState {
         case .ready:
             return nil
         case .generating:
-            return "Generating"
+            return phaseStatusText
         case .stopped:
-            return "Stopped"
+            return "Stopped · \(phaseName)"
         case .failed:
             if let generationErrorSummary = tool.generationErrorSummary,
                !generationErrorSummary.isEmpty {
-                return "Failed: \(generationErrorSummary)"
+                return "Failed · \(phaseName): \(generationErrorSummary)"
             }
-            return "Failed"
+            return "Failed · \(phaseName)"
+        }
+    }
+
+    private var phaseStatusText: String {
+        switch tool.generationPhase {
+        case .initializing:
+            return "Initializing"
+        case .planning:
+            return "Naming app"
+        case .generatingIcon:
+            return "Generating icon"
+        case .refiningPrompt:
+            return "Enhancing prompt"
+        case .generatingSource:
+            return "Generating source"
+        case .generatingEditDiff:
+            return "Editing source"
+        case .generatingRepairDiff:
+            return "Repairing source"
+        case .repairing:
+            return "Building"
+        case .packaging:
+            return "Packaging"
+        case .completed, nil:
+            return "Finishing"
+        }
+    }
+
+    private var phaseName: String {
+        switch tool.generationPhase {
+        case .initializing:
+            return "initializing"
+        case .planning:
+            return "naming"
+        case .generatingIcon:
+            return "icon"
+        case .refiningPrompt:
+            return "prompt"
+        case .generatingSource:
+            return "source"
+        case .generatingEditDiff:
+            return "edit"
+        case .generatingRepairDiff, .repairing:
+            return "repair"
+        case .packaging:
+            return "packaging"
+        case .completed, nil:
+            return "generation"
         }
     }
 

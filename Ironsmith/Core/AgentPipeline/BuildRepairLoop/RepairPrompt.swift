@@ -116,6 +116,7 @@ extension ContentViewBuildRepairLoop {
             try Task.checkCancellation()
             diff = response
         } catch {
+            try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             AgentDiagnosticsLog.append(
                 """
                 Model repair request failed.

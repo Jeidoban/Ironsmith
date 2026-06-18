@@ -77,6 +77,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
+            iconClient: .noOp,
             metadataClient: .fallback()
         )
         let store = ToolLibraryStore(
@@ -156,6 +157,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: appBundleClient,
+            iconClient: .noOp,
             metadataClient: ToolMetadataClient { _ in
                 ToolMetadataSuggestion(
                     displayName: "Focus Pad",
@@ -193,7 +195,7 @@ extension AgentPipelineTests {
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
         #expect(tool.name == "Focus Pad")
         #expect(tool.executableName == "FocusPad")
-        #expect(tool.lastPromptSummary == "Build a focused notes helper with quick tags")
+        #expect(tool.pendingPrompt == nil)
         #expect(tool.packageRootURL.lastPathComponent == "focus-pad")
         #expect(FileManager.default.fileExists(atPath: tool.packageRootURL.appendingPathComponent("Sources/FocusPad/FocusPad.swift").path))
         #expect(await appBundleCapture.builtRequests.first?.iconPrompt == iconPrompt)
@@ -237,6 +239,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
+            iconClient: .noOp,
             metadataClient: .fallback()
         )
         let store = ToolLibraryStore(
@@ -302,6 +305,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
+            iconClient: .noOp,
             metadataClient: .fallback()
         )
         let store = ToolLibraryStore(

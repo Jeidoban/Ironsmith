@@ -21,6 +21,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
+            iconClient: .noOp,
             metadataClient: ToolMetadataClient { _ in
                 ToolMetadataSuggestion(displayName: "Paused Tool", iconPrompt: "")
             },
@@ -102,8 +103,7 @@ extension AgentPipelineTests {
         tool.generationState = .stopped
         tool.generationPhase = .generatingSource
         tool.generationMode = .create
-        tool.pendingPrompt = "Build a resumable source app"
-        tool.pendingRefinedPrompt = "Build a focused resumable source app"
+        tool.pendingPrompt = "Build a focused resumable source app"
 
         let promptCapture = PromptCapture()
         let runtime = Self.makeRuntime(

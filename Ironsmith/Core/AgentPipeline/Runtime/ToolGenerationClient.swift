@@ -13,9 +13,9 @@ struct ToolGenerationLifecycle {
     let preservesCreatedPackageOnCancellation: Bool
     nonisolated(unsafe) let prepareCreatedTool: (
         _ preparedTool: ToolGenerationPreparedTool,
-        _ prompt: String,
-        _ refinedPrompt: String?
+        _ prompt: String
     ) async throws -> Void
+    nonisolated(unsafe) let updatePendingPrompt: (_ prompt: String) async throws -> Void
     nonisolated(unsafe) let updatePhase: (
         _ state: ToolGenerationState,
         _ phase: ToolGenerationPhase?,
@@ -26,9 +26,9 @@ struct ToolGenerationLifecycle {
         preservesCreatedPackageOnCancellation: Bool = false,
         prepareCreatedTool: @escaping (
             _ preparedTool: ToolGenerationPreparedTool,
-            _ prompt: String,
-            _ refinedPrompt: String?
-        ) async throws -> Void = { _, _, _ in },
+            _ prompt: String
+        ) async throws -> Void = { _, _ in },
+        updatePendingPrompt: @escaping (_ prompt: String) async throws -> Void = { _ in },
         updatePhase: @escaping (
             _ state: ToolGenerationState,
             _ phase: ToolGenerationPhase?,
@@ -37,6 +37,7 @@ struct ToolGenerationLifecycle {
     ) {
         self.preservesCreatedPackageOnCancellation = preservesCreatedPackageOnCancellation
         self.prepareCreatedTool = prepareCreatedTool
+        self.updatePendingPrompt = updatePendingPrompt
         self.updatePhase = updatePhase
     }
 
@@ -131,6 +132,7 @@ struct ToolGenerationClient {
         fileClient: AgentFileClient = .live,
         processClient: SwiftPackageProcessClient = .live,
         appBundleClient: ToolAppBundleClient = .live(),
+        iconClient: ToolIconClient = .live(),
         metadataClient: ToolMetadataClient = .live(),
         promptRefinementClient: ToolPromptRefinementClient = .live(),
         versionBackupClient: ToolVersionBackupClient = .live
@@ -145,6 +147,7 @@ struct ToolGenerationClient {
                 fileClient: fileClient,
                 processClient: processClient,
                 appBundleClient: appBundleClient,
+                iconClient: iconClient,
                 metadataClient: metadataClient,
                 promptRefinementClient: promptRefinementClient,
                 promptRefinementEnabled: languageModelContext.promptRefinementEnabled,

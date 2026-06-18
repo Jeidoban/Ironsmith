@@ -6,18 +6,15 @@ import ImagePlayground
 
 struct ToolIconRequest: Equatable, Sendable {
     let displayName: String
-    let promptSummary: String?
     let iconPrompt: String?
     let layout: ToolPackageLayout
 
     init(
         displayName: String,
-        promptSummary: String?,
         iconPrompt: String? = nil,
         layout: ToolPackageLayout
     ) {
         self.displayName = displayName
-        self.promptSummary = promptSummary
         self.iconPrompt = iconPrompt
         self.layout = layout
     }
@@ -27,6 +24,10 @@ struct ToolIconClient: Sendable {
     var ensureIconAssets: @Sendable (ToolIconRequest) async throws -> URL
 
     nonisolated private static let cachedPreviewPNGPixelSize = 256
+
+    nonisolated static let noOp = ToolIconClient { request in
+        request.layout.cachedAppIconICNSURL
+    }
 
     static func live(
         fileManager: FileManager = .default,

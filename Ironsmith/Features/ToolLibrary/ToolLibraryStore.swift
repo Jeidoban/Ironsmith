@@ -213,7 +213,6 @@ final class ToolLibraryStore {
             try dependencies.versionBackupClient.restorePreviousVersion(tool.packageRootURL, contentViewPath)
             generationStatus = "Building \(tool.name)"
             try await dependencies.buildClient.buildTool(tool)
-            tool.lastPromptSummary = "Reverted to previous version"
             clearPendingGeneration(on: tool)
             tool.updatedAt = .now
             try modelContext.save()
@@ -252,8 +251,7 @@ final class ToolLibraryStore {
                     selectedTool,
                     mode: .edit,
                     phase: .planning,
-                    prompt: trimmedPrompt,
-                    refinedPrompt: nil
+                    prompt: trimmedPrompt
                 )
                 try modelContext.save()
             }
@@ -293,7 +291,6 @@ final class ToolLibraryStore {
                     bundleIdentifier: result.bundleIdentifier,
                     sandboxEnabled: result.sandboxEnabled,
                     packageRootPath: result.packageRootURL.path,
-                    lastPromptSummary: Self.promptSummary(for: trimmedPrompt),
                     generationState: .ready,
                     generationPhase: .completed
                 )
@@ -492,7 +489,7 @@ final class ToolLibraryStore {
         inferenceStore: InferenceStore
     ) async {
         guard canContinueGeneration(tool) else { return }
-        let resumePrompt = (tool.pendingPrompt ?? tool.lastPromptSummary ?? "")
+        let resumePrompt = (tool.pendingPrompt ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !resumePrompt.isEmpty else {
             presentError("Ironsmith does not have enough saved prompt context to continue this generation.")
@@ -517,8 +514,7 @@ final class ToolLibraryStore {
                 tool,
                 mode: tool.generationMode ?? .create,
                 phase: tool.generationPhase ?? .planning,
-                prompt: resumePrompt,
-                refinedPrompt: tool.pendingRefinedPrompt
+                prompt: resumePrompt
             )
             try modelContext.save()
 
@@ -570,7 +566,7 @@ final class ToolLibraryStore {
     ) -> ToolGenerationLifecycle {
         ToolGenerationLifecycle(
             preservesCreatedPackageOnCancellation: true,
-            prepareCreatedTool: { preparedTool, prompt, refinedPrompt in
+            prepareCreatedTool: { preparedTool, prompt in
                 try await MainActor.run {
                     let tool = Tool(
                         name: preparedTool.name,
@@ -578,17 +574,23 @@ final class ToolLibraryStore {
                         bundleIdentifier: preparedTool.bundleIdentifier,
                         sandboxEnabled: preparedTool.sandboxEnabled,
                         packageRootPath: preparedTool.packageRootURL.path,
-                        lastPromptSummary: Self.promptSummary(for: prompt),
                         generationState: .generating,
-                        generationPhase: .generatingSource,
+                        generationPhase: .generatingIcon,
                         generationMode: .create,
-                        pendingPrompt: prompt,
-                        pendingRefinedPrompt: refinedPrompt
+                        pendingPrompt: prompt
                     )
                     modelContext.insert(tool)
                     try modelContext.save()
                     activeTool.value = tool
                     onPrepared(tool)
+                }
+            },
+            updatePendingPrompt: { prompt in
+                try await MainActor.run {
+                    guard let tool = activeTool.value else { return }
+                    tool.pendingPrompt = prompt
+                    tool.updatedAt = .now
+                    try modelContext.save()
                 }
             },
             updatePhase: { state, phase, errorSummary in
@@ -612,14 +614,12 @@ final class ToolLibraryStore {
         _ tool: Tool,
         mode: ToolGenerationMode,
         phase: ToolGenerationPhase,
-        prompt: String,
-        refinedPrompt: String?
+        prompt: String
     ) {
         tool.generationState = .generating
         tool.generationPhase = phase
         tool.generationMode = mode
         tool.pendingPrompt = prompt
-        tool.pendingRefinedPrompt = refinedPrompt
         tool.generationErrorSummary = nil
         tool.updatedAt = .now
     }
@@ -646,7 +646,6 @@ final class ToolLibraryStore {
         tool.bundleIdentifier = result.bundleIdentifier
         tool.sandboxEnabled = result.sandboxEnabled
         tool.packageRootPath = result.packageRootURL.path
-        tool.lastPromptSummary = Self.promptSummary(for: prompt)
         clearPendingGeneration(on: tool)
     }
 
@@ -655,7 +654,6 @@ final class ToolLibraryStore {
         tool.generationPhase = .completed
         tool.generationMode = nil
         tool.pendingPrompt = nil
-        tool.pendingRefinedPrompt = nil
         tool.generationErrorSummary = nil
         removePendingDraft(for: tool)
         tool.updatedAt = .now
@@ -674,13 +672,6 @@ final class ToolLibraryStore {
     private func removePackageIfExists(_ packageRootURL: URL) throws {
         guard FileManager.default.fileExists(atPath: packageRootURL.path) else { return }
         try FileManager.default.removeItem(at: packageRootURL)
-    }
-
-    private static func promptSummary(for prompt: String) -> String {
-        let singleLine = prompt
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return String(singleLine.prefix(160))
     }
 
     private static func shortSummary(for message: String) -> String {

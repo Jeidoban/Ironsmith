@@ -8,7 +8,6 @@ struct ToolAppBundleRequest: Equatable, Sendable {
     let sandboxEnabled: Bool
     let sandboxPermissions: GeneratedAppSandboxPermissions
     let resourcePermissions: GeneratedAppResourcePermissions
-    let promptSummary: String?
     let iconPrompt: String?
 
     init(
@@ -19,7 +18,6 @@ struct ToolAppBundleRequest: Equatable, Sendable {
         sandboxEnabled: Bool,
         sandboxPermissions: GeneratedAppSandboxPermissions = .default,
         resourcePermissions: GeneratedAppResourcePermissions = .none,
-        promptSummary: String?,
         iconPrompt: String? = nil
     ) {
         self.displayName = displayName
@@ -29,7 +27,6 @@ struct ToolAppBundleRequest: Equatable, Sendable {
         self.sandboxEnabled = sandboxEnabled
         self.sandboxPermissions = sandboxPermissions
         self.resourcePermissions = resourcePermissions
-        self.promptSummary = promptSummary
         self.iconPrompt = iconPrompt
     }
 
@@ -57,7 +54,6 @@ struct ToolAppBundleRequest: Equatable, Sendable {
             sandboxEnabled: tool.sandboxEnabled,
             sandboxPermissions: sandboxPermissions,
             resourcePermissions: resourcePermissions,
-            promptSummary: tool.lastPromptSummary,
             iconPrompt: nil
         )
     }
