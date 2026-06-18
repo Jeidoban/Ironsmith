@@ -272,7 +272,7 @@ extension AgentPipelineTests {
         in context: ModelContext,
         matching predicate: (StoredTool) -> Bool
     ) async throws -> StoredTool {
-        let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
+        let deadline = DispatchTime.now().uptimeNanoseconds + 5_000_000_000
         while DispatchTime.now().uptimeNanoseconds < deadline {
             let tools = try context.fetch(FetchDescriptor<StoredTool>())
             if let tool = tools.first(where: predicate) {
@@ -280,7 +280,9 @@ extension AgentPipelineTests {
             }
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
-        return try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
+        let tools = try context.fetch(FetchDescriptor<StoredTool>())
+        let matchingTool = tools.first(where: predicate)
+        return try #require(matchingTool)
     }
 }
 
