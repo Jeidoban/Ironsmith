@@ -61,6 +61,82 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func toolLibraryStoreUsesStoredBuildSettingsForSelectedTool() {
+        let toolLibraryState = ToolLibraryStore()
+        let tool = Tool(
+            name: "Menu Timer",
+            sandboxEnabled: false,
+            appKind: .menuBar,
+            menuBarSystemImage: "timer",
+            sandboxPermissions: GeneratedAppSandboxPermissions.none,
+            resourcePermissions: GeneratedAppResourcePermissions([.camera]),
+            packageRootPath: "/tmp/menu-timer"
+        )
+        let defaults = ToolGenerationSettings(
+            sandboxPermissions: GeneratedAppSandboxPermissions([.internet, .userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions([.location])
+        )
+
+        toolLibraryState.selectForEditing(tool, defaultSettings: defaults)
+
+        #expect(toolLibraryState.sandboxEnabled == false)
+        #expect(toolLibraryState.appKind == .menuBar)
+        #expect(toolLibraryState.menuBarSystemImage == "timer")
+        #expect(toolLibraryState.sandboxPermissions.enabled.isEmpty)
+        #expect(toolLibraryState.resourcePermissions.enabled == [.camera])
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreUsesGlobalDefaultsForLegacyToolPermissionsWithoutArtifactInference() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let tool = Tool(name: "Legacy Tool", packageRootPath: root.path)
+        let entitlementsURL = ToolPackageLayout.sandboxEntitlementsURL(for: root)
+        try FileManager.default.createDirectory(
+            at: entitlementsURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let entitlementsData = try PropertyListSerialization.data(
+            fromPropertyList: [
+                GeneratedAppSandboxPermission.internet.entitlementKey: true
+            ],
+            format: .xml,
+            options: 0
+        )
+        try entitlementsData.write(to: entitlementsURL, options: .atomic)
+
+        let infoPlistURL = tool.appBundleURL
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("Info.plist")
+        try FileManager.default.createDirectory(
+            at: infoPlistURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let infoPlistData = try PropertyListSerialization.data(
+            fromPropertyList: [
+                "NSCameraUsageDescription": "artifact camera access"
+            ],
+            format: .xml,
+            options: 0
+        )
+        try infoPlistData.write(to: infoPlistURL, options: .atomic)
+
+        let defaults = ToolGenerationSettings(
+            sandboxPermissions: GeneratedAppSandboxPermissions([.userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions([.location])
+        )
+        let toolLibraryState = ToolLibraryStore()
+
+        toolLibraryState.selectForEditing(tool, defaultSettings: defaults)
+
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.userSelectedFiles])
+        #expect(toolLibraryState.resourcePermissions.enabled == [.location])
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStoreHandleDeletedToolIsNoOpForNonSelectedTool() {
         let toolLibraryState = ToolLibraryStore()
         let selected = Tool(name: "Linter", packageRootPath: "/tmp/linter")

@@ -4,10 +4,16 @@ import Foundation
 struct ToolMetadataSuggestion: Equatable, Sendable {
     let displayName: String
     let iconPrompt: String
+    let menuBarSystemImage: String
 
-    nonisolated init(displayName: String, iconPrompt: String) {
+    nonisolated init(
+        displayName: String,
+        iconPrompt: String,
+        menuBarSystemImage: String = ToolMenuBarSymbol.fallback
+    ) {
         self.displayName = displayName
         self.iconPrompt = iconPrompt
+        self.menuBarSystemImage = ToolMenuBarSymbol.validated(menuBarSystemImage)
     }
 }
 
@@ -18,6 +24,19 @@ struct GeneratedToolMetadata {
 
     @Guide(description: "A tiny app icon concept phrase for an image generator, two to five words. Do not write a sentence.")
     let iconPrompt: String
+
+    @Guide(description: "One SF Symbol name chosen exactly from Ironsmith's allowed menuBarSystemImage list.")
+    let menuBarSystemImage: String
+}
+
+extension GeneratedToolMetadata {
+    nonisolated init(displayName: String, iconPrompt: String) {
+        self.init(
+            displayName: displayName,
+            iconPrompt: iconPrompt,
+            menuBarSystemImage: ToolMenuBarSymbol.fallback
+        )
+    }
 }
 
 struct ToolMetadataRequest: Sendable {
@@ -110,6 +129,9 @@ struct ToolMetadataClient: Sendable {
         """
         User request:
         \(userPrompt)
+
+        Allowed menuBarSystemImage values:
+        \(ToolMenuBarSymbol.allowedSymbols.joined(separator: ", "))
         """
     }
 
@@ -127,6 +149,11 @@ struct ToolMetadataClient: Sendable {
         - Must be 2 to 5 words.
         - Good examples: Calculator in front of house. Gamepad with buttons.
         - Do not mention app icon, macOS, style, text, letters, screenshots, UI, logos, or backgrounds.
+
+        menuBarSystemImage:
+        - Must be one exact SF Symbol name from the allowed list in the prompt.
+        - Choose the closest symbol for the user's requested app.
+        - Do not invent names or include variants outside that list.
         """
 
     nonisolated private static func metadataSuggestion(
@@ -135,9 +162,11 @@ struct ToolMetadataClient: Sendable {
     ) -> ToolMetadataSuggestion {
         let displayName = response.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let iconPrompt = response.iconPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let menuBarSystemImage = ToolMenuBarSymbol.validated(response.menuBarSystemImage)
         return ToolMetadataSuggestion(
             displayName: displayName.isEmpty ? fallback.displayName : displayName,
-            iconPrompt: iconPrompt.isEmpty ? fallback.iconPrompt : iconPrompt
+            iconPrompt: iconPrompt.isEmpty ? fallback.iconPrompt : iconPrompt,
+            menuBarSystemImage: menuBarSystemImage
         )
     }
 }
@@ -292,7 +321,8 @@ extension ToolMetadataSuggestion {
         let displayName = ToolNameSanitizer.displayName(fromPrompt: userPrompt)
         return ToolMetadataSuggestion(
             displayName: displayName,
-            iconPrompt: ""
+            iconPrompt: "",
+            menuBarSystemImage: ToolMenuBarSymbol.fallback
         )
     }
 }

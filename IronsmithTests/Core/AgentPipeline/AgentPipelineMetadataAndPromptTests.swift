@@ -8,12 +8,13 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
-    func generatedMetadataSchemaIncludesNameAndIconOnly() throws {
+    func generatedMetadataSchemaIncludesNameIconAndMenuBarSymbolOnly() throws {
         let data = try JSONEncoder().encode(GeneratedToolMetadata.generationSchema)
         let schema = try #require(String(data: data, encoding: .utf8))
 
         #expect(schema.contains("displayName"))
         #expect(schema.contains("iconPrompt"))
+        #expect(schema.contains("menuBarSystemImage"))
         #expect(!(schema.contains("refinedPrompt")))
     }
 
@@ -34,12 +35,34 @@ extension AgentPipelineTests {
 
         #expect(suggestion.displayName == "Recipe Board")
         #expect(suggestion.iconPrompt == "Recipe cards")
+        #expect(suggestion.menuBarSystemImage == ToolMenuBarSymbol.fallback)
         let prompt = try #require(await response.prompts.first)
         #expect(prompt.contains("User request:\nrecipes"))
+        #expect(prompt.contains("Allowed menuBarSystemImage values:"))
         #expect(!(prompt.contains("Planning budget:")))
         #expect(!(prompt.contains("Refined prompt:")))
         #expect(!(prompt.contains("backend")))
         #expect(await response.options.first?.maximumResponseTokens == 4096)
+    }
+
+    @MainActor
+    @Test
+    func metadataSuggestionValidatesMenuBarSymbolAgainstAllowlist() async throws {
+        let response = StructuredMetadataResponse(
+            metadata: GeneratedToolMetadata(
+                displayName: "Timer",
+                iconPrompt: "Small timer",
+                menuBarSystemImage: "not.a.real.allowed.symbol"
+            )
+        )
+
+        let suggestion = await ToolMetadataClient.live().suggestMetadata(
+            userPrompt: "Build a timer",
+            languageModel: StructuredMetadataLanguageModel(response: response),
+            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+        )
+
+        #expect(suggestion.menuBarSystemImage == ToolMenuBarSymbol.fallback)
     }
 
     @MainActor

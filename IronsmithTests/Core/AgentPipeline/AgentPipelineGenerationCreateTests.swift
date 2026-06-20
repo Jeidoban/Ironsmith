@@ -161,7 +161,8 @@ extension AgentPipelineTests {
             metadataClient: ToolMetadataClient { _ in
                 ToolMetadataSuggestion(
                     displayName: "Focus Pad",
-                    iconPrompt: iconPrompt
+                    iconPrompt: iconPrompt,
+                    menuBarSystemImage: "note.text"
                 )
             },
             promptRefinementClient: ToolPromptRefinementClient { _ in
@@ -186,20 +187,30 @@ extension AgentPipelineTests {
         let inferenceStore = Self.inferenceStore(
             languageModel: StubAgentLanguageModel.fixed(contentViewSource)
         )
+        inferenceStore.generationPreferences.generatedAppCameraAccessEnabled = true
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
 
+        store.appKind = .menuBar
         store.prompt = "Build a focused notes helper with quick tags"
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
         #expect(tool.name == "Focus Pad")
         #expect(tool.executableName == "FocusPad")
+        #expect(tool.appKind == .menuBar)
+        #expect(tool.validatedMenuBarSystemImage == "note.text")
+        #expect(tool.storedResourcePermissions?.enabled == [.camera])
         #expect(tool.pendingPrompt == nil)
         #expect(tool.packageRootURL.lastPathComponent == "focus-pad")
-        #expect(FileManager.default.fileExists(atPath: tool.packageRootURL.appendingPathComponent("Sources/FocusPad/FocusPad.swift").path))
+        let appEntryURL = tool.packageRootURL.appendingPathComponent("Sources/FocusPad/FocusPad.swift")
+        #expect(FileManager.default.fileExists(atPath: appEntryURL.path))
+        let appEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)
+        #expect(appEntrySource.contains("MenuBarExtra(\"Focus Pad\", systemImage: \"note.text\")"))
         #expect(await appBundleCapture.builtRequests.first?.iconPrompt == iconPrompt)
         #expect(await appBundleCapture.builtRequests.first?.displayName == "Focus Pad")
+        #expect(await appBundleCapture.builtRequests.first?.appKind == .menuBar)
+        #expect(await appBundleCapture.builtRequests.first?.menuBarSystemImage == "note.text")
     }
 
     @MainActor

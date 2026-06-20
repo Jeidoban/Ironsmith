@@ -62,7 +62,10 @@ struct ToolLibraryPopoverView: View {
                                 isExporting: toolLibraryStore.exportingToolID == tool.id,
                                 canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
                                 onSelect: {
-                                    toolLibraryStore.toggleSelection(for: tool)
+                                    toolLibraryStore.toggleSelection(
+                                        for: tool,
+                                        defaultSettings: defaultGenerationSettings
+                                    )
                                 },
                                 onRun: {
                                     Task {
@@ -122,8 +125,13 @@ struct ToolLibraryPopoverView: View {
             PromptComposerView(
                 prompt: $toolLibraryStore.prompt,
                 sandboxEnabled: $toolLibraryStore.sandboxEnabled,
+                appKind: $toolLibraryStore.appKind,
+                sandboxPermissions: $toolLibraryStore.sandboxPermissions,
+                resourcePermissions: $toolLibraryStore.resourcePermissions,
+                usesToolPermissionSettings: toolLibraryStore.hasSelectedTool,
+                generationPreferences: inferenceStore.generationPreferences,
                 placeholder: toolLibraryStore.promptPlaceholder,
-                showsSandboxToggle: showSandboxOverride,
+                showsSandboxControl: showSandboxOverride,
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
                 onSubmit: {
@@ -167,7 +175,7 @@ struct ToolLibraryPopoverView: View {
             presentWelcomeOnboardingIfNeeded()
         }
         .onChange(of: tools.map(\.id)) { _, _ in
-            toolLibraryStore.syncSelection(with: tools)
+            toolLibraryStore.syncSelection(with: tools, defaultSettings: defaultGenerationSettings)
         }
         .onChange(of: showSandboxOverride) { _, isEnabled in
             if !isEnabled {
@@ -308,6 +316,10 @@ struct ToolLibraryPopoverView: View {
         }
 
         return inferenceStore.selectedModelID
+    }
+
+    private var defaultGenerationSettings: ToolGenerationSettings {
+        ToolLibraryStore.defaultGenerationSettings(from: inferenceStore.generationPreferences)
     }
 
     private func openIronsmithCreditPurchase() {

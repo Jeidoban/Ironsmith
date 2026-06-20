@@ -50,7 +50,7 @@ struct ToolAppBundleClient {
                 return try await buildApp(
                     request: request,
                     destinationAppURL: destinationURL,
-                    showsInDock: true,
+                    showsInDock: request.appKind == .window,
                     fileManager: fileManager,
                     fileClient: fileClient,
                     processClient: processClient,

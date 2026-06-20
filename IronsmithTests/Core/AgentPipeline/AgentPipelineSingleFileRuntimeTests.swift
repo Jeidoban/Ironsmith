@@ -51,15 +51,25 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: appBundleClient,
-            metadataClient: .fallback()
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(
+                    displayName: "Tiny Tool",
+                    iconPrompt: "",
+                    menuBarSystemImage: "timer"
+                )
+            }
         )
 
         let resourcePermissions = GeneratedAppResourcePermissions([.location, .calendar])
         let sandboxPermissions = GeneratedAppSandboxPermissions([.internet])
+        let settings = ToolGenerationSettings(
+            appKind: .menuBar,
+            sandboxPermissions: sandboxPermissions,
+            resourcePermissions: resourcePermissions
+        )
         let result = try await runtime.generateTool(
             for: "Build a tiny tool",
-            sandboxPermissions: sandboxPermissions,
-            resourcePermissions: resourcePermissions,
+            settings: settings,
             status: { _ in }
         )
 
@@ -70,7 +80,14 @@ extension AgentPipelineTests {
         #expect(FileManager.default.fileExists(atPath: contentViewURL.path))
         #expect(FileManager.default.fileExists(atPath: appEntryURL.path))
         #expect(result.manifest.files.map(\.path) == ["Sources/\(result.executableName)/ContentView.swift"])
+        #expect(result.settings.appKind == .menuBar)
+        #expect(result.settings.menuBarSystemImage == "timer")
+        let appEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)
+        #expect(appEntrySource.contains("MenuBarExtra(\"Tiny Tool\", systemImage: \"timer\")"))
+        #expect(appEntrySource.contains(".menuBarExtraStyle(.window)"))
+        #expect(!(appEntrySource.contains("WindowGroup")))
         #expect(await appBundleCapture.builtRequests.first?.sandboxPermissions == sandboxPermissions)
         #expect(await appBundleCapture.builtRequests.first?.resourcePermissions == resourcePermissions)
+        #expect(await appBundleCapture.builtRequests.first?.appKind == .menuBar)
     }
 }

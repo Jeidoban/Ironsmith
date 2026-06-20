@@ -12,6 +12,7 @@ struct SingleFileToolGenerationRuntime {
         let contentViewPath: String
         let manifest: ToolManifest
         let iconPrompt: String?
+        let settings: ToolGenerationSettings
     }
 
     func generateTool(
@@ -20,6 +21,26 @@ struct SingleFileToolGenerationRuntime {
         sandboxEnabled: Bool = true,
         sandboxPermissions: GeneratedAppSandboxPermissions = .default,
         resourcePermissions: GeneratedAppResourcePermissions = .none,
+        lifecycle: ToolGenerationLifecycle = .noop,
+        status: @escaping @MainActor (String) -> Void
+    ) async throws -> ToolGenerationResult {
+        try await generateTool(
+            for: prompt,
+            existingTool: existingTool,
+            settings: ToolGenerationSettings(
+                sandboxEnabled: sandboxEnabled,
+                sandboxPermissions: sandboxPermissions,
+                resourcePermissions: resourcePermissions
+            ),
+            lifecycle: lifecycle,
+            status: status
+        )
+    }
+
+    func generateTool(
+        for prompt: String,
+        existingTool: Tool? = nil,
+        settings: ToolGenerationSettings,
         lifecycle: ToolGenerationLifecycle = .noop,
         status: @escaping @MainActor (String) -> Void
     ) async throws -> ToolGenerationResult {
@@ -36,9 +57,7 @@ struct SingleFileToolGenerationRuntime {
                 return try await createTool(
                     prompt: effectivePrompt,
                     existingTool: existingTool,
-                    sandboxEnabled: sandboxEnabled,
-                    sandboxPermissions: sandboxPermissions,
-                    resourcePermissions: resourcePermissions,
+                    settings: settings,
                     lifecycle: lifecycle,
                     status: status
                 )
@@ -46,9 +65,7 @@ struct SingleFileToolGenerationRuntime {
             return try await editTool(
                 prompt: effectivePrompt,
                 existingTool: existingTool,
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions,
+                settings: settings,
                 lifecycle: lifecycle,
                 status: status
             )
@@ -56,9 +73,7 @@ struct SingleFileToolGenerationRuntime {
 
         return try await createTool(
             prompt: trimmedPrompt,
-            sandboxEnabled: sandboxEnabled,
-            sandboxPermissions: sandboxPermissions,
-            resourcePermissions: resourcePermissions,
+            settings: settings,
             lifecycle: lifecycle,
             status: status
         )
@@ -76,7 +91,10 @@ struct SingleFileToolGenerationRuntime {
         return fallback
     }
 
-    private func loadCreateSetup(for tool: Tool) throws -> CreateToolSetup {
+    private func loadCreateSetup(
+        for tool: Tool,
+        settings: ToolGenerationSettings
+    ) throws -> CreateToolSetup {
         let manifest = try context.loadManifest(at: tool.agentManifestURL)
         let layout = ToolPackageLayout(
             packageRootURL: tool.packageRootURL,
@@ -89,17 +107,19 @@ struct SingleFileToolGenerationRuntime {
             layout: layout,
             contentViewPath: manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName),
             manifest: manifest,
-            iconPrompt: nil
+            iconPrompt: nil,
+            settings: settings
         )
     }
 
     private func prepareNewCreateSetup(
         metadata: ToolMetadataSuggestion,
         prompt: String,
-        sandboxEnabled: Bool,
+        settings: ToolGenerationSettings,
         lifecycle: ToolGenerationLifecycle
     ) async throws -> CreateToolSetup {
         let displayName = metadata.displayName
+        let resolvedSettings = settings.withMenuBarSystemImage(metadata.menuBarSystemImage)
         let executableName = ToolNameSanitizer.executableName(from: displayName)
         let bundleIdentifier = ToolBundleIdentifier.make(executableName: executableName)
         let packageRootURL = try context.makeUniquePackageRoot(displayName: displayName)
@@ -118,14 +138,18 @@ struct SingleFileToolGenerationRuntime {
 
         try context.fileClient.createDirectory(layout.sourceDirectoryURL)
         try context.write(layout.packageManifestContent(), to: "Package.swift", packageRootURL: layout.packageRootURL)
-        try context.write(layout.fixedAppEntrySource(), to: layout.appEntrySourcePath, packageRootURL: layout.packageRootURL)
+        try context.write(
+            layout.fixedAppEntrySource(displayName: displayName, settings: resolvedSettings),
+            to: layout.appEntrySourcePath,
+            packageRootURL: layout.packageRootURL
+        )
         try context.writeManifest(manifest, packageRootURL: layout.packageRootURL)
         try await lifecycle.prepareCreatedTool(
             ToolGenerationPreparedTool(
                 name: displayName,
                 executableName: executableName,
                 bundleIdentifier: bundleIdentifier,
-                sandboxEnabled: sandboxEnabled,
+                settings: resolvedSettings,
                 packageRootURL: packageRootURL,
                 manifest: manifest
             ),
@@ -139,13 +163,14 @@ struct SingleFileToolGenerationRuntime {
             layout: layout,
             contentViewPath: contentViewPath,
             manifest: manifest,
-            iconPrompt: metadata.iconPrompt
+            iconPrompt: metadata.iconPrompt,
+            settings: resolvedSettings
         )
     }
 
     private func preparePlaceholderCreateTool(
         prompt: String,
-        sandboxEnabled: Bool,
+        settings: ToolGenerationSettings,
         lifecycle: ToolGenerationLifecycle
     ) async throws {
         let displayName = "New App"
@@ -168,7 +193,7 @@ struct SingleFileToolGenerationRuntime {
                 name: displayName,
                 executableName: executableName,
                 bundleIdentifier: ToolBundleIdentifier.make(executableName: executableName),
-                sandboxEnabled: sandboxEnabled,
+                settings: settings,
                 packageRootURL: packageRootURL,
                 manifest: manifest
             ),
@@ -179,22 +204,20 @@ struct SingleFileToolGenerationRuntime {
     private func createTool(
         prompt: String,
         existingTool: Tool? = nil,
-        sandboxEnabled: Bool,
-        sandboxPermissions: GeneratedAppSandboxPermissions,
-        resourcePermissions: GeneratedAppResourcePermissions,
+        settings: ToolGenerationSettings,
         lifecycle: ToolGenerationLifecycle,
         status: @escaping @MainActor (String) -> Void
     ) async throws -> ToolGenerationResult {
         let startingPhase = existingTool?.generationPhase ?? .initializing
         let setup: CreateToolSetup
-        if let existingTool, let resumedSetup = try? loadCreateSetup(for: existingTool) {
+        if let existingTool, let resumedSetup = try? loadCreateSetup(for: existingTool, settings: settings) {
             setup = resumedSetup
         } else {
             status("Naming app")
             if existingTool == nil {
                 try await preparePlaceholderCreateTool(
                     prompt: prompt,
-                    sandboxEnabled: sandboxEnabled,
+                    settings: settings,
                     lifecycle: lifecycle
                 )
             }
@@ -209,7 +232,7 @@ struct SingleFileToolGenerationRuntime {
             setup = try await prepareNewCreateSetup(
                 metadata: metadata,
                 prompt: prompt,
-                sandboxEnabled: sandboxEnabled,
+                settings: settings,
                 lifecycle: lifecycle
             )
         }
@@ -247,7 +270,7 @@ struct SingleFileToolGenerationRuntime {
             } else {
                 contentPrompt = try await contentGenerationPrompt(
                     for: prompt,
-                    sandboxEnabled: sandboxEnabled,
+                    sandboxEnabled: setup.settings.sandboxEnabled,
                     lifecycle: lifecycle
                 )
             }
@@ -259,9 +282,7 @@ struct SingleFileToolGenerationRuntime {
                     bundleIdentifier: setup.bundleIdentifier,
                     packageRootURL: setup.layout.packageRootURL,
                     manifest: setup.manifest,
-                    sandboxEnabled: sandboxEnabled,
-                    sandboxPermissions: sandboxPermissions,
-                    resourcePermissions: resourcePermissions,
+                    settings: setup.settings,
                     iconPrompt: setup.iconPrompt,
                     lifecycle: lifecycle,
                     status: status
@@ -270,7 +291,7 @@ struct SingleFileToolGenerationRuntime {
 
             let generator = createGenerator(
                 userPrompt: contentPrompt,
-                sandboxEnabled: sandboxEnabled,
+                sandboxEnabled: setup.settings.sandboxEnabled,
                 layout: setup.layout,
                 contentViewPath: setup.contentViewPath,
                 lifecycle: lifecycle,
@@ -292,9 +313,7 @@ struct SingleFileToolGenerationRuntime {
                 bundleIdentifier: setup.bundleIdentifier,
                 packageRootURL: setup.layout.packageRootURL,
                 manifest: setup.manifest,
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions,
+                settings: setup.settings,
                 iconPrompt: setup.iconPrompt,
                 lifecycle: lifecycle,
                 status: status
@@ -335,9 +354,7 @@ struct SingleFileToolGenerationRuntime {
     private func editTool(
         prompt: String,
         existingTool: Tool,
-        sandboxEnabled: Bool,
-        sandboxPermissions: GeneratedAppSandboxPermissions,
-        resourcePermissions: GeneratedAppResourcePermissions,
+        settings: ToolGenerationSettings,
         lifecycle: ToolGenerationLifecycle,
         status: @escaping @MainActor (String) -> Void
     ) async throws -> ToolGenerationResult {
@@ -358,15 +375,17 @@ struct SingleFileToolGenerationRuntime {
                 bundleIdentifier: existingTool.bundleIdentifier,
                 packageRootURL: existingTool.packageRootURL,
                 manifest: manifest,
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions,
+                settings: settings,
                 iconPrompt: nil,
                 lifecycle: lifecycle,
                 status: status
             )
         }
         let existingSource = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
+        let existingAppEntrySource = try context.readIfPresent(
+            layout.appEntrySourcePath,
+            packageRootURL: layout.packageRootURL
+        )
         let backup = try context.versionBackupClient.stageCurrentVersion(layout.packageRootURL, contentViewPath)
 
         AgentDiagnosticsLog.append(
@@ -384,6 +403,11 @@ struct SingleFileToolGenerationRuntime {
 
         do {
             try Task.checkCancellation()
+            try context.write(
+                layout.fixedAppEntrySource(displayName: manifest.displayName, settings: settings),
+                to: layout.appEntrySourcePath,
+                packageRootURL: layout.packageRootURL
+            )
             try context.writeManifest(manifest, packageRootURL: layout.packageRootURL)
             let generator = editGenerator(
                 userPrompt: prompt,
@@ -412,15 +436,15 @@ struct SingleFileToolGenerationRuntime {
                     executableName: manifest.executableName,
                     bundleIdentifier: existingTool.bundleIdentifier,
                     packageRootURL: existingTool.packageRootURL,
-                    sandboxEnabled: sandboxEnabled,
-                    sandboxPermissions: sandboxPermissions,
-                    resourcePermissions: resourcePermissions
+                    sandboxEnabled: settings.sandboxEnabled,
+                    settings: settings
                 )
             )
             try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             try context.versionBackupClient.promoteStagedVersion(backup)
         } catch {
             try? context.write(existingSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            try? context.write(existingAppEntrySource, to: layout.appEntrySourcePath, packageRootURL: layout.packageRootURL)
             try? context.versionBackupClient.discardStagedVersion(backup)
             AgentDiagnosticsLog.append(
                 """
@@ -441,7 +465,7 @@ struct SingleFileToolGenerationRuntime {
             toolName: manifest.displayName,
             executableName: manifest.executableName,
             bundleIdentifier: existingTool.bundleIdentifier,
-            sandboxEnabled: sandboxEnabled,
+            settings: settings,
             packageRootURL: existingTool.packageRootURL,
             manifest: manifest
         )
@@ -795,9 +819,7 @@ struct SingleFileToolGenerationRuntime {
         bundleIdentifier: String,
         packageRootURL: URL,
         manifest: ToolManifest,
-        sandboxEnabled: Bool,
-        sandboxPermissions: GeneratedAppSandboxPermissions,
-        resourcePermissions: GeneratedAppResourcePermissions,
+        settings: ToolGenerationSettings,
         iconPrompt: String?,
         lifecycle: ToolGenerationLifecycle,
         status: @escaping @MainActor (String) -> Void
@@ -817,9 +839,8 @@ struct SingleFileToolGenerationRuntime {
                 executableName: executableName,
                 bundleIdentifier: bundleIdentifier,
                 packageRootURL: packageRootURL,
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions,
+                sandboxEnabled: settings.sandboxEnabled,
+                settings: settings,
                 iconPrompt: iconPrompt
             )
         )
@@ -829,7 +850,7 @@ struct SingleFileToolGenerationRuntime {
             toolName: displayName,
             executableName: executableName,
             bundleIdentifier: bundleIdentifier,
-            sandboxEnabled: sandboxEnabled,
+            settings: settings,
             packageRootURL: packageRootURL,
             manifest: manifest
         )

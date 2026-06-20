@@ -8,12 +8,18 @@ import SwiftUI
 struct PromptComposerView: View {
     @Binding var prompt: String
     @Binding var sandboxEnabled: Bool
+    @Binding var appKind: ToolAppKind
+    @Binding var sandboxPermissions: GeneratedAppSandboxPermissions
+    @Binding var resourcePermissions: GeneratedAppResourcePermissions
+    let usesToolPermissionSettings: Bool
+    let generationPreferences: GenerationPreferencesStore
     let placeholder: String
-    let showsSandboxToggle: Bool
+    let showsSandboxControl: Bool
     let isSubmitEnabled: Bool
     let isSubmitting: Bool
     let onSubmit: () -> Void
     let onCancel: () -> Void
+    @State private var pendingPermission: GeneratedAppResourcePermission?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -31,20 +37,7 @@ struct PromptComposerView: View {
                 .accessibilityIdentifier("tool-prompt-field")
 
             HStack {
-                if showsSandboxToggle {
-                    Toggle(isOn: $sandboxEnabled) {
-                        HStack(spacing: 4) {
-                            Image(systemName: sandboxEnabled ? "lock.fill" : "lock.open.fill")
-                                .frame(width: 14, alignment: .center)
-                                .accessibilityHidden(true)
-                            Text(sandboxLabel)
-                        }
-                    }
-                    .toggleStyle(.switch)
-                    .font(.caption)
-                    .disabled(isSubmitting)
-                    .help(sandboxHelpText)
-                }
+                generationSettingsMenu
 
                 Spacer()
 
@@ -76,6 +69,71 @@ struct PromptComposerView: View {
                 .accessibilityIdentifier(isSubmitting ? "stop-generation-button" : "submit-generation-button")
             }
         }
+        .alert(
+            pendingPermission?.enablementWarningTitle ?? "Allow Access?",
+            isPresented: Binding(
+                get: { pendingPermission != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingPermission = nil
+                    }
+                }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                pendingPermission = nil
+            }
+            Button("Enable") {
+                if let pendingPermission {
+                    setResourcePermission(pendingPermission, enabled: true)
+                }
+                pendingPermission = nil
+            }
+        } message: {
+            Text(pendingPermission?.enablementWarningMessage ?? "")
+        }
+    }
+
+    private var generationSettingsMenu: some View {
+        Menu {
+            Picker("App Type", selection: $appKind) {
+                ForEach(ToolAppKind.allCases, id: \.self) { kind in
+                    Label(kind.displayName, systemImage: kind == .menuBar ? "menubar.rectangle" : "macwindow")
+                        .tag(kind)
+                }
+            }
+
+            if showsSandboxControl {
+                Divider()
+                Toggle(isOn: $sandboxEnabled) {
+                    Label(sandboxLabel, systemImage: sandboxEnabled ? "lock.fill" : "lock.open.fill")
+                }
+                .help(sandboxHelpText)
+            }
+
+            Divider()
+
+            Section("General Access") {
+                ForEach(GeneratedAppResourcePermission.allCases) { permission in
+                    Toggle(permission.displayName, isOn: resourcePermissionBinding(for: permission))
+                }
+            }
+
+            Section("Sandbox Access") {
+                ForEach(GeneratedAppSandboxPermission.allCases) { permission in
+                    Toggle(permission.displayName, isOn: sandboxPermissionBinding(for: permission))
+                }
+            }
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain)
+        .help("Generation settings")
+        .accessibilityLabel("Generation settings")
+        .accessibilityIdentifier("generation-settings-menu")
+        .disabled(isSubmitting)
     }
 
     private var submitButtonForegroundStyle: some ShapeStyle {
@@ -99,14 +157,79 @@ struct PromptComposerView: View {
             ? "Generated apps will include App Sandbox entitlements."
             : "Generated apps will be built without App Sandbox entitlements."
     }
+
+    private func resourcePermissionBinding(for permission: GeneratedAppResourcePermission) -> Binding<Bool> {
+        Binding(
+            get: { currentResourcePermissions.contains(permission) },
+            set: { isEnabled in
+                if isEnabled, permission.enablementWarningMessage != nil {
+                    pendingPermission = permission
+                } else {
+                    setResourcePermission(permission, enabled: isEnabled)
+                }
+            }
+        )
+    }
+
+    private func sandboxPermissionBinding(for permission: GeneratedAppSandboxPermission) -> Binding<Bool> {
+        Binding(
+            get: { currentSandboxPermissions.contains(permission) },
+            set: { setSandboxPermission(permission, enabled: $0) }
+        )
+    }
+
+    private var currentResourcePermissions: GeneratedAppResourcePermissions {
+        usesToolPermissionSettings
+            ? resourcePermissions
+            : generationPreferences.generatedAppResourcePermissions
+    }
+
+    private var currentSandboxPermissions: GeneratedAppSandboxPermissions {
+        usesToolPermissionSettings
+            ? sandboxPermissions
+            : generationPreferences.generatedAppSandboxPermissions
+    }
+
+    private func setResourcePermission(_ permission: GeneratedAppResourcePermission, enabled: Bool) {
+        if usesToolPermissionSettings {
+            var updated = resourcePermissions
+            if enabled {
+                updated.enabled.insert(permission)
+            } else {
+                updated.enabled.remove(permission)
+            }
+            resourcePermissions = updated
+        } else {
+            generationPreferences.setGeneratedAppResourcePermission(permission, enabled: enabled)
+        }
+    }
+
+    private func setSandboxPermission(_ permission: GeneratedAppSandboxPermission, enabled: Bool) {
+        if usesToolPermissionSettings {
+            var updated = sandboxPermissions
+            if enabled {
+                updated.enabled.insert(permission)
+            } else {
+                updated.enabled.remove(permission)
+            }
+            sandboxPermissions = updated
+        } else {
+            generationPreferences.setGeneratedAppSandboxPermission(permission, enabled: enabled)
+        }
+    }
 }
 
 #Preview("Create Prompt") {
     PromptComposerView(
         prompt: .constant(""),
         sandboxEnabled: .constant(true),
+        appKind: .constant(.window),
+        sandboxPermissions: .constant(.default),
+        resourcePermissions: .constant(.none),
+        usesToolPermissionSettings: false,
+        generationPreferences: GenerationPreferencesStore(),
         placeholder: "Describe a new app to build…",
-        showsSandboxToggle: false,
+        showsSandboxControl: false,
         isSubmitEnabled: false,
         isSubmitting: false,
         onSubmit: {},
@@ -120,8 +243,13 @@ struct PromptComposerView: View {
     PromptComposerView(
         prompt: .constant(""),
         sandboxEnabled: .constant(false),
+        appKind: .constant(.menuBar),
+        sandboxPermissions: .constant(.default),
+        resourcePermissions: .constant(GeneratedAppResourcePermissions([.camera])),
+        usesToolPermissionSettings: true,
+        generationPreferences: GenerationPreferencesStore(),
         placeholder: "Describe changes for Clipboard Cleaner…",
-        showsSandboxToggle: true,
+        showsSandboxControl: true,
         isSubmitEnabled: true,
         isSubmitting: false,
         onSubmit: {},

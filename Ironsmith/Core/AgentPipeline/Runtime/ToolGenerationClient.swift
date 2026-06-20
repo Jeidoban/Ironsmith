@@ -4,9 +4,30 @@ struct ToolGenerationPreparedTool {
     let name: String
     let executableName: String
     let bundleIdentifier: String
-    let sandboxEnabled: Bool
+    let settings: ToolGenerationSettings
     let packageRootURL: URL
     let manifest: ToolManifest
+
+    var sandboxEnabled: Bool {
+        settings.sandboxEnabled
+    }
+
+    init(
+        name: String,
+        executableName: String,
+        bundleIdentifier: String,
+        sandboxEnabled: Bool = true,
+        settings: ToolGenerationSettings? = nil,
+        packageRootURL: URL,
+        manifest: ToolManifest
+    ) {
+        self.name = name
+        self.executableName = executableName
+        self.bundleIdentifier = bundleIdentifier
+        self.settings = settings ?? ToolGenerationSettings(sandboxEnabled: sandboxEnabled)
+        self.packageRootURL = packageRootURL
+        self.manifest = manifest
+    }
 }
 
 struct ToolGenerationLifecycle {
@@ -53,13 +74,29 @@ struct ToolGenerationClient {
     private var generateToolWithLifecycle: (
         _ prompt: String,
         _ existingTool: Tool?,
-        _ sandboxEnabled: Bool,
-        _ sandboxPermissions: GeneratedAppSandboxPermissions,
-        _ resourcePermissions: GeneratedAppResourcePermissions,
+        _ settings: ToolGenerationSettings,
         _ languageModelContext: AgentLanguageModelContext,
         _ lifecycle: ToolGenerationLifecycle,
         _ status: @escaping @MainActor (String) -> Void
     ) async throws -> ToolGenerationResult
+
+    func generateTool(
+        _ prompt: String,
+        _ existingTool: Tool?,
+        _ settings: ToolGenerationSettings,
+        _ languageModelContext: AgentLanguageModelContext,
+        lifecycle: ToolGenerationLifecycle = .noop,
+        status: @escaping @MainActor (String) -> Void
+    ) async throws -> ToolGenerationResult {
+        try await generateToolWithLifecycle(
+            prompt,
+            existingTool,
+            settings,
+            languageModelContext,
+            lifecycle,
+            status
+        )
+    }
 
     func generateTool(
         _ prompt: String,
@@ -71,15 +108,17 @@ struct ToolGenerationClient {
         lifecycle: ToolGenerationLifecycle = .noop,
         status: @escaping @MainActor (String) -> Void
     ) async throws -> ToolGenerationResult {
-        try await generateToolWithLifecycle(
+        try await generateTool(
             prompt,
             existingTool,
-            sandboxEnabled,
-            sandboxPermissions,
-            resourcePermissions,
+            ToolGenerationSettings(
+                sandboxEnabled: sandboxEnabled,
+                sandboxPermissions: sandboxPermissions,
+                resourcePermissions: resourcePermissions
+            ),
             languageModelContext,
-            lifecycle,
-            status
+            lifecycle: lifecycle,
+            status: status
         )
     }
 
@@ -97,18 +136,16 @@ struct ToolGenerationClient {
         self.generateToolWithLifecycle = {
             prompt,
             existingTool,
-            sandboxEnabled,
-            sandboxPermissions,
-            resourcePermissions,
+            settings,
             languageModelContext,
             _,
             status in
             try await generateTool(
                 prompt,
                 existingTool,
-                sandboxEnabled,
-                sandboxPermissions,
-                resourcePermissions,
+                settings.sandboxEnabled,
+                settings.sandboxPermissions,
+                settings.resourcePermissions,
                 languageModelContext,
                 status
             )
@@ -127,6 +164,36 @@ struct ToolGenerationClient {
             _ status: @escaping @MainActor (String) -> Void
         ) async throws -> ToolGenerationResult
     ) {
+        self.generateToolWithLifecycle = {
+            prompt,
+            existingTool,
+            settings,
+            languageModelContext,
+            lifecycle,
+            status in
+            try await generateTool(
+                prompt,
+                existingTool,
+                settings.sandboxEnabled,
+                settings.sandboxPermissions,
+                settings.resourcePermissions,
+                languageModelContext,
+                lifecycle,
+                status
+            )
+        }
+    }
+
+    init(
+        withLifecycle generateTool: @escaping (
+            _ prompt: String,
+            _ existingTool: Tool?,
+            _ settings: ToolGenerationSettings,
+            _ languageModelContext: AgentLanguageModelContext,
+            _ lifecycle: ToolGenerationLifecycle,
+            _ status: @escaping @MainActor (String) -> Void
+        ) async throws -> ToolGenerationResult
+    ) {
         self.generateToolWithLifecycle = generateTool
     }
 
@@ -140,7 +207,7 @@ struct ToolGenerationClient {
         promptRefinementClient: ToolPromptRefinementClient = .live(),
         versionBackupClient: ToolVersionBackupClient = .live
     ) -> Self {
-        Self(withLifecycle: { prompt, existingTool, sandboxEnabled, sandboxPermissions, resourcePermissions, languageModelContext, lifecycle, status in
+        Self(withLifecycle: { prompt, existingTool, settings, languageModelContext, lifecycle, status in
             let context = ToolGenerationRuntimeContext(
                 languageModel: languageModelContext.languageModel,
                 metadataLanguageModel: languageModelContext.metadataLanguageModel,
@@ -161,9 +228,7 @@ struct ToolGenerationClient {
             return try await runtime.generateTool(
                 for: prompt,
                 existingTool: existingTool,
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions,
+                settings: settings,
                 lifecycle: lifecycle,
                 status: status
             )
