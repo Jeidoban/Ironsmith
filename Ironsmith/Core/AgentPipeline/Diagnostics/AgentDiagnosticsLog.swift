@@ -11,10 +11,10 @@ enum AgentDiagnosticsLog {
 
     nonisolated static func append(
         _ message: String,
-        to logURL: URL = defaultURL
+        to logURL: URL = defaultURL,
+        userDefaults: UserDefaults = .standard
     ) {
-#if DEBUG
-        guard shouldWrite(to: logURL) else {
+        guard shouldWrite(to: logURL, userDefaults: userDefaults) else {
             return
         }
 
@@ -41,7 +41,6 @@ enum AgentDiagnosticsLog {
         } catch {
             print("[Ironsmith][DiagnosticsLog] Failed to append diagnostics: \(error.localizedDescription)")
         }
-#endif
     }
 
     nonisolated static func renderDiagnostics(
@@ -259,11 +258,14 @@ enum AgentDiagnosticsLog {
         return lines
     }
 
-    nonisolated private static func shouldWrite(to logURL: URL) -> Bool {
+    nonisolated private static func shouldWrite(
+        to logURL: URL,
+        userDefaults: UserDefaults
+    ) -> Bool {
         if IronsmithRuntimeEnvironment.isRunningTests, logURL == defaultURL {
             return false
         }
 
-        return true
+        return userDefaults.bool(forKey: IronsmithPreferenceKeys.diagnosticsLoggingEnabled)
     }
 }

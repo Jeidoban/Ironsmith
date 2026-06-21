@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsPreferencesSectionView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
+    @AppStorage(IronsmithPreferenceKeys.diagnosticsLoggingEnabled) private var diagnosticsLoggingEnabled = false
     @State private var isConfirmingUnsandboxedTools = false
 
     var body: some View {
@@ -36,6 +37,21 @@ struct SettingsPreferencesSectionView: View {
                             + "You should always read the source code of any unsandboxed app before using it."
                     )
                 }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(
+                    "Write generation diagnostics log",
+                    isOn: $diagnosticsLoggingEnabled
+                )
+                .toggleStyle(.switch)
+
+                Text(
+                    "Records detailed generation logs to a file on disk so you can share "
+                        + "them when reporting a problem. Off by default."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         } header: {
             Text("Preferences")
         }
