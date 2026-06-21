@@ -111,6 +111,13 @@ extension AgentPipelineTests {
         }
     }
 
+    static func makeIsolatedUserDefaults() throws -> UserDefaults {
+        let suiteName = "IronsmithTests.AgentPipeline.DiagnosticsLog.\(UUID().uuidString)"
+        let userDefaults = try #require(UserDefaults(suiteName: suiteName))
+        userDefaults.removePersistentDomain(forName: suiteName)
+        return userDefaults
+    }
+
     static func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ironsmith-agent-tests-\(UUID().uuidString)", isDirectory: true)
