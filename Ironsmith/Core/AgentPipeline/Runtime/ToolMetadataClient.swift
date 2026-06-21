@@ -173,6 +173,7 @@ struct ToolMetadataClient: Sendable {
 
 struct ToolPromptRefinementRequest: Sendable {
     let userPrompt: String
+    let appKind: ToolAppKind
     let sandboxEnabled: Bool
     let languageModel: any LanguageModel
     let generationOptions: GenerationOptions
@@ -200,11 +201,13 @@ struct ToolPromptRefinementClient: Sendable {
         userPrompt: String,
         languageModel: any LanguageModel,
         generationOptions: GenerationOptions,
+        appKind: ToolAppKind = .window,
         sandboxEnabled: Bool = true
     ) async -> String? {
         await refinePromptForRequest(
             ToolPromptRefinementRequest(
                 userPrompt: userPrompt,
+                appKind: appKind,
                 sandboxEnabled: sandboxEnabled,
                 languageModel: languageModel,
                 generationOptions: generationOptions
@@ -226,6 +229,7 @@ struct ToolPromptRefinementClient: Sendable {
                 let response: LanguageModelSession.Response<String> = try await session.respond(
                     to: Self.promptRefinementPrompt(
                         for: request.userPrompt,
+                        appKind: request.appKind,
                         sandboxEnabled: request.sandboxEnabled
                     ),
                     options: Self.promptRefinementOptions(from: request.generationOptions)
@@ -266,10 +270,13 @@ struct ToolPromptRefinementClient: Sendable {
 
     nonisolated private static func promptRefinementPrompt(
         for userPrompt: String,
+        appKind: ToolAppKind,
         sandboxEnabled: Bool
     ) -> String {
         """
         Return a plain text prompt to be given to a macOS SwiftUI AI coding agent for the user's request below.
+
+        \(ToolGenerationPrompts.appPresentationContext(appKind: appKind))
 
         \(ToolGenerationPrompts.sandboxContext(sandboxEnabled: sandboxEnabled))
 
@@ -294,6 +301,9 @@ struct ToolPromptRefinementClient: Sendable {
         - Must be under 750 characters.
         - Should expand the user's request with specific product intent, core features, expected interactions, layout and visual design direction, and useful states such as empty, loading, complete, or error states when relevant.
         - Treat every request as a first-version prototype unless the user explicitly asks for a full-featured app.
+        - Must preserve whether the generated app is a window app or menu bar app.
+        - For menu bar apps, describe a compact menu bar popover utility with concise controls, short labels, bounded size, and a focused quick workflow. Do not expand the request into a full-size desktop app, dashboard, sidebar layout, multi-pane workflow, or large complicated UI.
+        - For window apps, describe a normal native macOS window app layout when appropriate.
         - Choose at most 3 core user-facing features.
         - If the user lists many features, preserve the most important ones and explicitly simplify or omit the rest.
         - Prefer one polished primary workflow over many secondary workflows.

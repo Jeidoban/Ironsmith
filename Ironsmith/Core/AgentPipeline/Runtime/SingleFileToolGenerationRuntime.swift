@@ -270,6 +270,7 @@ struct SingleFileToolGenerationRuntime {
             } else {
                 contentPrompt = try await contentGenerationPrompt(
                     for: prompt,
+                    appKind: setup.settings.appKind,
                     sandboxEnabled: setup.settings.sandboxEnabled,
                     lifecycle: lifecycle
                 )
@@ -291,6 +292,7 @@ struct SingleFileToolGenerationRuntime {
 
             let generator = createGenerator(
                 userPrompt: contentPrompt,
+                appKind: setup.settings.appKind,
                 sandboxEnabled: setup.settings.sandboxEnabled,
                 layout: setup.layout,
                 contentViewPath: setup.contentViewPath,
@@ -328,6 +330,7 @@ struct SingleFileToolGenerationRuntime {
 
     private func contentGenerationPrompt(
         for prompt: String,
+        appKind: ToolAppKind,
         sandboxEnabled: Bool,
         lifecycle: ToolGenerationLifecycle
     ) async throws -> String {
@@ -341,6 +344,7 @@ struct SingleFileToolGenerationRuntime {
             userPrompt: prompt,
             languageModel: context.languageModel,
             generationOptions: context.generationOptions,
+            appKind: appKind,
             sandboxEnabled: sandboxEnabled
         )
         try Task.checkCancellation()
@@ -531,6 +535,7 @@ struct SingleFileToolGenerationRuntime {
 
     private func createGenerator(
         userPrompt: String,
+        appKind: ToolAppKind,
         sandboxEnabled: Bool,
         layout: ToolPackageLayout,
         contentViewPath: String,
@@ -543,7 +548,8 @@ struct SingleFileToolGenerationRuntime {
         let originalPrompt = ToolGenerationPrompts.singleFileCreatePrompt(
             userPrompt: userPrompt,
             executableName: layout.executableName,
-            sandboxEnabled: sandboxEnabled
+            sandboxEnabled: sandboxEnabled,
+            appKind: appKind
         )
 
         return ContentViewCandidateGenerator(
@@ -596,6 +602,7 @@ struct SingleFileToolGenerationRuntime {
 
             try await regenerateCreatedContentView(
                 userPrompt: userPrompt,
+                appKind: appKind,
                 sandboxEnabled: sandboxEnabled,
                 layout: layout,
                 contentViewPath: contentViewPath,
@@ -931,6 +938,7 @@ struct SingleFileToolGenerationRuntime {
 
     private func regenerateCreatedContentView(
         userPrompt: String,
+        appKind: ToolAppKind,
         sandboxEnabled: Bool,
         layout: ToolPackageLayout,
         contentViewPath: String,
@@ -940,7 +948,8 @@ struct SingleFileToolGenerationRuntime {
         let prompt = ToolGenerationPrompts.singleFileCreatePrompt(
             userPrompt: userPrompt,
             executableName: layout.executableName,
-            sandboxEnabled: sandboxEnabled
+            sandboxEnabled: sandboxEnabled,
+            appKind: appKind
         )
         let draftPath = ToolPackageLayout.pendingContentViewDraftPath
         do {
