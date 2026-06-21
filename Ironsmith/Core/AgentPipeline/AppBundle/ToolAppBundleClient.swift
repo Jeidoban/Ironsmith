@@ -35,6 +35,7 @@ struct ToolAppBundleClient {
                     request: request,
                     destinationAppURL: request.internalAppBundleURL,
                     showsInDock: false,
+                    quitsOnLastWindowClose: request.appKind == .window,
                     fileManager: fileManager,
                     fileClient: fileClient,
                     processClient: processClient,
@@ -51,6 +52,7 @@ struct ToolAppBundleClient {
                     request: request,
                     destinationAppURL: destinationURL,
                     showsInDock: request.appKind == .window,
+                    quitsOnLastWindowClose: false,
                     fileManager: fileManager,
                     fileClient: fileClient,
                     processClient: processClient,
@@ -70,11 +72,20 @@ struct ToolAppBundleClient {
         request: ToolAppBundleRequest,
         destinationAppURL: URL,
         showsInDock: Bool,
+        quitsOnLastWindowClose: Bool,
         fileManager: FileManager,
         fileClient: AgentFileClient,
         processClient: SwiftPackageProcessClient,
         iconClient: ToolIconClient
     ) async throws -> URL {
+        let appEntryURL = try request.layout.packageFileURL(for: request.layout.appEntrySourcePath)
+        try fileManager.createDirectory(
+            at: appEntryURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try request.layout.fixedAppEntrySource(displayName: request.displayName, settings: request.settings)
+            .write(to: appEntryURL, atomically: true, encoding: .utf8)
+
         let buildResult = try await processClient.buildRelease(request.packageRootURL)
         guard buildResult.succeeded else {
             throw ToolAppBundleError.releaseBuildFailed(buildResult.combinedOutput)
@@ -121,6 +132,7 @@ struct ToolAppBundleClient {
             for: request,
             to: infoPlistURL,
             showsInDock: showsInDock,
+            quitsOnLastWindowClose: quitsOnLastWindowClose,
             iconFileName: iconFileName
         )
 
@@ -237,6 +249,7 @@ struct ToolAppBundleClient {
         for request: ToolAppBundleRequest,
         to url: URL,
         showsInDock: Bool,
+        quitsOnLastWindowClose: Bool,
         iconFileName: String?
     ) throws {
         var plist: [String: Any] = [
@@ -259,6 +272,10 @@ struct ToolAppBundleClient {
 
         if !showsInDock {
             plist["LSUIElement"] = true
+        }
+
+        if quitsOnLastWindowClose {
+            plist["IronsmithQuitOnLastWindowClose"] = true
         }
 
         for permission in request.resourcePermissions.enabledPermissions {

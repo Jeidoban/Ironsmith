@@ -86,10 +86,35 @@ extension AgentPipelineTests {
             settings: ToolGenerationSettings(appKind: .menuBar, menuBarSystemImage: "timer")
         )
 
+        #expect(source.contains("import AppKit"))
         #expect(source.contains("MenuBarExtra(\"Menu Timer\", systemImage: \"timer\")"))
+        #expect(source.contains("Text(\"Menu Timer\")"))
+        #expect(source.contains(".truncationMode(.tail)"))
+        #expect(source.contains("NSApplication.shared.terminate(nil)"))
+        #expect(source.contains(".accessibilityLabel(\"Quit\")"))
         #expect(source.contains("ContentView()"))
+        #expect(source.contains(".padding(.bottom, 12)"))
+        #expect(source.contains(".padding(.horizontal, 12)"))
         #expect(source.contains(".menuBarExtraStyle(.window)"))
         #expect(!(source.contains("WindowGroup")))
+    }
+
+    @MainActor
+    @Test
+    func fixedWindowAppEntrySourceQuitsInternalBuildsAfterLastWindowCloses() {
+        let layout = ToolPackageLayout(
+            packageRootURL: URL(fileURLWithPath: "/tmp/WindowTimer", isDirectory: true),
+            executableName: "WindowTimer"
+        )
+        let source = layout.fixedAppEntrySource(settings: ToolGenerationSettings(appKind: .window))
+
+        #expect(source.contains("import AppKit"))
+        #expect(source.contains("IronsmithGeneratedAppDelegate"))
+        #expect(source.contains("applicationShouldTerminateAfterLastWindowClosed"))
+        #expect(source.contains("IronsmithQuitOnLastWindowClose"))
+        #expect(source.contains("WindowGroup"))
+        #expect(source.contains("ContentView()"))
+        #expect(!(source.contains("MenuBarExtra")))
     }
 
     @MainActor
@@ -276,11 +301,18 @@ extension AgentPipelineTests {
 
         let plist = try Self.plistDictionary(at: appURL.appendingPathComponent("Contents/Info.plist"))
         let entitlements = try Self.plistDictionary(at: request.layout.sandboxEntitlementsURL)
+        let appEntrySource = try String(
+            contentsOf: request.layout.sourceDirectoryURL.appendingPathComponent("SandboxedTool.swift"),
+            encoding: .utf8
+        )
         #expect(appURL == request.internalAppBundleURL)
         #expect(appURL.lastPathComponent == "Sandboxed Tool.app")
         #expect(plist["CFBundleIdentifier"] as? String == request.bundleIdentifier)
         #expect(plist["CFBundleExecutable"] as? String == request.executableName)
         #expect(plist["LSUIElement"] as? Bool == true)
+        #expect(plist["IronsmithQuitOnLastWindowClose"] as? Bool == true)
+        #expect(appEntrySource.contains("IronsmithGeneratedAppDelegate"))
+        #expect(appEntrySource.contains("IronsmithQuitOnLastWindowClose"))
         #expect(entitlements["com.apple.security.app-sandbox"] as? Bool == true)
         #expect(entitlements["com.apple.security.files.user-selected.read-write"] as? Bool == true)
         #expect(entitlements["com.apple.security.network.client"] as? Bool == true)
@@ -503,6 +535,7 @@ extension AgentPipelineTests {
         #expect(appURL == applicationsDirectory.appendingPathComponent("Exported Tool.app", isDirectory: true))
         #expect(plist["CFBundleIdentifier"] as? String == request.bundleIdentifier)
         #expect(plist["LSUIElement"] == nil)
+        #expect(plist["IronsmithQuitOnLastWindowClose"] == nil)
         #expect(plist["NSContactsUsageDescription"] as? String == GeneratedAppResourcePermission.contacts.usageDescription)
         #expect(plist["NSPhotoLibraryUsageDescription"] as? String == GeneratedAppResourcePermission.photoLibrary.usageDescription)
         #expect(plist["NSPhotoLibraryAddUsageDescription"] as? String == GeneratedAppResourcePermission.photoLibrary.usageDescription)
@@ -563,6 +596,7 @@ extension AgentPipelineTests {
 
         let plist = try Self.plistDictionary(at: appURL.appendingPathComponent("Contents/Info.plist"))
         #expect(plist["LSUIElement"] as? Bool == true)
+        #expect(plist["IronsmithQuitOnLastWindowClose"] == nil)
     }
 
     @MainActor

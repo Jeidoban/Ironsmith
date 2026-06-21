@@ -48,6 +48,109 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func toolLibraryStoreKeepsNextGenerationSettingsInMemoryAcrossSelection() {
+        let toolLibraryState = ToolLibraryStore()
+        let tool = Tool(
+            name: "Window Tool",
+            sandboxEnabled: true,
+            appKind: .window,
+            sandboxPermissions: GeneratedAppSandboxPermissions.none,
+            resourcePermissions: GeneratedAppResourcePermissions.none,
+            packageRootPath: "/tmp/window-tool"
+        )
+        let defaults = ToolGenerationSettings(
+            sandboxPermissions: GeneratedAppSandboxPermissions([.userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions([.location])
+        )
+
+        toolLibraryState.initializeNextGenerationSettingsIfNeeded(defaults)
+        toolLibraryState.appKind = .menuBar
+        toolLibraryState.sandboxEnabled = false
+        toolLibraryState.sandboxPermissions = GeneratedAppSandboxPermissions([.internet])
+        toolLibraryState.resourcePermissions = GeneratedAppResourcePermissions([.camera])
+        toolLibraryState.rememberCurrentGenerationSettingsForNextGeneration()
+
+        toolLibraryState.toggleSelection(for: tool, defaultSettings: defaults)
+
+        #expect(toolLibraryState.isSelected(tool))
+        #expect(toolLibraryState.appKind == .window)
+        #expect(toolLibraryState.sandboxEnabled)
+        #expect(toolLibraryState.sandboxPermissions.enabled.isEmpty)
+        #expect(toolLibraryState.resourcePermissions.enabled.isEmpty)
+
+        toolLibraryState.toggleSelection(for: tool, defaultSettings: defaults)
+
+        #expect(!(toolLibraryState.isSelected(tool)))
+        #expect(toolLibraryState.appKind == .menuBar)
+        #expect(!(toolLibraryState.sandboxEnabled))
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.internet])
+        #expect(toolLibraryState.resourcePermissions.enabled == [.camera])
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreSelectedToolChangesBecomeNextGenerationSettings() {
+        let toolLibraryState = ToolLibraryStore()
+        let tool = Tool(
+            name: "Menu Tool",
+            sandboxEnabled: false,
+            appKind: .menuBar,
+            menuBarSystemImage: "timer",
+            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            resourcePermissions: GeneratedAppResourcePermissions([.camera]),
+            packageRootPath: "/tmp/menu-tool"
+        )
+        let defaults = ToolGenerationSettings(
+            sandboxPermissions: GeneratedAppSandboxPermissions([.userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions([.location])
+        )
+
+        toolLibraryState.selectForEditing(tool, defaultSettings: defaults)
+        toolLibraryState.sandboxEnabled = true
+        toolLibraryState.resourcePermissions = GeneratedAppResourcePermissions([.microphone])
+        toolLibraryState.rememberCurrentGenerationSettingsForNextGeneration()
+
+        toolLibraryState.toggleSelection(for: tool, defaultSettings: defaults)
+
+        #expect(!(toolLibraryState.isSelected(tool)))
+        #expect(toolLibraryState.appKind == .menuBar)
+        #expect(toolLibraryState.menuBarSystemImage == "timer")
+        #expect(toolLibraryState.sandboxEnabled)
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.internet])
+        #expect(toolLibraryState.resourcePermissions.enabled == [.microphone])
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreSettingsDefaultsOnlySeedNextGenerationUntilCustomized() {
+        let toolLibraryState = ToolLibraryStore()
+        let initialDefaults = ToolGenerationSettings(
+            sandboxPermissions: GeneratedAppSandboxPermissions([.userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions([.location])
+        )
+        let updatedDefaults = ToolGenerationSettings(
+            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            resourcePermissions: GeneratedAppResourcePermissions([.camera])
+        )
+
+        toolLibraryState.initializeNextGenerationSettingsIfNeeded(initialDefaults)
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.userSelectedFiles])
+        #expect(toolLibraryState.resourcePermissions.enabled == [.location])
+
+        toolLibraryState.initializeNextGenerationSettingsIfNeeded(updatedDefaults)
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.internet])
+        #expect(toolLibraryState.resourcePermissions.enabled == [.camera])
+
+        toolLibraryState.resourcePermissions = GeneratedAppResourcePermissions([.microphone])
+        toolLibraryState.rememberCurrentGenerationSettingsForNextGeneration()
+        toolLibraryState.initializeNextGenerationSettingsIfNeeded(initialDefaults)
+
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.internet])
+        #expect(toolLibraryState.resourcePermissions.enabled == [.microphone])
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStoreSyncSelectionIsNoOpWhenNothingSelected() {
         let toolLibraryState = ToolLibraryStore()
         let tool = Tool(name: "Formatter", packageRootPath: "/tmp/formatter")

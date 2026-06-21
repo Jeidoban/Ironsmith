@@ -11,8 +11,6 @@ struct PromptComposerView: View {
     @Binding var appKind: ToolAppKind
     @Binding var sandboxPermissions: GeneratedAppSandboxPermissions
     @Binding var resourcePermissions: GeneratedAppResourcePermissions
-    let usesToolPermissionSettings: Bool
-    let generationPreferences: GenerationPreferencesStore
     let placeholder: String
     let showsSandboxControl: Bool
     let isSubmitEnabled: Bool
@@ -105,23 +103,23 @@ struct PromptComposerView: View {
 
             if showsSandboxControl {
                 Divider()
-                Toggle(isOn: $sandboxEnabled) {
-                    Label(sandboxLabel, systemImage: sandboxEnabled ? "lock.fill" : "lock.open.fill")
-                }
+                Toggle("Sandbox Enabled", isOn: $sandboxEnabled)
                 .help(sandboxHelpText)
             }
 
             Divider()
 
-            Section("General Access") {
-                ForEach(GeneratedAppResourcePermission.allCases) { permission in
-                    Toggle(permission.displayName, isOn: resourcePermissionBinding(for: permission))
+            Menu("Permissions") {
+                Section("General Access") {
+                    ForEach(GeneratedAppResourcePermission.allCases) { permission in
+                        Toggle(permission.displayName, isOn: resourcePermissionBinding(for: permission))
+                    }
                 }
-            }
 
-            Section("Sandbox Access") {
-                ForEach(GeneratedAppSandboxPermission.allCases) { permission in
-                    Toggle(permission.displayName, isOn: sandboxPermissionBinding(for: permission))
+                Section("Sandbox Access") {
+                    ForEach(GeneratedAppSandboxPermission.allCases) { permission in
+                        Toggle(permission.displayName, isOn: sandboxPermissionBinding(for: permission))
+                    }
                 }
             }
         } label: {
@@ -148,14 +146,8 @@ struct PromptComposerView: View {
         return AnyShapeStyle(.secondary)
     }
 
-    private var sandboxLabel: String {
-        sandboxEnabled ? "Sandbox On" : "Sandbox Off"
-    }
-
     private var sandboxHelpText: String {
-        sandboxEnabled
-            ? "Generated apps will include App Sandbox entitlements."
-            : "Generated apps will be built without App Sandbox entitlements."
+        "Controls whether generated apps include App Sandbox entitlements."
     }
 
     private func resourcePermissionBinding(for permission: GeneratedAppResourcePermission) -> Binding<Bool> {
@@ -179,43 +171,31 @@ struct PromptComposerView: View {
     }
 
     private var currentResourcePermissions: GeneratedAppResourcePermissions {
-        usesToolPermissionSettings
-            ? resourcePermissions
-            : generationPreferences.generatedAppResourcePermissions
+        resourcePermissions
     }
 
     private var currentSandboxPermissions: GeneratedAppSandboxPermissions {
-        usesToolPermissionSettings
-            ? sandboxPermissions
-            : generationPreferences.generatedAppSandboxPermissions
+        sandboxPermissions
     }
 
     private func setResourcePermission(_ permission: GeneratedAppResourcePermission, enabled: Bool) {
-        if usesToolPermissionSettings {
-            var updated = resourcePermissions
-            if enabled {
-                updated.enabled.insert(permission)
-            } else {
-                updated.enabled.remove(permission)
-            }
-            resourcePermissions = updated
+        var updated = resourcePermissions
+        if enabled {
+            updated.enabled.insert(permission)
         } else {
-            generationPreferences.setGeneratedAppResourcePermission(permission, enabled: enabled)
+            updated.enabled.remove(permission)
         }
+        resourcePermissions = updated
     }
 
     private func setSandboxPermission(_ permission: GeneratedAppSandboxPermission, enabled: Bool) {
-        if usesToolPermissionSettings {
-            var updated = sandboxPermissions
-            if enabled {
-                updated.enabled.insert(permission)
-            } else {
-                updated.enabled.remove(permission)
-            }
-            sandboxPermissions = updated
+        var updated = sandboxPermissions
+        if enabled {
+            updated.enabled.insert(permission)
         } else {
-            generationPreferences.setGeneratedAppSandboxPermission(permission, enabled: enabled)
+            updated.enabled.remove(permission)
         }
+        sandboxPermissions = updated
     }
 }
 
@@ -226,8 +206,6 @@ struct PromptComposerView: View {
         appKind: .constant(.window),
         sandboxPermissions: .constant(.default),
         resourcePermissions: .constant(.none),
-        usesToolPermissionSettings: false,
-        generationPreferences: GenerationPreferencesStore(),
         placeholder: "Describe a new app to build…",
         showsSandboxControl: false,
         isSubmitEnabled: false,
@@ -246,8 +224,6 @@ struct PromptComposerView: View {
         appKind: .constant(.menuBar),
         sandboxPermissions: .constant(.default),
         resourcePermissions: .constant(GeneratedAppResourcePermissions([.camera])),
-        usesToolPermissionSettings: true,
-        generationPreferences: GenerationPreferencesStore(),
         placeholder: "Describe changes for Clipboard Cleaner…",
         showsSandboxControl: true,
         isSubmitEnabled: true,

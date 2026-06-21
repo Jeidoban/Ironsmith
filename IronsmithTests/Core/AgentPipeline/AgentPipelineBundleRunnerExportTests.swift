@@ -33,6 +33,15 @@ extension AgentPipelineTests {
             bundleIdentifier: "com.ironsmith.tests.runner",
             packageRootPath: root.path
         )
+        try Self.writePlistDictionary(
+            [
+                "CFBundleExecutable": "Runner",
+                "IronsmithQuitOnLastWindowClose": true,
+            ],
+            to: tool.appBundleURL
+                .appendingPathComponent("Contents", isDirectory: true)
+                .appendingPathComponent("Info.plist")
+        )
 
         try await runner.runTool(tool)
 
@@ -77,6 +86,49 @@ extension AgentPipelineTests {
         try await runner.runTool(tool)
 
         #expect(await capture.builtRequests.map(\.executableName) == ["Partial"])
+        #expect(await capture.launchedURL == tool.appBundleURL)
+    }
+
+    @MainActor
+    @Test
+    func toolRunnerRebuildsOldInternalWindowBundleBeforeLaunching() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let tool = StoredTool(
+            name: "Old Runner",
+            executableName: "OldRunner",
+            bundleIdentifier: "com.ironsmith.tests.old-runner",
+            packageRootPath: root.path
+        )
+        try Self.writePlistDictionary(
+            [
+                "CFBundleExecutable": "OldRunner"
+            ],
+            to: tool.appBundleURL
+                .appendingPathComponent("Contents", isDirectory: true)
+                .appendingPathComponent("Info.plist")
+        )
+
+        let capture = AppBundleCapture()
+        let appBundleClient = ToolAppBundleClient(
+            buildInternalApp: { request in
+                await capture.recordBuild(request)
+                return request.internalAppBundleURL
+            },
+            exportApp: { request, applicationsDirectoryURL in
+                applicationsDirectoryURL.appendingPathComponent("\(request.displayName).app", isDirectory: true)
+            },
+            launchApp: { url in
+                await capture.recordLaunch(url)
+            },
+            appExists: { _ in true }
+        )
+        let runner = ToolRunnerClient.live(appBundleClient: appBundleClient)
+
+        try await runner.runTool(tool)
+
+        #expect(await capture.builtRequests.map(\.executableName) == ["OldRunner"])
         #expect(await capture.launchedURL == tool.appBundleURL)
     }
 

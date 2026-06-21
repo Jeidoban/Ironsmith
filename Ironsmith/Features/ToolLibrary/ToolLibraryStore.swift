@@ -37,6 +37,8 @@ final class ToolLibraryStore {
     private(set) var selectedToolID: UUID?
     private(set) var selectedToolName: String?
     private var restorableToolIDs = Set<UUID>()
+    @ObservationIgnored private var nextGenerationSettings: ToolGenerationSettings?
+    @ObservationIgnored private var hasCustomizedNextGenerationSettings = false
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     private let dependencies: ToolLibraryDependencies
 
@@ -67,6 +69,7 @@ final class ToolLibraryStore {
     }
 
     func toggleSelection(for tool: Tool, defaultSettings: ToolGenerationSettings = .default) {
+        initializeNextGenerationSettingsIfNeeded(defaultSettings)
         if selectedToolID == tool.id {
             clearSelection()
         } else {
@@ -76,6 +79,7 @@ final class ToolLibraryStore {
 
     func selectForEditing(_ tool: Tool, defaultSettings: ToolGenerationSettings = .default) {
         guard tool.isGenerationReady else { return }
+        initializeNextGenerationSettingsIfNeeded(defaultSettings)
         selectedToolID = tool.id
         selectedToolName = tool.name
         applyComposerSettings(tool.generationSettings(defaults: defaultSettings))
@@ -89,6 +93,7 @@ final class ToolLibraryStore {
     }
 
     func syncSelection(with tools: [Tool], defaultSettings: ToolGenerationSettings = .default) {
+        initializeNextGenerationSettingsIfNeeded(defaultSettings)
         restorableToolIDs.formIntersection(tools.map(\.id))
 
         guard let selectedToolID else {
@@ -106,6 +111,19 @@ final class ToolLibraryStore {
 
         selectedToolName = selectedTool.name
         applyComposerSettings(selectedTool.generationSettings(defaults: defaultSettings))
+    }
+
+    func initializeNextGenerationSettingsIfNeeded(_ defaultSettings: ToolGenerationSettings) {
+        guard !hasCustomizedNextGenerationSettings else { return }
+        nextGenerationSettings = defaultSettings
+        if !hasSelectedTool {
+            applyComposerSettings(defaultSettings)
+        }
+    }
+
+    func rememberCurrentGenerationSettingsForNextGeneration() {
+        nextGenerationSettings = currentComposerSettings
+        hasCustomizedNextGenerationSettings = true
     }
 
     func isSelected(_ tool: Tool) -> Bool {
@@ -446,11 +464,17 @@ final class ToolLibraryStore {
     private func clearSelection() {
         selectedToolID = nil
         selectedToolName = nil
-        sandboxEnabled = true
-        appKind = .window
-        menuBarSystemImage = ToolMenuBarSymbol.fallback
-        sandboxPermissions = .default
-        resourcePermissions = .none
+        applyComposerSettings(nextGenerationSettings ?? .default)
+    }
+
+    private var currentComposerSettings: ToolGenerationSettings {
+        ToolGenerationSettings(
+            appKind: appKind,
+            menuBarSystemImage: menuBarSystemImage,
+            sandboxEnabled: sandboxEnabled,
+            sandboxPermissions: sandboxPermissions,
+            resourcePermissions: resourcePermissions
+        )
     }
 
     private func applyComposerSettings(_ settings: ToolGenerationSettings) {
@@ -462,12 +486,18 @@ final class ToolLibraryStore {
     }
 
     private func submittedGenerationSettings(defaultSettings: ToolGenerationSettings) -> ToolGenerationSettings {
-        ToolGenerationSettings(
+        let defaultBackedSandboxPermissions = !hasSelectedTool && nextGenerationSettings == nil
+            ? defaultSettings.sandboxPermissions
+            : sandboxPermissions
+        let defaultBackedResourcePermissions = !hasSelectedTool && nextGenerationSettings == nil
+            ? defaultSettings.resourcePermissions
+            : resourcePermissions
+        return ToolGenerationSettings(
             appKind: appKind,
             menuBarSystemImage: menuBarSystemImage,
             sandboxEnabled: sandboxEnabled,
-            sandboxPermissions: hasSelectedTool ? sandboxPermissions : defaultSettings.sandboxPermissions,
-            resourcePermissions: hasSelectedTool ? resourcePermissions : defaultSettings.resourcePermissions
+            sandboxPermissions: defaultBackedSandboxPermissions,
+            resourcePermissions: defaultBackedResourcePermissions
         )
     }
 

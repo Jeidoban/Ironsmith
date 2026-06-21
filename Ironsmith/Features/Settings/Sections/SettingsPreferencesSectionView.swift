@@ -65,7 +65,7 @@ struct SettingsPreferencesSectionView: View {
                 }
             }
         } header: {
-            Text("Generated app permissions")
+            Text("Default generated app permissions")
         }
     }
 

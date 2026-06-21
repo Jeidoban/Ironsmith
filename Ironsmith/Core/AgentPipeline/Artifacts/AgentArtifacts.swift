@@ -420,10 +420,20 @@ struct ToolPackageLayout: Equatable, Sendable {
         switch settings.appKind {
         case .window:
             """
+            import AppKit
             import SwiftUI
+
+            @MainActor
+            private final class IronsmithGeneratedAppDelegate: NSObject, NSApplicationDelegate {
+                func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+                    Bundle.main.object(forInfoDictionaryKey: "IronsmithQuitOnLastWindowClose") as? Bool == true
+                }
+            }
 
             @main
             struct \(executableName): App {
+                @NSApplicationDelegateAdaptor(IronsmithGeneratedAppDelegate.self) private var appDelegate
+
                 var body: some Scene {
                     WindowGroup {
                         ContentView()
@@ -433,13 +443,39 @@ struct ToolPackageLayout: Equatable, Sendable {
             """
         case .menuBar:
             """
+            import AppKit
             import SwiftUI
 
             @main
             struct \(executableName): App {
                 var body: some Scene {
                     MenuBarExtra(\(Self.swiftStringLiteral(displayName ?? executableName)), systemImage: \(Self.swiftStringLiteral(settings.menuBarSystemImage))) {
-                        ContentView()
+                        VStack(spacing: 0) {
+                            HStack {
+                                Text(\(Self.swiftStringLiteral(displayName ?? executableName)))
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+
+                                Spacer()
+
+                                Button {
+                                    NSApplication.shared.terminate(nil)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .imageScale(.medium)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Quit")
+                                .accessibilityLabel("Quit")
+                            }
+                            .padding(.top, 10)
+                            .padding(.bottom, 12)
+                            .padding(.horizontal, 12)
+
+                            ContentView()
+                        }
                     }
                     .menuBarExtraStyle(.window)
                 }

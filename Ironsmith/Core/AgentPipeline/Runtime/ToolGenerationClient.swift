@@ -242,11 +242,27 @@ struct ToolRunnerClient {
     static func live(appBundleClient: ToolAppBundleClient = .live()) -> Self {
         Self { tool in
             let request = ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(tool)
-            if !appBundleClient.appExists(request.internalAppBundleURL) {
+            if !appBundleClient.appExists(request.internalAppBundleURL)
+                || needsQuitOnCloseRebuild(request)
+            {
                 _ = try await appBundleClient.buildInternalApp(request)
             }
             try await appBundleClient.launchApp(request.internalAppBundleURL)
         }
+    }
+
+    private static func needsQuitOnCloseRebuild(_ request: ToolAppBundleRequest) -> Bool {
+        guard request.appKind == .window else { return false }
+        let plistURL = request.internalAppBundleURL
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("Info.plist")
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let dictionary = plist as? [String: Any]
+        else {
+            return true
+        }
+        return dictionary["IronsmithQuitOnLastWindowClose"] as? Bool != true
     }
 }
 

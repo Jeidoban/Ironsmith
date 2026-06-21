@@ -403,6 +403,7 @@ struct SingleFileToolGenerationRuntime {
 
         do {
             try Task.checkCancellation()
+            // The model only edits ContentView.swift; Ironsmith owns the fixed app scene wrapper.
             try context.write(
                 layout.fixedAppEntrySource(displayName: manifest.displayName, settings: settings),
                 to: layout.appEntrySourcePath,
