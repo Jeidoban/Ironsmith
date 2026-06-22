@@ -214,18 +214,18 @@ extension Tool {
 }
 
 extension GeneratedAppResourcePermissions {
-    init(rawValueList: String) {
+    nonisolated init(rawValueList: String) {
         let rawValues = Self.rawValues(from: rawValueList)
         self.init(
             GeneratedAppResourcePermission.allCases.filter { rawValues.contains($0.rawValue) }
         )
     }
 
-    var rawValueList: String {
+    nonisolated var rawValueList: String {
         enabledPermissions.map(\.rawValue).joined(separator: ",")
     }
 
-    private static func rawValues(from rawValueList: String) -> Set<String> {
+    nonisolated private static func rawValues(from rawValueList: String) -> Set<String> {
         Set(
             rawValueList
                 .split(separator: ",")
@@ -236,18 +236,18 @@ extension GeneratedAppResourcePermissions {
 }
 
 extension GeneratedAppSandboxPermissions {
-    init(rawValueList: String) {
+    nonisolated init(rawValueList: String) {
         let rawValues = Self.rawValues(from: rawValueList)
         self.init(
             GeneratedAppSandboxPermission.allCases.filter { rawValues.contains($0.rawValue) }
         )
     }
 
-    var rawValueList: String {
+    nonisolated var rawValueList: String {
         enabledPermissions.map(\.rawValue).joined(separator: ",")
     }
 
-    private static func rawValues(from rawValueList: String) -> Set<String> {
+    nonisolated private static func rawValues(from rawValueList: String) -> Set<String> {
         Set(
             rawValueList
                 .split(separator: ",")

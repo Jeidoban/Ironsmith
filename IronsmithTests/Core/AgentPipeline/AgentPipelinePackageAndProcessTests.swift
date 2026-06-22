@@ -301,18 +301,12 @@ extension AgentPipelineTests {
 
         let plist = try Self.plistDictionary(at: appURL.appendingPathComponent("Contents/Info.plist"))
         let entitlements = try Self.plistDictionary(at: request.layout.sandboxEntitlementsURL)
-        let appEntrySource = try String(
-            contentsOf: request.layout.sourceDirectoryURL.appendingPathComponent("SandboxedTool.swift"),
-            encoding: .utf8
-        )
         #expect(appURL == request.internalAppBundleURL)
         #expect(appURL.lastPathComponent == "Sandboxed Tool.app")
         #expect(plist["CFBundleIdentifier"] as? String == request.bundleIdentifier)
         #expect(plist["CFBundleExecutable"] as? String == request.executableName)
         #expect(plist["LSUIElement"] as? Bool == true)
         #expect(plist["IronsmithQuitOnLastWindowClose"] as? Bool == true)
-        #expect(appEntrySource.contains("IronsmithGeneratedAppDelegate"))
-        #expect(appEntrySource.contains("IronsmithQuitOnLastWindowClose"))
         #expect(entitlements["com.apple.security.app-sandbox"] as? Bool == true)
         #expect(entitlements["com.apple.security.files.user-selected.read-write"] as? Bool == true)
         #expect(entitlements["com.apple.security.network.client"] as? Bool == true)
@@ -327,6 +321,76 @@ extension AgentPipelineTests {
         #expect(await capture.signedEntitlementsURL == request.layout.sandboxEntitlementsURL)
         #expect(await capture.verifiedAppURL == appURL)
         #expect(await capture.strippedURL == appURL)
+    }
+
+    @MainActor
+    @Test
+    func appBundlerDoesNotRewritePackageAppEntryWhenBuildingBundle() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("ExistingWindowTool", isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "ExistingWindowTool")
+        let appEntryURL = packageRoot.appendingPathComponent(layout.appEntrySourcePath)
+        let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
+        let originalAppEntrySource = """
+        import SwiftUI
+
+        @main
+        struct ExistingWindowTool: App {
+            var body: some Scene {
+                WindowGroup {
+                    ContentView()
+                }
+            }
+        }
+        """
+        try FileManager.default.createDirectory(
+            at: appEntryURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try originalAppEntrySource.write(to: appEntryURL, atomically: true, encoding: .utf8)
+
+        let processClient = SwiftPackageProcessClient(
+            build: { _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            buildRelease: { _ in
+                try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
+                try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent("ExistingWindowTool"))
+                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            showBinPath: { _ in releaseBinDirectory },
+            showReleaseBinPath: { _ in releaseBinDirectory },
+            launch: { _ in },
+            launchApp: { _ in },
+            stripQuarantine: { _ in },
+            signAdHoc: { _, _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            verifyCodeSignature: { _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = ToolAppBundleClient.live(
+            processClient: processClient,
+            iconClient: ToolIconClient { _ in
+                throw ToolAppBundleError.iconEncodingFailed
+            }
+        )
+        let request = ToolAppBundleRequest(
+            displayName: "Existing Window Tool",
+            executableName: "ExistingWindowTool",
+            bundleIdentifier: "com.ironsmith.tests.existing-window-tool",
+            packageRootURL: packageRoot,
+            sandboxEnabled: false,
+            settings: ToolGenerationSettings(appKind: .menuBar)
+        )
+
+        _ = try await client.buildInternalApp(request)
+
+        let currentAppEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)
+        #expect(currentAppEntrySource == originalAppEntrySource)
     }
 
     @MainActor

@@ -237,11 +237,28 @@ final class ToolLibraryStore {
         }
 
         do {
-            let contentViewPath = try Self.contentViewPath(for: tool)
-            try dependencies.versionBackupClient.restorePreviousVersion(tool.packageRootURL, contentViewPath)
+            let manifest = try Self.manifest(for: tool)
+            let layout = ToolPackageLayout(
+                packageRootURL: tool.packageRootURL,
+                executableName: manifest.executableName
+            )
+            let contentViewPath = manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName)
+            let restoredSettings = try dependencies.versionBackupClient.restorePreviousVersion(
+                tool.packageRootURL,
+                contentViewPath,
+                tool.generationSettings(defaults: .default)
+            )
+            tool.applyGenerationSettings(restoredSettings)
+            try Self.writeAppEntry(
+                layout: layout,
+                displayName: manifest.displayName,
+                settings: restoredSettings
+            )
             try await dependencies.buildClient.buildTool(tool)
             clearPendingGeneration(on: tool)
-            tool.updatedAt = .now
+            if selectedToolID == tool.id {
+                applyComposerSettings(restoredSettings)
+            }
             try modelContext.save()
         } catch {
             modelContext.rollback()
@@ -751,8 +768,7 @@ final class ToolLibraryStore {
     }
 
     private static func contentViewPath(for tool: Tool) throws -> String {
-        let data = try Data(contentsOf: tool.agentManifestURL)
-        let manifest = try JSONDecoder().decode(ToolManifest.self, from: data)
+        let manifest = try manifest(for: tool)
         let layout = ToolPackageLayout(
             packageRootURL: tool.packageRootURL,
             executableName: manifest.executableName
@@ -760,9 +776,28 @@ final class ToolLibraryStore {
         return manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName)
     }
 
+    private static func manifest(for tool: Tool) throws -> ToolManifest {
+        let data = try Data(contentsOf: tool.agentManifestURL)
+        return try JSONDecoder().decode(ToolManifest.self, from: data)
+    }
+
     private static func contentViewURL(for tool: Tool) throws -> URL {
         let contentViewPath = try contentViewPath(for: tool)
         return try ToolPackageLayout.packageFileURL(for: contentViewPath, packageRootURL: tool.packageRootURL)
+    }
+
+    private static func writeAppEntry(
+        layout: ToolPackageLayout,
+        displayName: String,
+        settings: ToolGenerationSettings
+    ) throws {
+        let appEntryURL = try layout.packageFileURL(for: layout.appEntrySourcePath)
+        try FileManager.default.createDirectory(
+            at: appEntryURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try layout.fixedAppEntrySource(displayName: displayName, settings: settings)
+            .write(to: appEntryURL, atomically: true, encoding: .utf8)
     }
 
     private static var defaultPrompt: String {

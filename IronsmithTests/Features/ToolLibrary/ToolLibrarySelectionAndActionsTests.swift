@@ -383,6 +383,7 @@ extension ToolLibraryTests {
         let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
         let contentViewPath = layout.sourcePath(for: layout.defaultContentViewFileName)
         let contentViewURL = packageRoot.appendingPathComponent(contentViewPath)
+        let appEntryURL = packageRoot.appendingPathComponent(layout.appEntrySourcePath)
         let previousURL = layout.previousContentViewVersionURL
         let manifest = ToolManifest(
             displayName: executableName,
@@ -392,14 +393,42 @@ extension ToolLibraryTests {
             ]
         )
         try FileManager.default.createDirectory(at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: previousURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(manifest).write(to: layout.agentManifestURL)
+        let previousSettings = ToolGenerationSettings(
+            appKind: .window,
+            sandboxEnabled: true,
+            sandboxPermissions: GeneratedAppSandboxPermissions([.userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions([.camera])
+        )
+        let currentSettings = ToolGenerationSettings(
+            appKind: .menuBar,
+            menuBarSystemImage: "timer",
+            sandboxEnabled: false,
+            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            resourcePermissions: GeneratedAppResourcePermissions([.microphone])
+        )
+        try #"Text("previous")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
+        let backup = try ToolVersionBackupClient.live.stageCurrentVersion(
+            packageRoot,
+            contentViewPath,
+            previousSettings
+        )
+        try ToolVersionBackupClient.live.promoteStagedVersion(backup)
         try #"Text("current")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
-        try #"Text("previous")"#.write(to: previousURL, atomically: true, encoding: .utf8)
+        try layout.fixedAppEntrySource(displayName: executableName, settings: currentSettings)
+            .write(to: appEntryURL, atomically: true, encoding: .utf8)
 
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
-        let tool = Tool(name: executableName, packageRootPath: packageRoot.path)
+        let tool = Tool(
+            name: executableName,
+            sandboxEnabled: currentSettings.sandboxEnabled,
+            appKind: currentSettings.appKind,
+            menuBarSystemImage: currentSettings.menuBarSystemImage,
+            sandboxPermissions: currentSettings.sandboxPermissions,
+            resourcePermissions: currentSettings.resourcePermissions,
+            packageRootPath: packageRoot.path
+        )
         context.insert(tool)
         try context.save()
 
@@ -428,8 +457,15 @@ extension ToolLibraryTests {
 
         let restoredSource = try String(contentsOf: contentViewURL, encoding: .utf8)
         let swappedPreviousSource = try String(contentsOf: previousURL, encoding: .utf8)
+        let restoredAppEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)
         #expect(restoredSource == #"Text("previous")"#)
         #expect(swappedPreviousSource == #"Text("current")"#)
+        #expect(tool.appKind == .window)
+        #expect(tool.sandboxEnabled)
+        #expect(tool.storedSandboxPermissions?.enabled == [.userSelectedFiles])
+        #expect(tool.storedResourcePermissions?.enabled == [.camera])
+        #expect(restoredAppEntrySource.contains("WindowGroup"))
+        #expect(!(restoredAppEntrySource.contains("MenuBarExtra")))
         #expect(await buildCapture.builtPackageRoot == packageRoot)
         #expect(tool.generationState == .ready)
     }

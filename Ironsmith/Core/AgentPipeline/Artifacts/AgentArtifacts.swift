@@ -270,6 +270,8 @@ struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let pendingContentViewDraftPath = "\(packageMetadataDirectoryName)/\(pendingContentViewDraftFilename)"
     nonisolated static let pendingContentViewVersionFilename = "pending-ContentView.swift"
     nonisolated static let previousContentViewVersionFilename = "previous-ContentView.swift"
+    nonisolated static let pendingBuildSettingsVersionFilename = "pending-build-settings.json"
+    nonisolated static let previousBuildSettingsVersionFilename = "previous-build-settings.json"
 
     let packageRootURL: URL
     let executableName: String
@@ -300,6 +302,14 @@ struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var previousContentViewVersionURL: URL {
         Self.previousContentViewVersionURL(for: packageRootURL)
+    }
+
+    nonisolated var pendingBuildSettingsVersionURL: URL {
+        Self.pendingBuildSettingsVersionURL(for: packageRootURL)
+    }
+
+    nonisolated var previousBuildSettingsVersionURL: URL {
+        Self.previousBuildSettingsVersionURL(for: packageRootURL)
     }
 
     nonisolated var sourceDirectoryURL: URL {
@@ -387,6 +397,16 @@ struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static func previousContentViewVersionURL(for packageRootURL: URL) -> URL {
         versionsDirectoryURL(for: packageRootURL)
             .appendingPathComponent(previousContentViewVersionFilename)
+    }
+
+    nonisolated static func pendingBuildSettingsVersionURL(for packageRootURL: URL) -> URL {
+        versionsDirectoryURL(for: packageRootURL)
+            .appendingPathComponent(pendingBuildSettingsVersionFilename)
+    }
+
+    nonisolated static func previousBuildSettingsVersionURL(for packageRootURL: URL) -> URL {
+        versionsDirectoryURL(for: packageRootURL)
+            .appendingPathComponent(previousBuildSettingsVersionFilename)
     }
 
     nonisolated static func sandboxEntitlementsURL(for packageRootURL: URL) -> URL {

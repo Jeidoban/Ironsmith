@@ -78,14 +78,6 @@ struct ToolAppBundleClient {
         processClient: SwiftPackageProcessClient,
         iconClient: ToolIconClient
     ) async throws -> URL {
-        let appEntryURL = try request.layout.packageFileURL(for: request.layout.appEntrySourcePath)
-        try fileManager.createDirectory(
-            at: appEntryURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try request.layout.fixedAppEntrySource(displayName: request.displayName, settings: request.settings)
-            .write(to: appEntryURL, atomically: true, encoding: .utf8)
-
         let buildResult = try await processClient.buildRelease(request.packageRootURL)
         guard buildResult.succeeded else {
             throw ToolAppBundleError.releaseBuildFailed(buildResult.combinedOutput)

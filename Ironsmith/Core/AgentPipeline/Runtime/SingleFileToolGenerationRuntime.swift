@@ -390,7 +390,11 @@ struct SingleFileToolGenerationRuntime {
             layout.appEntrySourcePath,
             packageRootURL: layout.packageRootURL
         )
-        let backup = try context.versionBackupClient.stageCurrentVersion(layout.packageRootURL, contentViewPath)
+        let backup = try context.versionBackupClient.stageCurrentVersion(
+            layout.packageRootURL,
+            contentViewPath,
+            existingTool.generationSettings(defaults: settings)
+        )
 
         AgentDiagnosticsLog.append(
             """
