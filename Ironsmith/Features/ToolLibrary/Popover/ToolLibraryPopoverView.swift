@@ -62,7 +62,10 @@ struct ToolLibraryPopoverView: View {
                                 isExporting: toolLibraryStore.exportingToolID == tool.id,
                                 canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
                                 onSelect: {
-                                    toolLibraryStore.toggleSelection(for: tool)
+                                    toolLibraryStore.toggleSelection(
+                                        for: tool,
+                                        defaultSettings: defaultGenerationSettings
+                                    )
                                 },
                                 onRun: {
                                     Task {
@@ -121,9 +124,12 @@ struct ToolLibraryPopoverView: View {
 
             PromptComposerView(
                 prompt: $toolLibraryStore.prompt,
-                sandboxEnabled: $toolLibraryStore.sandboxEnabled,
+                sandboxEnabled: sandboxEnabledBinding,
+                appKind: appKindBinding,
+                sandboxPermissions: sandboxPermissionsBinding,
+                resourcePermissions: resourcePermissionsBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
-                showsSandboxToggle: showSandboxOverride,
+                showsSandboxControl: showSandboxOverride,
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
                 onSubmit: {
@@ -145,6 +151,7 @@ struct ToolLibraryPopoverView: View {
         .frame(width: 340, height: 520)
         .accessibilityIdentifier("tool-library-root")
         .onAppear {
+            toolLibraryStore.initializeNextGenerationSettingsIfNeeded(defaultGenerationSettings)
             presentWelcomeOnboardingIfNeeded()
         }
         .onDisappear {
@@ -167,11 +174,15 @@ struct ToolLibraryPopoverView: View {
             presentWelcomeOnboardingIfNeeded()
         }
         .onChange(of: tools.map(\.id)) { _, _ in
-            toolLibraryStore.syncSelection(with: tools)
+            toolLibraryStore.syncSelection(with: tools, defaultSettings: defaultGenerationSettings)
+        }
+        .onChange(of: defaultGenerationSettings) { _, settings in
+            toolLibraryStore.initializeNextGenerationSettingsIfNeeded(settings)
         }
         .onChange(of: showSandboxOverride) { _, isEnabled in
             if !isEnabled {
                 toolLibraryStore.sandboxEnabled = true
+                toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
             }
         }
         .alert(
@@ -308,6 +319,50 @@ struct ToolLibraryPopoverView: View {
         }
 
         return inferenceStore.selectedModelID
+    }
+
+    private var defaultGenerationSettings: ToolGenerationSettings {
+        ToolLibraryStore.defaultGenerationSettings(from: inferenceStore.generationPreferences)
+    }
+
+    private var sandboxEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { toolLibraryStore.sandboxEnabled },
+            set: { newValue in
+                toolLibraryStore.sandboxEnabled = newValue
+                toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
+            }
+        )
+    }
+
+    private var appKindBinding: Binding<ToolAppKind> {
+        Binding(
+            get: { toolLibraryStore.appKind },
+            set: { newValue in
+                toolLibraryStore.appKind = newValue
+                toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
+            }
+        )
+    }
+
+    private var sandboxPermissionsBinding: Binding<GeneratedAppSandboxPermissions> {
+        Binding(
+            get: { toolLibraryStore.sandboxPermissions },
+            set: { newValue in
+                toolLibraryStore.sandboxPermissions = newValue
+                toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
+            }
+        )
+    }
+
+    private var resourcePermissionsBinding: Binding<GeneratedAppResourcePermissions> {
+        Binding(
+            get: { toolLibraryStore.resourcePermissions },
+            set: { newValue in
+                toolLibraryStore.resourcePermissions = newValue
+                toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
+            }
+        )
     }
 
     private func openIronsmithCreditPurchase() {

@@ -8,12 +8,13 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
-    func generatedMetadataSchemaIncludesNameAndIconOnly() throws {
+    func generatedMetadataSchemaIncludesNameIconAndMenuBarSymbolOnly() throws {
         let data = try JSONEncoder().encode(GeneratedToolMetadata.generationSchema)
         let schema = try #require(String(data: data, encoding: .utf8))
 
         #expect(schema.contains("displayName"))
         #expect(schema.contains("iconPrompt"))
+        #expect(schema.contains("menuBarSystemImage"))
         #expect(!(schema.contains("refinedPrompt")))
     }
 
@@ -34,12 +35,34 @@ extension AgentPipelineTests {
 
         #expect(suggestion.displayName == "Recipe Board")
         #expect(suggestion.iconPrompt == "Recipe cards")
+        #expect(suggestion.menuBarSystemImage == ToolMenuBarSymbol.fallback)
         let prompt = try #require(await response.prompts.first)
         #expect(prompt.contains("User request:\nrecipes"))
+        #expect(prompt.contains("Allowed menuBarSystemImage values:"))
         #expect(!(prompt.contains("Planning budget:")))
         #expect(!(prompt.contains("Refined prompt:")))
         #expect(!(prompt.contains("backend")))
         #expect(await response.options.first?.maximumResponseTokens == 4096)
+    }
+
+    @MainActor
+    @Test
+    func metadataSuggestionValidatesMenuBarSymbolAgainstAllowlist() async throws {
+        let response = StructuredMetadataResponse(
+            metadata: GeneratedToolMetadata(
+                displayName: "Timer",
+                iconPrompt: "Small timer",
+                menuBarSystemImage: "not.a.real.allowed.symbol"
+            )
+        )
+
+        let suggestion = await ToolMetadataClient.live().suggestMetadata(
+            userPrompt: "Build a timer",
+            languageModel: StructuredMetadataLanguageModel(response: response),
+            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+        )
+
+        #expect(suggestion.menuBarSystemImage == ToolMenuBarSymbol.fallback)
     }
 
     @MainActor
@@ -85,6 +108,31 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func livePromptRefinementClientIncludesMenuBarAppTypeContext() async throws {
+        let promptCapture = PromptCapture()
+        let refinedPrompt = "Build a compact menu bar timer with start, pause, reset, and a current-session summary."
+        let refined = await ToolPromptRefinementClient.live().refinePrompt(
+            userPrompt: "Build a timer",
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await promptCapture.record(prompt)
+                return refinedPrompt
+            },
+            generationOptions: GenerationOptions(maximumResponseTokens: 4096),
+            appKind: .menuBar,
+            sandboxEnabled: true
+        )
+
+        #expect(refined == refinedPrompt)
+        let prompt = try #require(await promptCapture.prompts.first)
+        #expect(prompt.contains("App type: menu bar app."))
+        #expect(prompt.contains("MenuBarExtra popover-style window"))
+        #expect(prompt.contains("compact menu bar utility"))
+        #expect(prompt.contains("bounded width and height"))
+        #expect(!(prompt.contains("Avoid full-app layouts")))
+    }
+
+    @MainActor
+    @Test
     func livePromptRefinementClientFallsBackToOriginalPromptOnFailure() async throws {
         let refined = await ToolPromptRefinementClient.live().refinePrompt(
             userPrompt: "Build a pantry tracker",
@@ -123,10 +171,17 @@ extension AgentPipelineTests {
             }
         )
 
-        _ = try await runtime.generateTool(for: "Make a timer", status: { _ in })
+        _ = try await runtime.generateTool(
+            for: "Make a timer",
+            settings: ToolGenerationSettings(appKind: .menuBar),
+            status: { _ in }
+        )
 
         let prompts = await promptCapture.prompts
         #expect(prompts.first?.contains(refinedPrompt) == true)
+        #expect(prompts.first?.contains("App type: menu bar app.") == true)
+        #expect(prompts.first?.contains("MenuBarExtra popover-style window") == true)
+        #expect(prompts.first?.contains("compact menu bar utility") == true)
         #expect(!(prompts.first?.contains("User request: Make a timer") ?? false))
     }
 

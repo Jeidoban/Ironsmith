@@ -5,10 +5,22 @@ struct ToolAppBundleRequest: Equatable, Sendable {
     let executableName: String
     let bundleIdentifier: String
     let packageRootURL: URL
-    let sandboxEnabled: Bool
+    let settings: ToolGenerationSettings
     let sandboxPermissions: GeneratedAppSandboxPermissions
     let resourcePermissions: GeneratedAppResourcePermissions
     let iconPrompt: String?
+
+    var appKind: ToolAppKind {
+        settings.appKind
+    }
+
+    var menuBarSystemImage: String {
+        settings.menuBarSystemImage
+    }
+
+    var sandboxEnabled: Bool {
+        settings.sandboxEnabled
+    }
 
     init(
         displayName: String,
@@ -18,15 +30,25 @@ struct ToolAppBundleRequest: Equatable, Sendable {
         sandboxEnabled: Bool,
         sandboxPermissions: GeneratedAppSandboxPermissions = .default,
         resourcePermissions: GeneratedAppResourcePermissions = .none,
+        appKind: ToolAppKind = .window,
+        menuBarSystemImage: String = ToolMenuBarSymbol.fallback,
+        settings: ToolGenerationSettings? = nil,
         iconPrompt: String? = nil
     ) {
         self.displayName = displayName
         self.executableName = executableName
         self.bundleIdentifier = bundleIdentifier
         self.packageRootURL = packageRootURL
-        self.sandboxEnabled = sandboxEnabled
-        self.sandboxPermissions = sandboxPermissions
-        self.resourcePermissions = resourcePermissions
+        let resolvedSettings = settings ?? ToolGenerationSettings(
+            appKind: appKind,
+            menuBarSystemImage: menuBarSystemImage,
+            sandboxEnabled: sandboxEnabled,
+            sandboxPermissions: sandboxPermissions,
+            resourcePermissions: resourcePermissions
+        )
+        self.settings = resolvedSettings
+        self.sandboxPermissions = resolvedSettings.sandboxPermissions
+        self.resourcePermissions = resolvedSettings.resourcePermissions
         self.iconPrompt = iconPrompt
     }
 
@@ -52,8 +74,10 @@ struct ToolAppBundleRequest: Equatable, Sendable {
             bundleIdentifier: tool.bundleIdentifier,
             packageRootURL: tool.packageRootURL,
             sandboxEnabled: tool.sandboxEnabled,
-            sandboxPermissions: sandboxPermissions,
-            resourcePermissions: resourcePermissions,
+            settings: tool.generationSettings(
+                defaultSandboxPermissions: sandboxPermissions,
+                defaultResourcePermissions: resourcePermissions
+            ),
             iconPrompt: nil
         )
     }

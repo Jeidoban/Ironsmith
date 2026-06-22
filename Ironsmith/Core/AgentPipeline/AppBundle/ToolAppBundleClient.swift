@@ -35,6 +35,7 @@ struct ToolAppBundleClient {
                     request: request,
                     destinationAppURL: request.internalAppBundleURL,
                     showsInDock: false,
+                    quitsOnLastWindowClose: request.appKind == .window,
                     fileManager: fileManager,
                     fileClient: fileClient,
                     processClient: processClient,
@@ -50,7 +51,8 @@ struct ToolAppBundleClient {
                 return try await buildApp(
                     request: request,
                     destinationAppURL: destinationURL,
-                    showsInDock: true,
+                    showsInDock: request.appKind == .window,
+                    quitsOnLastWindowClose: false,
                     fileManager: fileManager,
                     fileClient: fileClient,
                     processClient: processClient,
@@ -70,6 +72,7 @@ struct ToolAppBundleClient {
         request: ToolAppBundleRequest,
         destinationAppURL: URL,
         showsInDock: Bool,
+        quitsOnLastWindowClose: Bool,
         fileManager: FileManager,
         fileClient: AgentFileClient,
         processClient: SwiftPackageProcessClient,
@@ -121,6 +124,7 @@ struct ToolAppBundleClient {
             for: request,
             to: infoPlistURL,
             showsInDock: showsInDock,
+            quitsOnLastWindowClose: quitsOnLastWindowClose,
             iconFileName: iconFileName
         )
 
@@ -237,6 +241,7 @@ struct ToolAppBundleClient {
         for request: ToolAppBundleRequest,
         to url: URL,
         showsInDock: Bool,
+        quitsOnLastWindowClose: Bool,
         iconFileName: String?
     ) throws {
         var plist: [String: Any] = [
@@ -259,6 +264,10 @@ struct ToolAppBundleClient {
 
         if !showsInDock {
             plist["LSUIElement"] = true
+        }
+
+        if quitsOnLastWindowClose {
+            plist["IronsmithQuitOnLastWindowClose"] = true
         }
 
         for permission in request.resourcePermissions.enabledPermissions {

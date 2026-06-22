@@ -4,10 +4,16 @@ import Foundation
 struct ToolMetadataSuggestion: Equatable, Sendable {
     let displayName: String
     let iconPrompt: String
+    let menuBarSystemImage: String
 
-    nonisolated init(displayName: String, iconPrompt: String) {
+    nonisolated init(
+        displayName: String,
+        iconPrompt: String,
+        menuBarSystemImage: String = ToolMenuBarSymbol.fallback
+    ) {
         self.displayName = displayName
         self.iconPrompt = iconPrompt
+        self.menuBarSystemImage = ToolMenuBarSymbol.validated(menuBarSystemImage)
     }
 }
 
@@ -18,6 +24,19 @@ struct GeneratedToolMetadata {
 
     @Guide(description: "A tiny app icon concept phrase for an image generator, two to five words. Do not write a sentence.")
     let iconPrompt: String
+
+    @Guide(description: "One SF Symbol name chosen exactly from Ironsmith's allowed menuBarSystemImage list.")
+    let menuBarSystemImage: String
+}
+
+extension GeneratedToolMetadata {
+    nonisolated init(displayName: String, iconPrompt: String) {
+        self.init(
+            displayName: displayName,
+            iconPrompt: iconPrompt,
+            menuBarSystemImage: ToolMenuBarSymbol.fallback
+        )
+    }
 }
 
 struct ToolMetadataRequest: Sendable {
@@ -110,6 +129,9 @@ struct ToolMetadataClient: Sendable {
         """
         User request:
         \(userPrompt)
+
+        Allowed menuBarSystemImage values:
+        \(ToolMenuBarSymbol.allowedSymbols.joined(separator: ", "))
         """
     }
 
@@ -127,6 +149,11 @@ struct ToolMetadataClient: Sendable {
         - Must be 2 to 5 words.
         - Good examples: Calculator in front of house. Gamepad with buttons.
         - Do not mention app icon, macOS, style, text, letters, screenshots, UI, logos, or backgrounds.
+
+        menuBarSystemImage:
+        - Must be one exact SF Symbol name from the allowed list in the prompt.
+        - Choose the closest symbol for the user's requested app.
+        - Do not invent names or include variants outside that list.
         """
 
     nonisolated private static func metadataSuggestion(
@@ -135,15 +162,18 @@ struct ToolMetadataClient: Sendable {
     ) -> ToolMetadataSuggestion {
         let displayName = response.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let iconPrompt = response.iconPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let menuBarSystemImage = ToolMenuBarSymbol.validated(response.menuBarSystemImage)
         return ToolMetadataSuggestion(
             displayName: displayName.isEmpty ? fallback.displayName : displayName,
-            iconPrompt: iconPrompt.isEmpty ? fallback.iconPrompt : iconPrompt
+            iconPrompt: iconPrompt.isEmpty ? fallback.iconPrompt : iconPrompt,
+            menuBarSystemImage: menuBarSystemImage
         )
     }
 }
 
 struct ToolPromptRefinementRequest: Sendable {
     let userPrompt: String
+    let appKind: ToolAppKind
     let sandboxEnabled: Bool
     let languageModel: any LanguageModel
     let generationOptions: GenerationOptions
@@ -171,11 +201,13 @@ struct ToolPromptRefinementClient: Sendable {
         userPrompt: String,
         languageModel: any LanguageModel,
         generationOptions: GenerationOptions,
+        appKind: ToolAppKind = .window,
         sandboxEnabled: Bool = true
     ) async -> String? {
         await refinePromptForRequest(
             ToolPromptRefinementRequest(
                 userPrompt: userPrompt,
+                appKind: appKind,
                 sandboxEnabled: sandboxEnabled,
                 languageModel: languageModel,
                 generationOptions: generationOptions
@@ -197,6 +229,7 @@ struct ToolPromptRefinementClient: Sendable {
                 let response: LanguageModelSession.Response<String> = try await session.respond(
                     to: Self.promptRefinementPrompt(
                         for: request.userPrompt,
+                        appKind: request.appKind,
                         sandboxEnabled: request.sandboxEnabled
                     ),
                     options: Self.promptRefinementOptions(from: request.generationOptions)
@@ -237,10 +270,13 @@ struct ToolPromptRefinementClient: Sendable {
 
     nonisolated private static func promptRefinementPrompt(
         for userPrompt: String,
+        appKind: ToolAppKind,
         sandboxEnabled: Bool
     ) -> String {
         """
         Return a plain text prompt to be given to a macOS SwiftUI AI coding agent for the user's request below.
+
+        \(ToolGenerationPrompts.appPresentationContext(appKind: appKind))
 
         \(ToolGenerationPrompts.sandboxContext(sandboxEnabled: sandboxEnabled))
 
@@ -265,6 +301,9 @@ struct ToolPromptRefinementClient: Sendable {
         - Must be under 750 characters.
         - Should expand the user's request with specific product intent, core features, expected interactions, layout and visual design direction, and useful states such as empty, loading, complete, or error states when relevant.
         - Treat every request as a first-version prototype unless the user explicitly asks for a full-featured app.
+        - Must preserve whether the generated app is a window app or menu bar app.
+        - For menu bar apps, describe a compact menu bar popover utility with concise controls, short labels, bounded size, and a focused quick workflow. Do not expand the request into a full-size desktop app, dashboard, sidebar layout, multi-pane workflow, or large complicated UI.
+        - For window apps, describe a normal native macOS window app layout when appropriate.
         - Choose at most 3 core user-facing features.
         - If the user lists many features, preserve the most important ones and explicitly simplify or omit the rest.
         - Prefer one polished primary workflow over many secondary workflows.
@@ -292,7 +331,8 @@ extension ToolMetadataSuggestion {
         let displayName = ToolNameSanitizer.displayName(fromPrompt: userPrompt)
         return ToolMetadataSuggestion(
             displayName: displayName,
-            iconPrompt: ""
+            iconPrompt: "",
+            menuBarSystemImage: ToolMenuBarSymbol.fallback
         )
     }
 }

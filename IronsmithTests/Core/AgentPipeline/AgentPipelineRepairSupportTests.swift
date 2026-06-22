@@ -418,6 +418,7 @@ extension AgentPipelineTests {
 
         #expect(instructions.contains("self-contained"))
         #expect(instructions.contains("direct internet requests allowed"))
+        #expect(instructions.contains("Respect that app type when choosing scope, layout density, and sizing"))
         #expect(instructions.contains("Treat that as runtime context, not a reason to reduce useful scope"))
         #expect(instructions.contains("sandbox-compatible macOS patterns"))
         #expect(instructions.contains("use what is needed to complete the user's ask"))
@@ -445,6 +446,50 @@ extension AgentPipelineTests {
         #expect(prompt.contains("Generate ContentView.swift only."))
         #expect(!(prompt.contains("capped at")))
         #expect(!(prompt.contains("output tokens")))
+    }
+
+    @Test
+    func singleFilePromptsIncludeAppTypeContext() {
+        let menuBarCreatePrompt = ToolGenerationPrompts.singleFileCreatePrompt(
+            userPrompt: "Build a timer",
+            executableName: "Timer",
+            sandboxEnabled: true,
+            appKind: .menuBar
+        )
+        let menuBarEditPrompt = ToolGenerationPrompts.singleFileEditPrompt(
+            userPrompt: "Make it simpler",
+            executableName: "Timer",
+            existingSource: "import SwiftUI\n\nstruct ContentView: View { var body: some View { Text(\"Timer\") } }"
+        )
+        let menuBarDiffPrompt = ToolGenerationPrompts.singleFileEditDiffPrompt(
+            userPrompt: "Make it simpler",
+            executableName: "Timer",
+            existingSource: "import SwiftUI\n\nstruct ContentView: View { var body: some View { Text(\"Timer\") } }",
+            maximumDiffHunks: nil
+        )
+        let windowCreatePrompt = ToolGenerationPrompts.singleFileCreatePrompt(
+            userPrompt: "Build a planner",
+            executableName: "Planner",
+            sandboxEnabled: true,
+            appKind: .window
+        )
+
+        #expect(menuBarCreatePrompt.contains("App type: menu bar app."))
+        #expect(menuBarCreatePrompt.contains("MenuBarExtra popover-style window"))
+        #expect(menuBarCreatePrompt.contains("not a regular full-size app window"))
+        #expect(menuBarCreatePrompt.contains("compact menu bar utility"))
+        #expect(menuBarCreatePrompt.contains("bounded width and height"))
+        #expect(!(menuBarCreatePrompt.contains("Avoid full-app layouts")))
+
+        for prompt in [menuBarEditPrompt, menuBarDiffPrompt] {
+            #expect(!(prompt.contains("App type: menu bar app.")))
+            #expect(!(prompt.contains("MenuBarExtra popover-style window")))
+            #expect(!(prompt.contains("compact menu bar utility")))
+        }
+
+        #expect(windowCreatePrompt.contains("App type: window app."))
+        #expect(windowCreatePrompt.contains("normal macOS WindowGroup"))
+        #expect(windowCreatePrompt.contains("native desktop layout sized for a regular app window"))
     }
 
     @Test

@@ -54,6 +54,105 @@ struct ToolManifestFile: Codable, Equatable, Sendable {
     var description: String
 }
 
+enum ToolAppKind: String, Codable, CaseIterable, Equatable, Sendable {
+    case window
+    case menuBar = "menu_bar"
+
+    var displayName: String {
+        switch self {
+        case .window: return "Window App"
+        case .menuBar: return "Menu Bar App"
+        }
+    }
+}
+
+enum ToolMenuBarSymbol {
+    nonisolated static let fallback = "hammer"
+
+    nonisolated static let allowedSymbols = [
+        "hammer",
+        "wrench.and.screwdriver",
+        "sparkles",
+        "bolt",
+        "clock",
+        "timer",
+        "calendar",
+        "checkmark.circle",
+        "list.bullet",
+        "note.text",
+        "tray",
+        "folder",
+        "doc.text",
+        "magnifyingglass",
+        "camera",
+        "mic",
+        "map",
+        "location",
+        "person.crop.circle",
+        "chart.bar",
+        "house",
+        "dollarsign.circle",
+        "cart",
+        "gamecontroller",
+        "paintbrush",
+        "pencil",
+        "book",
+        "bell",
+        "cloud",
+        "globe",
+        "link",
+        "lock",
+        "shield",
+        "terminal",
+    ]
+
+    nonisolated static func validated(_ symbol: String?) -> String {
+        guard let symbol = symbol?.trimmingCharacters(in: .whitespacesAndNewlines),
+              allowedSymbols.contains(symbol)
+        else {
+            return fallback
+        }
+        return symbol
+    }
+
+}
+
+struct ToolGenerationSettings: Equatable, Sendable {
+    var appKind: ToolAppKind
+    var menuBarSystemImage: String
+    var sandboxEnabled: Bool
+    var sandboxPermissions: GeneratedAppSandboxPermissions
+    var resourcePermissions: GeneratedAppResourcePermissions
+
+    nonisolated init(
+        appKind: ToolAppKind = .window,
+        menuBarSystemImage: String = ToolMenuBarSymbol.fallback,
+        sandboxEnabled: Bool = true,
+        sandboxPermissions: GeneratedAppSandboxPermissions = .default,
+        resourcePermissions: GeneratedAppResourcePermissions = .none
+    ) {
+        self.appKind = appKind
+        self.menuBarSystemImage = ToolMenuBarSymbol.validated(menuBarSystemImage)
+        self.sandboxEnabled = sandboxEnabled
+        self.sandboxPermissions = sandboxPermissions
+        self.resourcePermissions = resourcePermissions
+    }
+
+    nonisolated static var `default`: ToolGenerationSettings {
+        ToolGenerationSettings()
+    }
+
+    nonisolated func withMenuBarSystemImage(_ symbol: String) -> ToolGenerationSettings {
+        ToolGenerationSettings(
+            appKind: appKind,
+            menuBarSystemImage: symbol,
+            sandboxEnabled: sandboxEnabled,
+            sandboxPermissions: sandboxPermissions,
+            resourcePermissions: resourcePermissions
+        )
+    }
+}
+
 enum ContentViewDeterministicEditOperation: String, Codable, CaseIterable, Equatable, Sendable {
     case addImport
     case addStateProperty
@@ -81,22 +180,27 @@ struct ToolGenerationResult: Equatable, Sendable {
     let toolName: String
     let executableName: String
     let bundleIdentifier: String
-    let sandboxEnabled: Bool
+    let settings: ToolGenerationSettings
     let packageRootURL: URL
     let manifest: ToolManifest
+
+    var sandboxEnabled: Bool {
+        settings.sandboxEnabled
+    }
 
     init(
         toolName: String,
         executableName: String,
         bundleIdentifier: String? = nil,
         sandboxEnabled: Bool = true,
+        settings: ToolGenerationSettings? = nil,
         packageRootURL: URL,
         manifest: ToolManifest
     ) {
         self.toolName = toolName
         self.executableName = executableName
         self.bundleIdentifier = bundleIdentifier ?? ToolBundleIdentifier.make(executableName: executableName)
-        self.sandboxEnabled = sandboxEnabled
+        self.settings = settings ?? ToolGenerationSettings(sandboxEnabled: sandboxEnabled)
         self.packageRootURL = packageRootURL
         self.manifest = manifest
     }
@@ -166,6 +270,8 @@ struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let pendingContentViewDraftPath = "\(packageMetadataDirectoryName)/\(pendingContentViewDraftFilename)"
     nonisolated static let pendingContentViewVersionFilename = "pending-ContentView.swift"
     nonisolated static let previousContentViewVersionFilename = "previous-ContentView.swift"
+    nonisolated static let pendingBuildSettingsVersionFilename = "pending-build-settings.json"
+    nonisolated static let previousBuildSettingsVersionFilename = "previous-build-settings.json"
 
     let packageRootURL: URL
     let executableName: String
@@ -196,6 +302,14 @@ struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var previousContentViewVersionURL: URL {
         Self.previousContentViewVersionURL(for: packageRootURL)
+    }
+
+    nonisolated var pendingBuildSettingsVersionURL: URL {
+        Self.pendingBuildSettingsVersionURL(for: packageRootURL)
+    }
+
+    nonisolated var previousBuildSettingsVersionURL: URL {
+        Self.previousBuildSettingsVersionURL(for: packageRootURL)
     }
 
     nonisolated var sourceDirectoryURL: URL {
@@ -285,6 +399,16 @@ struct ToolPackageLayout: Equatable, Sendable {
             .appendingPathComponent(previousContentViewVersionFilename)
     }
 
+    nonisolated static func pendingBuildSettingsVersionURL(for packageRootURL: URL) -> URL {
+        versionsDirectoryURL(for: packageRootURL)
+            .appendingPathComponent(pendingBuildSettingsVersionFilename)
+    }
+
+    nonisolated static func previousBuildSettingsVersionURL(for packageRootURL: URL) -> URL {
+        versionsDirectoryURL(for: packageRootURL)
+            .appendingPathComponent(previousBuildSettingsVersionFilename)
+    }
+
     nonisolated static func sandboxEntitlementsURL(for packageRootURL: URL) -> URL {
         packageMetadataDirectoryURL(for: packageRootURL)
             .appendingPathComponent("sandbox.entitlements")
@@ -309,18 +433,78 @@ struct ToolPackageLayout: Equatable, Sendable {
         """
     }
 
-    nonisolated func fixedAppEntrySource() -> String {
-        """
-        import SwiftUI
+    nonisolated func fixedAppEntrySource(
+        displayName: String? = nil,
+        settings: ToolGenerationSettings = .default
+    ) -> String {
+        switch settings.appKind {
+        case .window:
+            """
+            import AppKit
+            import SwiftUI
 
-        @main
-        struct \(executableName): App {
-            var body: some Scene {
-                WindowGroup {
-                    ContentView()
+            @MainActor
+            private final class IronsmithGeneratedAppDelegate: NSObject, NSApplicationDelegate {
+                func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+                    Bundle.main.object(forInfoDictionaryKey: "IronsmithQuitOnLastWindowClose") as? Bool == true
                 }
             }
+
+            @main
+            struct \(executableName): App {
+                @NSApplicationDelegateAdaptor(IronsmithGeneratedAppDelegate.self) private var appDelegate
+
+                var body: some Scene {
+                    WindowGroup {
+                        ContentView()
+                    }
+                }
+            }
+            """
+        case .menuBar:
+            """
+            import AppKit
+            import SwiftUI
+
+            @main
+            struct \(executableName): App {
+                var body: some Scene {
+                    MenuBarExtra(\(Self.swiftStringLiteral(displayName ?? executableName)), systemImage: \(Self.swiftStringLiteral(settings.menuBarSystemImage))) {
+                        VStack(spacing: 0) {
+                            HStack {
+                                Text(\(Self.swiftStringLiteral(displayName ?? executableName)))
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+
+                                Spacer()
+
+                                Button {
+                                    NSApplication.shared.terminate(nil)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .imageScale(.medium)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Quit")
+                                .accessibilityLabel("Quit")
+                            }
+                            .padding(.top, 10)
+                            .padding(.bottom, 12)
+                            .padding(.horizontal, 12)
+
+                            ContentView()
+                        }
+                    }
+                    .menuBarExtraStyle(.window)
+                }
+            }
+            """
         }
-        """
+    }
+
+    nonisolated private static func swiftStringLiteral(_ value: String) -> String {
+        String(reflecting: value)
     }
 }

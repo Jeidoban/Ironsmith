@@ -28,6 +28,97 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func toolBuildSettingsRoundTripThroughStoredTool() {
+        let tool = StoredTool(
+            name: "Timer",
+            sandboxEnabled: false,
+            appKind: .menuBar,
+            menuBarSystemImage: "timer",
+            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            resourcePermissions: GeneratedAppResourcePermissions([.camera, .microphone]),
+            packageRootPath: "/tmp/timer"
+        )
+
+        #expect(tool.appKind == .menuBar)
+        #expect(tool.validatedMenuBarSystemImage == "timer")
+        #expect(tool.storedSandboxPermissions?.enabled == [.internet])
+        #expect(tool.storedResourcePermissions?.enabled == [.camera, .microphone])
+
+        tool.storedSandboxPermissions = GeneratedAppSandboxPermissions.none
+        tool.storedResourcePermissions = GeneratedAppResourcePermissions.none
+
+        #expect(tool.sandboxPermissionRawValues == "")
+        #expect(tool.resourcePermissionRawValues == "")
+        #expect(tool.storedSandboxPermissions?.enabled.isEmpty == true)
+        #expect(tool.storedResourcePermissions?.enabled.isEmpty == true)
+    }
+
+    @MainActor
+    @Test
+    func legacyToolSettingsUseProvidedPermissionDefaults() {
+        let tool = StoredTool(
+            name: "Legacy",
+            sandboxEnabled: true,
+            packageRootPath: "/tmp/legacy"
+        )
+        let settings = tool.generationSettings(
+            defaults: ToolGenerationSettings(
+                sandboxPermissions: GeneratedAppSandboxPermissions([.userSelectedFiles]),
+                resourcePermissions: GeneratedAppResourcePermissions([.location])
+            )
+        )
+
+        #expect(settings.appKind == .window)
+        #expect(settings.menuBarSystemImage == ToolMenuBarSymbol.fallback)
+        #expect(settings.sandboxPermissions.enabled == [.userSelectedFiles])
+        #expect(settings.resourcePermissions.enabled == [.location])
+    }
+
+    @MainActor
+    @Test
+    func fixedAppEntrySourceCanUseMenuBarExtra() {
+        let layout = ToolPackageLayout(
+            packageRootURL: URL(fileURLWithPath: "/tmp/MenuTimer", isDirectory: true),
+            executableName: "MenuTimer"
+        )
+        let source = layout.fixedAppEntrySource(
+            displayName: "Menu Timer",
+            settings: ToolGenerationSettings(appKind: .menuBar, menuBarSystemImage: "timer")
+        )
+
+        #expect(source.contains("import AppKit"))
+        #expect(source.contains("MenuBarExtra(\"Menu Timer\", systemImage: \"timer\")"))
+        #expect(source.contains("Text(\"Menu Timer\")"))
+        #expect(source.contains(".truncationMode(.tail)"))
+        #expect(source.contains("NSApplication.shared.terminate(nil)"))
+        #expect(source.contains(".accessibilityLabel(\"Quit\")"))
+        #expect(source.contains("ContentView()"))
+        #expect(source.contains(".padding(.bottom, 12)"))
+        #expect(source.contains(".padding(.horizontal, 12)"))
+        #expect(source.contains(".menuBarExtraStyle(.window)"))
+        #expect(!(source.contains("WindowGroup")))
+    }
+
+    @MainActor
+    @Test
+    func fixedWindowAppEntrySourceQuitsInternalBuildsAfterLastWindowCloses() {
+        let layout = ToolPackageLayout(
+            packageRootURL: URL(fileURLWithPath: "/tmp/WindowTimer", isDirectory: true),
+            executableName: "WindowTimer"
+        )
+        let source = layout.fixedAppEntrySource(settings: ToolGenerationSettings(appKind: .window))
+
+        #expect(source.contains("import AppKit"))
+        #expect(source.contains("IronsmithGeneratedAppDelegate"))
+        #expect(source.contains("applicationShouldTerminateAfterLastWindowClosed"))
+        #expect(source.contains("IronsmithQuitOnLastWindowClose"))
+        #expect(source.contains("WindowGroup"))
+        #expect(source.contains("ContentView()"))
+        #expect(!(source.contains("MenuBarExtra")))
+    }
+
+    @MainActor
+    @Test
     func agentArtifactsRoundTripThroughJSON() throws {
         let manifest = ToolManifest(
             displayName: "Clipboard Cleaner",
@@ -215,6 +306,7 @@ extension AgentPipelineTests {
         #expect(plist["CFBundleIdentifier"] as? String == request.bundleIdentifier)
         #expect(plist["CFBundleExecutable"] as? String == request.executableName)
         #expect(plist["LSUIElement"] as? Bool == true)
+        #expect(plist["IronsmithQuitOnLastWindowClose"] as? Bool == true)
         #expect(entitlements["com.apple.security.app-sandbox"] as? Bool == true)
         #expect(entitlements["com.apple.security.files.user-selected.read-write"] as? Bool == true)
         #expect(entitlements["com.apple.security.network.client"] as? Bool == true)
@@ -229,6 +321,76 @@ extension AgentPipelineTests {
         #expect(await capture.signedEntitlementsURL == request.layout.sandboxEntitlementsURL)
         #expect(await capture.verifiedAppURL == appURL)
         #expect(await capture.strippedURL == appURL)
+    }
+
+    @MainActor
+    @Test
+    func appBundlerDoesNotRewritePackageAppEntryWhenBuildingBundle() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("ExistingWindowTool", isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "ExistingWindowTool")
+        let appEntryURL = packageRoot.appendingPathComponent(layout.appEntrySourcePath)
+        let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
+        let originalAppEntrySource = """
+        import SwiftUI
+
+        @main
+        struct ExistingWindowTool: App {
+            var body: some Scene {
+                WindowGroup {
+                    ContentView()
+                }
+            }
+        }
+        """
+        try FileManager.default.createDirectory(
+            at: appEntryURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try originalAppEntrySource.write(to: appEntryURL, atomically: true, encoding: .utf8)
+
+        let processClient = SwiftPackageProcessClient(
+            build: { _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            buildRelease: { _ in
+                try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
+                try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent("ExistingWindowTool"))
+                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            showBinPath: { _ in releaseBinDirectory },
+            showReleaseBinPath: { _ in releaseBinDirectory },
+            launch: { _ in },
+            launchApp: { _ in },
+            stripQuarantine: { _ in },
+            signAdHoc: { _, _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            verifyCodeSignature: { _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = ToolAppBundleClient.live(
+            processClient: processClient,
+            iconClient: ToolIconClient { _ in
+                throw ToolAppBundleError.iconEncodingFailed
+            }
+        )
+        let request = ToolAppBundleRequest(
+            displayName: "Existing Window Tool",
+            executableName: "ExistingWindowTool",
+            bundleIdentifier: "com.ironsmith.tests.existing-window-tool",
+            packageRootURL: packageRoot,
+            sandboxEnabled: false,
+            settings: ToolGenerationSettings(appKind: .menuBar)
+        )
+
+        _ = try await client.buildInternalApp(request)
+
+        let currentAppEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)
+        #expect(currentAppEntrySource == originalAppEntrySource)
     }
 
     @MainActor
@@ -327,6 +489,37 @@ extension AgentPipelineTests {
         #expect(request.sandboxPermissions.contains(.internet))
         #expect(!(request.sandboxPermissions.contains(.userSelectedFiles)))
 
+        let storedPackageRoot = root.appendingPathComponent("StoredSettingsTool", isDirectory: true)
+        let storedTool = StoredTool(
+            name: "Stored Settings",
+            executableName: "StoredSettingsTool",
+            bundleIdentifier: "com.ironsmith.tests.stored-settings",
+            sandboxEnabled: true,
+            sandboxPermissions: GeneratedAppSandboxPermissions([.userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions([.camera]),
+            packageRootPath: storedPackageRoot.path
+        )
+        try Self.writePlistDictionary(
+            [
+                "com.apple.security.app-sandbox": true,
+                "com.apple.security.network.client": true,
+            ],
+            to: ToolPackageLayout.sandboxEntitlementsURL(for: storedPackageRoot)
+        )
+        try Self.writePlistDictionary(
+            [
+                "NSContactsUsageDescription": "artifact contacts access"
+            ],
+            to: storedTool.appBundleURL
+                .appendingPathComponent("Contents", isDirectory: true)
+                .appendingPathComponent("Info.plist")
+        )
+
+        let storedRequest = ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(storedTool)
+
+        #expect(storedRequest.sandboxPermissions.enabled == [.userSelectedFiles])
+        #expect(storedRequest.resourcePermissions.enabled == [.camera])
+
         let legacyPackageRoot = root.appendingPathComponent("LegacyTool", isDirectory: true)
         let legacyTool = StoredTool(
             name: "Legacy",
@@ -406,6 +599,7 @@ extension AgentPipelineTests {
         #expect(appURL == applicationsDirectory.appendingPathComponent("Exported Tool.app", isDirectory: true))
         #expect(plist["CFBundleIdentifier"] as? String == request.bundleIdentifier)
         #expect(plist["LSUIElement"] == nil)
+        #expect(plist["IronsmithQuitOnLastWindowClose"] == nil)
         #expect(plist["NSContactsUsageDescription"] as? String == GeneratedAppResourcePermission.contacts.usageDescription)
         #expect(plist["NSPhotoLibraryUsageDescription"] as? String == GeneratedAppResourcePermission.photoLibrary.usageDescription)
         #expect(plist["NSPhotoLibraryAddUsageDescription"] as? String == GeneratedAppResourcePermission.photoLibrary.usageDescription)
@@ -415,6 +609,58 @@ extension AgentPipelineTests {
         #expect(signedAppURL != appURL)
         #expect(signedAppURL.deletingLastPathComponent() == appURL.deletingLastPathComponent())
         #expect(await capture.signedEntitlementsURL == nil)
+    }
+
+    @MainActor
+    @Test
+    func appBundlerExportsMenuBarBundleHiddenFromDock() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("MenuBarTool", isDirectory: true)
+        let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
+        let applicationsDirectory = root.appendingPathComponent("Applications", isDirectory: true)
+        let processClient = SwiftPackageProcessClient(
+            build: { _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            buildRelease: { _ in
+                try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
+                try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent("MenuBarTool"))
+                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            showBinPath: { _ in releaseBinDirectory },
+            showReleaseBinPath: { _ in releaseBinDirectory },
+            launch: { _ in },
+            launchApp: { _ in },
+            stripQuarantine: { _ in },
+            signAdHoc: { _, _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            verifyCodeSignature: { _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = ToolAppBundleClient.live(
+            processClient: processClient,
+            iconClient: ToolIconClient { _ in
+                throw ToolAppBundleError.iconEncodingFailed
+            }
+        )
+        let request = ToolAppBundleRequest(
+            displayName: "Menu Bar Tool",
+            executableName: "MenuBarTool",
+            bundleIdentifier: "com.ironsmith.tests.menu-bar-tool",
+            packageRootURL: packageRoot,
+            sandboxEnabled: true,
+            settings: ToolGenerationSettings(appKind: .menuBar)
+        )
+
+        let appURL = try await client.exportApp(request, applicationsDirectory)
+
+        let plist = try Self.plistDictionary(at: appURL.appendingPathComponent("Contents/Info.plist"))
+        #expect(plist["LSUIElement"] as? Bool == true)
+        #expect(plist["IronsmithQuitOnLastWindowClose"] == nil)
     }
 
     @MainActor

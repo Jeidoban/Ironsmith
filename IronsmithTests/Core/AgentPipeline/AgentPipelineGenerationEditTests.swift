@@ -63,7 +63,10 @@ extension AgentPipelineTests {
         inferenceStore.generationPreferences.generatedAppLocationAccessEnabled = true
         inferenceStore.generationPreferences.generatedAppCalendarAccessEnabled = true
 
-        store.selectForEditing(existingTool)
+        store.selectForEditing(
+            existingTool,
+            defaultSettings: ToolLibraryStore.defaultGenerationSettings(from: inferenceStore.generationPreferences)
+        )
         store.sandboxEnabled = false
         store.prompt = "Add down payment support"
 

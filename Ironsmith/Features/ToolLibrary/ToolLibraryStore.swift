@@ -28,11 +28,17 @@ final class ToolLibraryStore {
     var presentedErrorAction: ToolLibraryPresentedErrorAction?
     var isGenerating = false
     var sandboxEnabled = true
+    var appKind: ToolAppKind = .window
+    var menuBarSystemImage = ToolMenuBarSymbol.fallback
+    var sandboxPermissions = GeneratedAppSandboxPermissions.default
+    var resourcePermissions = GeneratedAppResourcePermissions.none
     var runningToolID: UUID?
     var exportingToolID: UUID?
     private(set) var selectedToolID: UUID?
     private(set) var selectedToolName: String?
     private var restorableToolIDs = Set<UUID>()
+    @ObservationIgnored private var nextGenerationSettings: ToolGenerationSettings?
+    @ObservationIgnored private var hasCustomizedNextGenerationSettings = false
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     private let dependencies: ToolLibraryDependencies
 
@@ -58,19 +64,25 @@ final class ToolLibraryStore {
         !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isGenerating
     }
 
-    func toggleSelection(for tool: Tool) {
+    var hasSelectedTool: Bool {
+        selectedToolID != nil
+    }
+
+    func toggleSelection(for tool: Tool, defaultSettings: ToolGenerationSettings = .default) {
+        initializeNextGenerationSettingsIfNeeded(defaultSettings)
         if selectedToolID == tool.id {
             clearSelection()
         } else {
-            selectForEditing(tool)
+            selectForEditing(tool, defaultSettings: defaultSettings)
         }
     }
 
-    func selectForEditing(_ tool: Tool) {
+    func selectForEditing(_ tool: Tool, defaultSettings: ToolGenerationSettings = .default) {
         guard tool.isGenerationReady else { return }
+        initializeNextGenerationSettingsIfNeeded(defaultSettings)
         selectedToolID = tool.id
         selectedToolName = tool.name
-        sandboxEnabled = tool.sandboxEnabled
+        applyComposerSettings(tool.generationSettings(defaults: defaultSettings))
     }
 
     func handleDeletedTool(_ tool: Tool) {
@@ -80,7 +92,8 @@ final class ToolLibraryStore {
         }
     }
 
-    func syncSelection(with tools: [Tool]) {
+    func syncSelection(with tools: [Tool], defaultSettings: ToolGenerationSettings = .default) {
+        initializeNextGenerationSettingsIfNeeded(defaultSettings)
         restorableToolIDs.formIntersection(tools.map(\.id))
 
         guard let selectedToolID else {
@@ -97,7 +110,20 @@ final class ToolLibraryStore {
         }
 
         selectedToolName = selectedTool.name
-        sandboxEnabled = selectedTool.sandboxEnabled
+        applyComposerSettings(selectedTool.generationSettings(defaults: defaultSettings))
+    }
+
+    func initializeNextGenerationSettingsIfNeeded(_ defaultSettings: ToolGenerationSettings) {
+        guard !hasCustomizedNextGenerationSettings else { return }
+        nextGenerationSettings = defaultSettings
+        if !hasSelectedTool {
+            applyComposerSettings(defaultSettings)
+        }
+    }
+
+    func rememberCurrentGenerationSettingsForNextGeneration() {
+        nextGenerationSettings = currentComposerSettings
+        hasCustomizedNextGenerationSettings = true
     }
 
     func isSelected(_ tool: Tool) -> Bool {
@@ -211,11 +237,28 @@ final class ToolLibraryStore {
         }
 
         do {
-            let contentViewPath = try Self.contentViewPath(for: tool)
-            try dependencies.versionBackupClient.restorePreviousVersion(tool.packageRootURL, contentViewPath)
+            let manifest = try Self.manifest(for: tool)
+            let layout = ToolPackageLayout(
+                packageRootURL: tool.packageRootURL,
+                executableName: manifest.executableName
+            )
+            let contentViewPath = manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName)
+            let restoredSettings = try dependencies.versionBackupClient.restorePreviousVersion(
+                tool.packageRootURL,
+                contentViewPath,
+                tool.generationSettings(defaults: .default)
+            )
+            tool.applyGenerationSettings(restoredSettings)
+            try Self.writeAppEntry(
+                layout: layout,
+                displayName: manifest.displayName,
+                settings: restoredSettings
+            )
             try await dependencies.buildClient.buildTool(tool)
             clearPendingGeneration(on: tool)
-            tool.updatedAt = .now
+            if selectedToolID == tool.id {
+                applyComposerSettings(restoredSettings)
+            }
             try modelContext.save()
         } catch {
             modelContext.rollback()
@@ -229,7 +272,9 @@ final class ToolLibraryStore {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedSelectedToolID = selectedToolID
         let submittedToolName = selectedToolName
-        let submittedSandboxEnabled = sandboxEnabled
+        let submittedSettings = submittedGenerationSettings(
+            defaultSettings: Self.defaultGenerationSettings(from: inferenceStore.generationPreferences)
+        )
         var activeTool: Tool?
         isGenerating = true
         clearPresentedErrorState()
@@ -243,8 +288,6 @@ final class ToolLibraryStore {
 
             try await inferenceStore.prepareSelectedModelForGeneration()
             let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext()
-            let sandboxPermissions = inferenceStore.generationPreferences.generatedAppSandboxPermissions
-            let resourcePermissions = inferenceStore.generationPreferences.generatedAppResourcePermissions
             if let selectedTool {
                 markToolGenerating(
                     selectedTool,
@@ -267,9 +310,7 @@ final class ToolLibraryStore {
             let result = try await dependencies.generationClient.generateTool(
                 trimmedPrompt,
                 selectedTool,
-                submittedSandboxEnabled,
-                sandboxPermissions,
-                resourcePermissions,
+                submittedSettings,
                 languageModelContext,
                 lifecycle: lifecycle
             ) { _ in }
@@ -286,7 +327,11 @@ final class ToolLibraryStore {
                     name: result.toolName,
                     executableName: result.executableName,
                     bundleIdentifier: result.bundleIdentifier,
-                    sandboxEnabled: result.sandboxEnabled,
+                    sandboxEnabled: result.settings.sandboxEnabled,
+                    appKind: result.settings.appKind,
+                    menuBarSystemImage: result.settings.menuBarSystemImage,
+                    sandboxPermissions: result.settings.sandboxPermissions,
+                    resourcePermissions: result.settings.resourcePermissions,
                     packageRootPath: result.packageRootURL.path,
                     generationState: .ready,
                     generationPhase: .completed
@@ -436,7 +481,49 @@ final class ToolLibraryStore {
     private func clearSelection() {
         selectedToolID = nil
         selectedToolName = nil
-        sandboxEnabled = true
+        applyComposerSettings(nextGenerationSettings ?? .default)
+    }
+
+    private var currentComposerSettings: ToolGenerationSettings {
+        ToolGenerationSettings(
+            appKind: appKind,
+            menuBarSystemImage: menuBarSystemImage,
+            sandboxEnabled: sandboxEnabled,
+            sandboxPermissions: sandboxPermissions,
+            resourcePermissions: resourcePermissions
+        )
+    }
+
+    private func applyComposerSettings(_ settings: ToolGenerationSettings) {
+        sandboxEnabled = settings.sandboxEnabled
+        appKind = settings.appKind
+        menuBarSystemImage = settings.menuBarSystemImage
+        sandboxPermissions = settings.sandboxPermissions
+        resourcePermissions = settings.resourcePermissions
+    }
+
+    private func submittedGenerationSettings(defaultSettings: ToolGenerationSettings) -> ToolGenerationSettings {
+        let defaultBackedSandboxPermissions = !hasSelectedTool && nextGenerationSettings == nil
+            ? defaultSettings.sandboxPermissions
+            : sandboxPermissions
+        let defaultBackedResourcePermissions = !hasSelectedTool && nextGenerationSettings == nil
+            ? defaultSettings.resourcePermissions
+            : resourcePermissions
+        return ToolGenerationSettings(
+            appKind: appKind,
+            menuBarSystemImage: menuBarSystemImage,
+            sandboxEnabled: sandboxEnabled,
+            sandboxPermissions: defaultBackedSandboxPermissions,
+            resourcePermissions: defaultBackedResourcePermissions
+        )
+    }
+
+    static func defaultGenerationSettings(from preferences: GenerationPreferencesStore) -> ToolGenerationSettings {
+        ToolGenerationSettings(
+            sandboxEnabled: true,
+            sandboxPermissions: preferences.generatedAppSandboxPermissions,
+            resourcePermissions: preferences.generatedAppResourcePermissions
+        )
     }
 
     private func fetchSelectedTool(in modelContext: ModelContext) throws -> Tool? {
@@ -477,8 +564,9 @@ final class ToolLibraryStore {
         do {
             try await inferenceStore.prepareSelectedModelForGeneration()
             let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext()
-            let sandboxPermissions = inferenceStore.generationPreferences.generatedAppSandboxPermissions
-            let resourcePermissions = inferenceStore.generationPreferences.generatedAppResourcePermissions
+            let settings = tool.generationSettings(
+                defaults: Self.defaultGenerationSettings(from: inferenceStore.generationPreferences)
+            )
             markToolGenerating(
                 tool,
                 mode: tool.generationMode ?? .create,
@@ -490,9 +578,7 @@ final class ToolLibraryStore {
             let result = try await dependencies.generationClient.generateTool(
                 resumePrompt,
                 tool,
-                tool.sandboxEnabled,
-                sandboxPermissions,
-                resourcePermissions,
+                settings,
                 languageModelContext,
                 lifecycle: lifecycle
             ) { _ in }
@@ -538,7 +624,7 @@ final class ToolLibraryStore {
                         tool.name = preparedTool.name
                         tool.executableName = preparedTool.executableName
                         tool.bundleIdentifier = preparedTool.bundleIdentifier
-                        tool.sandboxEnabled = preparedTool.sandboxEnabled
+                        tool.applyGenerationSettings(preparedTool.settings)
                         tool.packageRootPath = preparedTool.packageRootURL.path
                         tool.generationState = .generating
                         tool.generationPhase = .planning
@@ -552,7 +638,11 @@ final class ToolLibraryStore {
                             name: preparedTool.name,
                             executableName: preparedTool.executableName,
                             bundleIdentifier: preparedTool.bundleIdentifier,
-                            sandboxEnabled: preparedTool.sandboxEnabled,
+                            sandboxEnabled: preparedTool.settings.sandboxEnabled,
+                            appKind: preparedTool.settings.appKind,
+                            menuBarSystemImage: preparedTool.settings.menuBarSystemImage,
+                            sandboxPermissions: preparedTool.settings.sandboxPermissions,
+                            resourcePermissions: preparedTool.settings.resourcePermissions,
                             packageRootPath: preparedTool.packageRootURL.path,
                             generationState: .generating,
                             generationPhase: .planning,
@@ -639,7 +729,7 @@ final class ToolLibraryStore {
         tool.name = result.toolName
         tool.executableName = result.executableName
         tool.bundleIdentifier = result.bundleIdentifier
-        tool.sandboxEnabled = result.sandboxEnabled
+        tool.applyGenerationSettings(result.settings)
         tool.packageRootPath = result.packageRootURL.path
         clearPendingGeneration(on: tool)
     }
@@ -678,8 +768,7 @@ final class ToolLibraryStore {
     }
 
     private static func contentViewPath(for tool: Tool) throws -> String {
-        let data = try Data(contentsOf: tool.agentManifestURL)
-        let manifest = try JSONDecoder().decode(ToolManifest.self, from: data)
+        let manifest = try manifest(for: tool)
         let layout = ToolPackageLayout(
             packageRootURL: tool.packageRootURL,
             executableName: manifest.executableName
@@ -687,9 +776,28 @@ final class ToolLibraryStore {
         return manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName)
     }
 
+    private static func manifest(for tool: Tool) throws -> ToolManifest {
+        let data = try Data(contentsOf: tool.agentManifestURL)
+        return try JSONDecoder().decode(ToolManifest.self, from: data)
+    }
+
     private static func contentViewURL(for tool: Tool) throws -> URL {
         let contentViewPath = try contentViewPath(for: tool)
         return try ToolPackageLayout.packageFileURL(for: contentViewPath, packageRootURL: tool.packageRootURL)
+    }
+
+    private static func writeAppEntry(
+        layout: ToolPackageLayout,
+        displayName: String,
+        settings: ToolGenerationSettings
+    ) throws {
+        let appEntryURL = try layout.packageFileURL(for: layout.appEntrySourcePath)
+        try FileManager.default.createDirectory(
+            at: appEntryURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try layout.fixedAppEntrySource(displayName: displayName, settings: settings)
+            .write(to: appEntryURL, atomically: true, encoding: .utf8)
     }
 
     private static var defaultPrompt: String {

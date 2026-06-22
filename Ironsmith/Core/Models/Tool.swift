@@ -38,6 +38,10 @@ final class Tool {
     var executableName: String
     var bundleIdentifier: String
     var sandboxEnabled: Bool
+    var appKindRawValue: String = ToolAppKind.window.rawValue
+    var menuBarSystemImage: String = ToolMenuBarSymbol.fallback
+    var sandboxPermissionRawValues: String?
+    var resourcePermissionRawValues: String?
     var packageRootPath: String
     var generationStateRawValue: String = ToolGenerationState.ready.rawValue
     var generationPhaseRawValue: String? = ToolGenerationPhase.completed.rawValue
@@ -54,6 +58,10 @@ final class Tool {
         executableName: String? = nil,
         bundleIdentifier: String? = nil,
         sandboxEnabled: Bool = true,
+        appKind: ToolAppKind = .window,
+        menuBarSystemImage: String = ToolMenuBarSymbol.fallback,
+        sandboxPermissions: GeneratedAppSandboxPermissions? = nil,
+        resourcePermissions: GeneratedAppResourcePermissions? = nil,
         packageRootPath: String,
         generationState: ToolGenerationState = .ready,
         generationPhase: ToolGenerationPhase? = .completed,
@@ -70,6 +78,10 @@ final class Tool {
         self.executableName = resolvedExecutableName
         self.bundleIdentifier = bundleIdentifier ?? ToolBundleIdentifier.make(executableName: resolvedExecutableName)
         self.sandboxEnabled = sandboxEnabled
+        self.appKindRawValue = appKind.rawValue
+        self.menuBarSystemImage = ToolMenuBarSymbol.validated(menuBarSystemImage)
+        self.sandboxPermissionRawValues = sandboxPermissions?.rawValueList
+        self.resourcePermissionRawValues = resourcePermissions?.rawValueList
         self.packageRootPath = packageRootPath
         self.generationStateRawValue = generationState.rawValue
         self.generationPhaseRawValue = generationPhase?.rawValue
@@ -106,6 +118,72 @@ extension Tool {
         }
     }
 
+    var appKind: ToolAppKind {
+        get {
+            ToolAppKind(rawValue: appKindRawValue) ?? .window
+        }
+        set {
+            appKindRawValue = newValue.rawValue
+        }
+    }
+
+    var validatedMenuBarSystemImage: String {
+        get {
+            ToolMenuBarSymbol.validated(menuBarSystemImage)
+        }
+        set {
+            menuBarSystemImage = ToolMenuBarSymbol.validated(newValue)
+        }
+    }
+
+    var storedSandboxPermissions: GeneratedAppSandboxPermissions? {
+        get {
+            guard let sandboxPermissionRawValues else { return nil }
+            return GeneratedAppSandboxPermissions(rawValueList: sandboxPermissionRawValues)
+        }
+        set {
+            sandboxPermissionRawValues = newValue?.rawValueList
+        }
+    }
+
+    var storedResourcePermissions: GeneratedAppResourcePermissions? {
+        get {
+            guard let resourcePermissionRawValues else { return nil }
+            return GeneratedAppResourcePermissions(rawValueList: resourcePermissionRawValues)
+        }
+        set {
+            resourcePermissionRawValues = newValue?.rawValueList
+        }
+    }
+
+    func generationSettings(
+        defaultSandboxPermissions: GeneratedAppSandboxPermissions,
+        defaultResourcePermissions: GeneratedAppResourcePermissions
+    ) -> ToolGenerationSettings {
+        ToolGenerationSettings(
+            appKind: appKind,
+            menuBarSystemImage: validatedMenuBarSystemImage,
+            sandboxEnabled: sandboxEnabled,
+            sandboxPermissions: storedSandboxPermissions ?? defaultSandboxPermissions,
+            resourcePermissions: storedResourcePermissions ?? defaultResourcePermissions
+        )
+    }
+
+    func generationSettings(defaults: ToolGenerationSettings) -> ToolGenerationSettings {
+        generationSettings(
+            defaultSandboxPermissions: defaults.sandboxPermissions,
+            defaultResourcePermissions: defaults.resourcePermissions
+        )
+    }
+
+    func applyGenerationSettings(_ settings: ToolGenerationSettings) {
+        appKind = settings.appKind
+        validatedMenuBarSystemImage = settings.menuBarSystemImage
+        sandboxEnabled = settings.sandboxEnabled
+        storedSandboxPermissions = settings.sandboxPermissions
+        storedResourcePermissions = settings.resourcePermissions
+    }
+
     var isGenerationReady: Bool {
         generationState == .ready
     }
@@ -132,6 +210,50 @@ extension Tool {
 
     var appBundleURL: URL {
         packageRootURL.appendingPathComponent("\(ToolNameSanitizer.appBundleName(from: name)).app", isDirectory: true)
+    }
+}
+
+extension GeneratedAppResourcePermissions {
+    nonisolated init(rawValueList: String) {
+        let rawValues = Self.rawValues(from: rawValueList)
+        self.init(
+            GeneratedAppResourcePermission.allCases.filter { rawValues.contains($0.rawValue) }
+        )
+    }
+
+    nonisolated var rawValueList: String {
+        enabledPermissions.map(\.rawValue).joined(separator: ",")
+    }
+
+    nonisolated private static func rawValues(from rawValueList: String) -> Set<String> {
+        Set(
+            rawValueList
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+    }
+}
+
+extension GeneratedAppSandboxPermissions {
+    nonisolated init(rawValueList: String) {
+        let rawValues = Self.rawValues(from: rawValueList)
+        self.init(
+            GeneratedAppSandboxPermission.allCases.filter { rawValues.contains($0.rawValue) }
+        )
+    }
+
+    nonisolated var rawValueList: String {
+        enabledPermissions.map(\.rawValue).joined(separator: ",")
+    }
+
+    nonisolated private static func rawValues(from rawValueList: String) -> Set<String> {
+        Set(
+            rawValueList
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
     }
 }
 
