@@ -133,7 +133,7 @@ extension ContentViewBuildRepairLoop {
         switch generationError {
         case .invalidRepairPatch, .noRepairPatchCandidate:
             return true
-        case .emptyPrompt, .compileFailed, .couldNotEncodeManifest:
+        case .emptyPrompt, .compileFailed:
             return false
         }
     }
@@ -178,7 +178,7 @@ extension ContentViewBuildRepairLoop {
             return .invalidRepairPatch
         case .noRepairPatchCandidate:
             return .noDeterministicRepair
-        case .emptyPrompt, .compileFailed, .couldNotEncodeManifest:
+        case .emptyPrompt, .compileFailed:
             return nil
         }
     }

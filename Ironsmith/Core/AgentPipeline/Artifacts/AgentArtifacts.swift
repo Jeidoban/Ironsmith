@@ -43,17 +43,6 @@ nonisolated struct AgentLanguageModelContext {
     }
 }
 
-struct ToolManifest: Codable, Equatable, Sendable {
-    var displayName: String
-    var executableName: String
-    var files: [ToolManifestFile]
-}
-
-struct ToolManifestFile: Codable, Equatable, Sendable {
-    var path: String
-    var description: String
-}
-
 enum ToolAppKind: String, Codable, CaseIterable, Equatable, Sendable {
     case window
     case menuBar = "menu_bar"
@@ -182,22 +171,19 @@ struct ToolGenerationResult: Equatable, Sendable {
     let bundleIdentifier: String
     let settings: ToolGenerationSettings
     let packageRootURL: URL
-    let manifest: ToolManifest
 
     init(
         toolName: String,
         executableName: String,
         bundleIdentifier: String? = nil,
         settings: ToolGenerationSettings,
-        packageRootURL: URL,
-        manifest: ToolManifest
+        packageRootURL: URL
     ) {
         self.toolName = toolName
         self.executableName = executableName
         self.bundleIdentifier = bundleIdentifier ?? ToolBundleIdentifier.make(executableName: executableName)
         self.settings = settings
         self.packageRootURL = packageRootURL
-        self.manifest = manifest
     }
 }
 
@@ -258,7 +244,6 @@ enum ToolNameSanitizer {
 }
 
 struct ToolPackageLayout: Equatable, Sendable {
-    nonisolated static let agentManifestFilename = "ironsmith-manifest.json"
     nonisolated static let packageMetadataDirectoryName = ".ironsmith"
     nonisolated static let versionsDirectoryName = "versions"
     nonisolated static let pendingContentViewDraftFilename = "pending-ContentView.swift"
@@ -273,10 +258,6 @@ struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var packageManifestURL: URL {
         packageRootURL.appendingPathComponent("Package.swift")
-    }
-
-    nonisolated var agentManifestURL: URL {
-        packageRootURL.appendingPathComponent(Self.agentManifestFilename)
     }
 
     nonisolated var packageMetadataDirectoryURL: URL {
@@ -339,6 +320,10 @@ struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var defaultContentViewFileName: String {
         "ContentView.swift"
+    }
+
+    nonisolated var contentViewSourcePath: String {
+        sourcePath(for: defaultContentViewFileName)
     }
 
     nonisolated func sourcePath(for fileName: String) -> String {

@@ -196,12 +196,12 @@ extension Tool {
         packageRootURL.appendingPathComponent("Package.swift")
     }
 
-    var agentManifestURL: URL {
-        packageRootURL.appendingPathComponent(ToolPackageLayout.agentManifestFilename)
+    var packageLayout: ToolPackageLayout {
+        ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
     }
 
-    var manifestURL: URL {
-        agentManifestURL
+    var contentViewSourcePath: String {
+        packageLayout.contentViewSourcePath
     }
 
     var protocolsDirectoryURL: URL {

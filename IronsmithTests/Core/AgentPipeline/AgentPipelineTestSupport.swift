@@ -161,16 +161,6 @@ extension AgentPipelineTests {
     ) throws -> StoredTool {
         let packageRoot = toolsDirectory.appendingPathComponent(executableName, isDirectory: true)
         let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
-        let manifest = ToolManifest(
-            displayName: executableName,
-            executableName: executableName,
-            files: [
-                ToolManifestFile(
-                    path: layout.sourcePath(for: layout.defaultContentViewFileName),
-                    description: "Primary SwiftUI screen and supporting app logic."
-                )
-            ]
-        )
 
         try FileManager.default.createDirectory(at: layout.sourceDirectoryURL, withIntermediateDirectories: true)
         try layout.packageManifestContent().write(to: layout.packageManifestURL, atomically: true, encoding: .utf8)
@@ -179,14 +169,12 @@ extension AgentPipelineTests {
             atomically: true,
             encoding: .utf8
         )
-        let manifestData = try JSONEncoder().encode(manifest)
-        try manifestData.write(to: layout.agentManifestURL)
         try source.write(
-            to: packageRoot.appendingPathComponent(layout.sourcePath(for: layout.defaultContentViewFileName)),
+            to: packageRoot.appendingPathComponent(layout.contentViewSourcePath),
             atomically: true,
             encoding: .utf8
         )
-        return StoredTool(name: executableName, packageRootPath: packageRoot.path)
+        return StoredTool(name: executableName, executableName: executableName, packageRootPath: packageRoot.path)
     }
 
     static func successfulProcessClient() -> SwiftPackageProcessClient {

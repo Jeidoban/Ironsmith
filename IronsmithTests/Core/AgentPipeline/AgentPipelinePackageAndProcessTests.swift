@@ -8,13 +8,12 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
-    func toolPathHelpersSeparatePackageAndAgentManifests() {
+    func toolPathHelpersExposePackageLayout() {
         let tool = StoredTool(name: "Demo", packageRootPath: "/tmp/DemoTool")
 
         #expect(tool.packageRootURL.path == "/tmp/DemoTool")
         #expect(tool.packageManifestURL.path == "/tmp/DemoTool/Package.swift")
-        #expect(tool.agentManifestURL.path == "/tmp/DemoTool/ironsmith-manifest.json")
-        #expect(tool.manifestURL == tool.agentManifestURL)
+        #expect(tool.contentViewSourcePath == "Sources/Demo/ContentView.swift")
 
         let layout = ToolPackageLayout(
             packageRootURL: URL(fileURLWithPath: "/tmp/DemoTool", isDirectory: true),
@@ -22,6 +21,7 @@ extension AgentPipelineTests {
         )
         #expect(layout.appEntrySourcePath == "Sources/DemoTool/DemoTool.swift")
         #expect(layout.sourcePath(for: "ContentView.swift") == "Sources/DemoTool/ContentView.swift")
+        #expect(layout.contentViewSourcePath == "Sources/DemoTool/ContentView.swift")
         #expect(layout.packageManifestContent().contains("swiftLanguageModes: [.v6]"))
         #expect(layout.fixedAppEntrySource().contains("ContentView()"))
     }
@@ -115,26 +115,6 @@ extension AgentPipelineTests {
         #expect(source.contains("WindowGroup"))
         #expect(source.contains("ContentView()"))
         #expect(!(source.contains("MenuBarExtra")))
-    }
-
-    @MainActor
-    @Test
-    func agentArtifactsRoundTripThroughJSON() throws {
-        let manifest = ToolManifest(
-            displayName: "Clipboard Cleaner",
-            executableName: "ClipboardCleaner",
-            files: [
-                ToolManifestFile(
-                    path: "Sources/ClipboardCleaner/main.swift",
-                    description: "Entry point."
-                )
-            ]
-        )
-
-        let encoder = JSONEncoder()
-        let decoder = JSONDecoder()
-
-        #expect(try decoder.decode(ToolManifest.self, from: encoder.encode(manifest)) == manifest)
     }
 
     @MainActor

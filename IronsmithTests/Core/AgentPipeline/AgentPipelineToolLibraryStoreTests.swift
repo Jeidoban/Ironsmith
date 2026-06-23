@@ -13,7 +13,6 @@ extension AgentPipelineTests {
         let context = ModelContext(container)
         let packageRoot = URL(fileURLWithPath: "/tmp/fake-tool", isDirectory: true)
         let generationCapture = GenerationCapture()
-        let manifest = ToolManifest(displayName: "Fake Tool", executableName: "FakeTool", files: [])
         let generationClient = ToolGenerationClient { request in
             await generationCapture.record(request)
             try await request.lifecycle.prepareCreatedTool(
@@ -22,8 +21,7 @@ extension AgentPipelineTests {
                     executableName: "FakeTool",
                     bundleIdentifier: ToolBundleIdentifier.make(executableName: "FakeTool"),
                     settings: request.settings,
-                    packageRootURL: packageRoot,
-                    manifest: manifest
+                    packageRootURL: packageRoot
                 ),
                 request.prompt
             )
@@ -31,8 +29,7 @@ extension AgentPipelineTests {
                 toolName: "Fake Tool",
                 executableName: "FakeTool",
                 settings: request.settings,
-                packageRootURL: packageRoot,
-                manifest: manifest
+                packageRootURL: packageRoot
             )
         }
         let runCapture = ToolRunCapture()

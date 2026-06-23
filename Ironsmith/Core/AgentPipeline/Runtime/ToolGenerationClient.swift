@@ -6,22 +6,19 @@ nonisolated struct ToolGenerationPreparedTool {
     let bundleIdentifier: String
     let settings: ToolGenerationSettings
     let packageRootURL: URL
-    let manifest: ToolManifest
 
     init(
         name: String,
         executableName: String,
         bundleIdentifier: String,
         settings: ToolGenerationSettings,
-        packageRootURL: URL,
-        manifest: ToolManifest
+        packageRootURL: URL
     ) {
         self.name = name
         self.executableName = executableName
         self.bundleIdentifier = bundleIdentifier
         self.settings = settings
         self.packageRootURL = packageRootURL
-        self.manifest = manifest
     }
 }
 

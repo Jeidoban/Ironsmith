@@ -76,9 +76,9 @@
 ## Agent Pipeline
 
 - The active generation runtime is intentionally single-file. `SingleFileToolGenerationRuntime` creates or edits one editable file: `Sources/<ExecutableName>/ContentView.swift`.
-- Generated tools are SwiftPM executable packages under `~/.ironsmith/tools/<tool-slug>/`. `Package.swift`, the fixed `@main` app entry file, and `ironsmith-manifest.json` are written by Ironsmith, not by the model.
+- Generated tools are SwiftPM executable packages under `~/.ironsmith/tools/<tool-slug>/`. `Package.swift` and the fixed `@main` app entry file are written by Ironsmith, not by the model.
 - Generated package toolchain, language mode, and platform settings live in `ToolPackageLayout.packageManifestContent()`. Do not duplicate those values elsewhere.
-- The manifest is small bookkeeping: display name, executable name, and generated file descriptions. It is not an architecture plan, and there is no active `Protocols/` directory or action-plan agent.
+- Tool metadata is stored in SwiftData, and generated-file paths are derived from `ToolPackageLayout`. There is no active `Protocols/` directory or action-plan agent.
 - Create mode asks `ToolMetadataClient` for a short display name and icon prompt, writes the package scaffold, prompts the selected model for a complete `ContentView.swift`, cleans/formats it, compiles it, strips quarantine from the debug binary, and builds an internal app bundle.
 - `ToolMetadataClient.live()` may use local structured generation for nicer metadata, but metadata generation must remain a soft enhancement with a deterministic fallback.
 - Edit mode stages the current `ContentView.swift` in `.ironsmith/versions/pending-ContentView.swift`. Model-diff capable selections start with a bounded unified diff; deterministic-only selections rewrite the whole `ContentView.swift`. Successful edits promote the staged source to `previous-ContentView.swift`; failed edits restore the original source and discard the staged backup.
@@ -117,7 +117,7 @@
 - After Ironsmith-backed generation, refresh account credits so the popover and settings do not show stale balances.
 - Deleting a tool removes it from the SwiftData library. Do not add package-directory deletion unless that product behavior is intentionally changed and tested.
 - The sandbox toggle is hidden unless `IronsmithPreferenceKeys.showSandboxOverride` is enabled in Settings. When hidden, generation forces sandboxing on.
-- Restore-previous-version uses the package manifest to find `ContentView.swift`, swaps it with `.ironsmith/versions/previous-ContentView.swift`, rebuilds the internal app bundle, and updates the tool summary.
+- Restore-previous-version uses `ToolPackageLayout` to find `ContentView.swift`, swaps it with `.ironsmith/versions/previous-ContentView.swift`, rebuilds the internal app bundle, and updates the tool summary.
 
 ## Settings Rules
 
@@ -143,7 +143,7 @@
 - Use `IronsmithModelContainerFactory.make(isRunningTests: true)` for SwiftData tests and previews.
 - Do not silently delete a failed persistent store. The container factory backs up bad sqlite/wal/shm files under `~/.ironsmith/Backups/` before creating a fresh store.
 - App data lives under `~/.ironsmith/`: `ironsmith.sqlite`, `models/`, `tools/`, and the DEBUG diagnostics log.
-- Use `Tool` and `ToolPackageLayout` derived URL helpers for package roots, manifests, metadata, versions, app bundles, cached icons, and entitlements instead of rebuilding those paths at call sites.
+- Use `Tool` and `ToolPackageLayout` derived URL helpers for package roots, package manifests, metadata, versions, app bundles, cached icons, and entitlements instead of rebuilding those paths at call sites.
 - `ToolGenerationRuntimeContext.packageFileURL` and `ToolVersionBackupClient` validate that generated-tool file access stays inside the package root. Preserve those path-escape checks.
 - The generator does not write protocol files, but `Tool.protocolsDirectoryURL` may still exist for compatibility/future work. Do not build new agent flow around protocols unless the runtime is intentionally changed.
 - No Xcode project is committed. Open the root `Package.swift` in Xcode when IDE debugging is needed, and keep build graph changes in SwiftPM/script files.

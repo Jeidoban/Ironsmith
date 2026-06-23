@@ -70,7 +70,6 @@ extension ToolLibraryTests {
         await inferenceStore.loadIfNeeded(modelContext: context)
 
         let packageRoot = root.appendingPathComponent("LateCreate", isDirectory: true)
-        let manifest = ToolManifest(displayName: "Late Create", executableName: "LateCreate", files: [])
         let gate = LateGenerationCompletionGate()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
@@ -81,8 +80,7 @@ extension ToolLibraryTests {
                             executableName: "LateCreate",
                             bundleIdentifier: ToolBundleIdentifier.make(executableName: "LateCreate"),
                             settings: request.settings,
-                            packageRootURL: packageRoot,
-                            manifest: manifest
+                            packageRootURL: packageRoot
                         ),
                         request.prompt
                     )
@@ -91,8 +89,7 @@ extension ToolLibraryTests {
                         toolName: "Late Create",
                         executableName: "LateCreate",
                         settings: request.settings,
-                        packageRootURL: packageRoot,
-                        manifest: manifest
+                        packageRootURL: packageRoot
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in }
@@ -126,7 +123,6 @@ extension ToolLibraryTests {
         await inferenceStore.loadIfNeeded(modelContext: context)
 
         let packageRoot = root.appendingPathComponent("LateResume", isDirectory: true)
-        let manifest = ToolManifest(displayName: "Late Resume", executableName: "LateResume", files: [])
         let tool = StoredTool(
             name: "Late Resume",
             executableName: "LateResume",
@@ -148,8 +144,7 @@ extension ToolLibraryTests {
                         toolName: "Late Resume",
                         executableName: "LateResume",
                         settings: request.settings,
-                        packageRootURL: packageRoot,
-                        manifest: manifest
+                        packageRootURL: packageRoot
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in }
@@ -297,8 +292,7 @@ extension ToolLibraryTests {
                             executableName: "CreditTool",
                             bundleIdentifier: ToolBundleIdentifier.make(executableName: "CreditTool"),
                             settings: request.settings,
-                            packageRootURL: packageRoot,
-                            manifest: ToolManifest(displayName: "Credit Tool", executableName: "CreditTool", files: [])
+                            packageRootURL: packageRoot
                         ),
                         request.prompt
                     )
@@ -308,8 +302,7 @@ extension ToolLibraryTests {
                         toolName: "Credit Tool",
                         executableName: "CreditTool",
                         settings: request.settings,
-                        packageRootURL: packageRoot,
-                        manifest: ToolManifest(displayName: "Credit Tool", executableName: "CreditTool", files: [])
+                        packageRootURL: packageRoot
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in }

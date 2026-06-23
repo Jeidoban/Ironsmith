@@ -149,21 +149,6 @@ struct ToolGenerationRuntimeContext {
         return candidate
     }
 
-    func loadManifest(at url: URL) throws -> ToolManifest {
-        let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode(ToolManifest.self, from: data)
-    }
-
-    func writeManifest(_ manifest: ToolManifest, packageRootURL: URL) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(manifest)
-        guard let string = String(data: data, encoding: .utf8) else {
-            throw ToolGenerationError.couldNotEncodeManifest
-        }
-        try write(string, to: ToolPackageLayout.agentManifestFilename, packageRootURL: packageRootURL)
-    }
-
     func write(
         _ content: String,
         to path: String,
@@ -263,7 +248,6 @@ struct ToolGenerationRuntimeContext {
 enum ToolGenerationError: LocalizedError, Equatable {
     case emptyPrompt
     case compileFailed(String)
-    case couldNotEncodeManifest
     case invalidRepairPatch
     case noRepairPatchCandidate
 
@@ -273,8 +257,6 @@ enum ToolGenerationError: LocalizedError, Equatable {
             return "Enter a prompt before building an app."
         case .compileFailed(let output):
             return output.isEmpty ? "The generated package did not compile." : output
-        case .couldNotEncodeManifest:
-            return "Ironsmith could not encode the generated app manifest."
         case .invalidRepairPatch:
             return "The repair model returned an invalid patch."
         case .noRepairPatchCandidate:

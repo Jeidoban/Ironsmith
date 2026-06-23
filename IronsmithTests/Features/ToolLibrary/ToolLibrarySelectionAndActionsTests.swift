@@ -343,8 +343,7 @@ extension ToolLibraryTests {
                         toolName: "Runner",
                         executableName: "Runner",
                         settings: request.settings,
-                        packageRootURL: tool.packageRootURL,
-                        manifest: ToolManifest(displayName: "Runner", executableName: "Runner", files: [])
+                        packageRootURL: tool.packageRootURL
                     )
                 },
                 runnerClient: ToolRunnerClient { tool in
@@ -382,19 +381,11 @@ extension ToolLibraryTests {
         let executableName = "VersionedTool"
         let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
         let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
-        let contentViewPath = layout.sourcePath(for: layout.defaultContentViewFileName)
+        let contentViewPath = layout.contentViewSourcePath
         let contentViewURL = packageRoot.appendingPathComponent(contentViewPath)
         let appEntryURL = packageRoot.appendingPathComponent(layout.appEntrySourcePath)
         let previousURL = layout.previousContentViewVersionURL
-        let manifest = ToolManifest(
-            displayName: executableName,
-            executableName: executableName,
-            files: [
-                ToolManifestFile(path: contentViewPath, description: "Primary SwiftUI screen.")
-            ]
-        )
         try FileManager.default.createDirectory(at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(manifest).write(to: layout.agentManifestURL)
         let previousSettings = ToolGenerationSettings(
             appKind: .window,
             sandboxEnabled: true,
@@ -441,8 +432,7 @@ extension ToolLibraryTests {
                         toolName: executableName,
                         executableName: executableName,
                         settings: request.settings,
-                        packageRootURL: packageRoot,
-                        manifest: manifest
+                        packageRootURL: packageRoot
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in },
@@ -490,8 +480,7 @@ extension ToolLibraryTests {
                         toolName: "Exporter",
                         executableName: "Exporter",
                         settings: request.settings,
-                        packageRootURL: URL(fileURLWithPath: "/tmp/exporter", isDirectory: true),
-                        manifest: ToolManifest(displayName: "Exporter", executableName: "Exporter", files: [])
+                        packageRootURL: URL(fileURLWithPath: "/tmp/exporter", isDirectory: true)
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in },
@@ -528,8 +517,7 @@ extension ToolLibraryTests {
                         toolName: "Finder Tool",
                         executableName: "FinderTool",
                         settings: request.settings,
-                        packageRootURL: tool.packageRootURL,
-                        manifest: ToolManifest(displayName: "Finder Tool", executableName: "FinderTool", files: [])
+                        packageRootURL: tool.packageRootURL
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in },
@@ -557,20 +545,12 @@ extension ToolLibraryTests {
         let executableName = "SourceViewer"
         let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
         let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
-        let contentViewPath = layout.sourcePath(for: layout.defaultContentViewFileName)
+        let contentViewPath = layout.contentViewSourcePath
         let contentViewURL = packageRoot.appendingPathComponent(contentViewPath)
-        let manifest = ToolManifest(
-            displayName: executableName,
-            executableName: executableName,
-            files: [
-                ToolManifestFile(path: contentViewPath, description: "Primary SwiftUI screen.")
-            ]
-        )
         try FileManager.default.createDirectory(at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(manifest).write(to: layout.agentManifestURL)
         try "import SwiftUI\n".write(to: contentViewURL, atomically: true, encoding: .utf8)
 
-        let tool = Tool(name: executableName, packageRootPath: packageRoot.path)
+        let tool = Tool(name: executableName, executableName: executableName, packageRootPath: packageRoot.path)
         let capture = ToolFinderCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
@@ -579,8 +559,7 @@ extension ToolLibraryTests {
                         toolName: executableName,
                         executableName: executableName,
                         settings: request.settings,
-                        packageRootURL: packageRoot,
-                        manifest: manifest
+                        packageRootURL: packageRoot
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in },
@@ -598,55 +577,6 @@ extension ToolLibraryTests {
 
         #expect(await capture.openedURL == contentViewURL.standardizedFileURL)
         #expect(store.presentedErrorMessage == nil)
-    }
-
-    @MainActor
-    @Test
-    func toolLibraryStoreRejectsSourcePathsOutsidePackage() async throws {
-        let root = try Self.makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let executableName = "BadSourceViewer"
-        let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
-        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
-        let manifest = ToolManifest(
-            displayName: executableName,
-            executableName: executableName,
-            files: [
-                ToolManifestFile(path: "../outside.swift", description: "Escaping source.")
-            ]
-        )
-        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
-        try JSONEncoder().encode(manifest).write(to: layout.agentManifestURL)
-
-        let tool = Tool(name: executableName, packageRootPath: packageRoot.path)
-        let capture = ToolFinderCapture()
-        let store = ToolLibraryStore(
-            dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { request in
-                    ToolGenerationResult(
-                        toolName: executableName,
-                        executableName: executableName,
-                        settings: request.settings,
-                        packageRootURL: packageRoot,
-                        manifest: manifest
-                    )
-                },
-                runnerClient: ToolRunnerClient { _ in },
-                finderClient: ToolFinderClient(
-                    showToolDirectory: { _ in },
-                    revealURL: { _ in },
-                    openURL: { url in
-                        await capture.record(url)
-                    }
-                )
-            )
-        )
-
-        await store.viewSource(tool)
-
-        #expect(await capture.openedURL == nil)
-        #expect(store.presentedErrorMessage?.contains("outside the generated package") == true)
     }
 
     @MainActor

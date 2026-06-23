@@ -76,9 +76,10 @@ extension AgentPipelineTests {
             .appendingPathComponent("Sources/\(result.executableName)/ContentView.swift")
         let appEntryURL = result.packageRootURL
             .appendingPathComponent("Sources/\(result.executableName)/\(result.executableName).swift")
+        let layout = ToolPackageLayout(packageRootURL: result.packageRootURL, executableName: result.executableName)
         #expect(FileManager.default.fileExists(atPath: contentViewURL.path))
         #expect(FileManager.default.fileExists(atPath: appEntryURL.path))
-        #expect(result.manifest.files.map(\.path) == ["Sources/\(result.executableName)/ContentView.swift"])
+        #expect(layout.contentViewSourcePath == "Sources/\(result.executableName)/ContentView.swift")
         #expect(result.settings.appKind == .menuBar)
         #expect(result.settings.menuBarSystemImage == "timer")
         let appEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)

@@ -108,7 +108,7 @@ extension AgentPipelineTests {
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
         #expect(tool.name == "Build A Hello Command")
         #expect(FileManager.default.fileExists(atPath: tool.packageManifestURL.path))
-        #expect(FileManager.default.fileExists(atPath: tool.agentManifestURL.path))
+        #expect(!FileManager.default.fileExists(atPath: tool.packageRootURL.appendingPathComponent("ironsmith-manifest.json").path))
         #expect(FileManager.default.fileExists(atPath: tool.packageRootURL.appendingPathComponent("Sources/BuildAHelloCommand/BuildAHelloCommand.swift").path))
         #expect(FileManager.default.fileExists(atPath: tool.packageRootURL.appendingPathComponent("Sources/BuildAHelloCommand/ContentView.swift").path))
 
@@ -271,10 +271,9 @@ extension AgentPipelineTests {
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
-        let manifestData = try Data(contentsOf: tool.agentManifestURL)
-        let manifest = try JSONDecoder().decode(ToolManifest.self, from: manifestData)
+        let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: tool.executableName)
         let contentView = try String(
-            contentsOf: tool.packageRootURL.appendingPathComponent("Sources/\(manifest.executableName)/ContentView.swift"),
+            contentsOf: tool.packageRootURL.appendingPathComponent(layout.contentViewSourcePath),
             encoding: .utf8
         )
         #expect(contentView.contains(#"Text("real regenerated tool")"#))
@@ -337,10 +336,9 @@ extension AgentPipelineTests {
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
-        let manifestData = try Data(contentsOf: tool.agentManifestURL)
-        let manifest = try JSONDecoder().decode(ToolManifest.self, from: manifestData)
+        let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: tool.executableName)
         let contentView = try String(
-            contentsOf: tool.packageRootURL.appendingPathComponent("Sources/\(manifest.executableName)/ContentView.swift"),
+            contentsOf: tool.packageRootURL.appendingPathComponent(layout.contentViewSourcePath),
             encoding: .utf8
         )
         #expect(contentView.contains(#"Text("retried after context window")"#))

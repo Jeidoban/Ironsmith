@@ -248,12 +248,8 @@ final class ToolLibraryStore {
         }
 
         do {
-            let manifest = try Self.manifest(for: tool)
-            let layout = ToolPackageLayout(
-                packageRootURL: tool.packageRootURL,
-                executableName: manifest.executableName
-            )
-            let contentViewPath = manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName)
+            let layout = tool.packageLayout
+            let contentViewPath = tool.contentViewSourcePath
             let restoredSettings = try dependencies.versionBackupClient.restorePreviousVersion(
                 tool.packageRootURL,
                 contentViewPath,
@@ -262,7 +258,7 @@ final class ToolLibraryStore {
             tool.applyGenerationSettings(restoredSettings)
             try Self.writeAppEntry(
                 layout: layout,
-                displayName: manifest.displayName,
+                displayName: tool.name,
                 settings: restoredSettings
             )
             try await dependencies.buildClient.buildTool(tool)
@@ -771,23 +767,8 @@ final class ToolLibraryStore {
         return String(singleLine.prefix(240))
     }
 
-    private static func contentViewPath(for tool: Tool) throws -> String {
-        let manifest = try manifest(for: tool)
-        let layout = ToolPackageLayout(
-            packageRootURL: tool.packageRootURL,
-            executableName: manifest.executableName
-        )
-        return manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName)
-    }
-
-    private static func manifest(for tool: Tool) throws -> ToolManifest {
-        let data = try Data(contentsOf: tool.agentManifestURL)
-        return try JSONDecoder().decode(ToolManifest.self, from: data)
-    }
-
     private static func contentViewURL(for tool: Tool) throws -> URL {
-        let contentViewPath = try contentViewPath(for: tool)
-        return try ToolPackageLayout.packageFileURL(for: contentViewPath, packageRootURL: tool.packageRootURL)
+        try ToolPackageLayout.packageFileURL(for: tool.contentViewSourcePath, packageRootURL: tool.packageRootURL)
     }
 
     private static func writeAppEntry(

@@ -22,17 +22,7 @@ extension AgentPipelineTests {
                 toolName: "Calculator",
                 executableName: "Calculator",
                 settings: request.settings,
-                packageRootURL: URL(fileURLWithPath: "/tmp/calculator", isDirectory: true),
-                manifest: ToolManifest(
-                    displayName: "Calculator",
-                    executableName: "Calculator",
-                    files: [
-                        ToolManifestFile(
-                            path: "Sources/Calculator/ContentView.swift",
-                            description: "Primary SwiftUI screen and supporting app logic."
-                        )
-                    ]
-                )
+                packageRootURL: URL(fileURLWithPath: "/tmp/calculator", isDirectory: true)
             )
         }
         let runCapture = ToolRunCapture()
