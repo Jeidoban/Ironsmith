@@ -2,12 +2,16 @@ import AppKit
 import SwiftUI
 
 struct ToolLibraryPopoverHeaderView: View {
+    @Environment(\.openURL) private var openURL
+
     let appUpdateStore: AppUpdateStore
     let isLoadingModels: Bool
     let shouldShowNoModelMessage: Bool
     let selectedModelStatusText: String?
     let selectedIronsmithCreditWarningText: String?
     let onOpenSettings: () -> Void
+    private static let issueReportURL = URL(
+        string: "https://github.com/Jeidoban/Ironsmith/issues/new")!
 
     var body: some View {
         HStack {
@@ -41,6 +45,10 @@ struct ToolLibraryPopoverHeaderView: View {
                     IronsmithAboutWindowController.shared.show()
                 }
 
+                Button("Report an Issue") {
+                    openURL(Self.issueReportURL)
+                }
+
                 Divider()
 
                 Button("Quit Ironsmith") {
@@ -54,7 +62,7 @@ struct ToolLibraryPopoverHeaderView: View {
             .foregroundStyle(.secondary)
             .help("Ironsmith")
             .accessibilityLabel("Ironsmith menu")
-            .accessibilityHint("Opens settings, about, and quit actions.")
+            .accessibilityHint("Opens about, issue reporting, and quit actions.")
             .accessibilityIdentifier("ironsmith-menu-button")
         }
     }

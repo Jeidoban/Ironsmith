@@ -141,6 +141,7 @@ struct ToolMetadataClient: Sendable {
         displayName:
         - Must be one or two separate words.
         - Must be Title Case.
+        - Must name the user's requested app, task, or workflow, not the icon artwork or symbol.
         - Should feel snappy, playful, and useful for a small macOS app.
         - Do not use punctuation, emoji, or generic suffixes like App or Tool.
 

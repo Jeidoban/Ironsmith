@@ -3,7 +3,8 @@ import SwiftUI
 struct SettingsPreferencesSectionView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
-    @AppStorage(IronsmithPreferenceKeys.diagnosticsLoggingEnabled) private var diagnosticsLoggingEnabled = false
+    @AppStorage(IronsmithPreferenceKeys.diagnosticsLoggingEnabled) private
+        var diagnosticsLoggingEnabled = false
     @State private var isConfirmingUnsandboxedTools = false
 
     var body: some View {
@@ -46,8 +47,8 @@ struct SettingsPreferencesSectionView: View {
                 .toggleStyle(.switch)
 
                 Text(
-                    "Records detailed generation logs to a file on disk so you can share "
-                        + "them when reporting a problem. Off by default."
+                    "Records detailed generation logs to ~/.ironsmith so you can share "
+                        + "them when reporting a problem."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

@@ -39,11 +39,7 @@ enum ToolGenerationPrompts {
     static let diffRepairInstructions = """
         You are Ironsmith's Swift compiler repair agent.
         You repair exactly one file: ContentView.swift.
-        Return only a unified diff.
-        The diff must edit ContentView.swift only.
-        Use normal unified diff hunks with @@ headers and enough surrounding context to locate each edit.
-        Do not include prose, markdown fences, explanations, or unrelated rewrites in the diff.
-        Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
+        \(diffOutputContract)
         \(validUnifiedDiffShapeExample)
         Keep each repair turn focused on the listed compiler diagnostics.
         """
@@ -51,11 +47,7 @@ enum ToolGenerationPrompts {
     static let diffEditInstructions = """
         You are Ironsmith's Swift edit agent.
         You edit exactly one file: ContentView.swift.
-        Return only a unified diff.
-        The diff must edit ContentView.swift only.
-        Use normal unified diff hunks with @@ headers and enough surrounding context to locate each edit.
-        Do not include prose, markdown fences, explanations, or unrelated rewrites in the diff.
-        Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
+        \(diffOutputContract)
         \(validUnifiedDiffShapeExample)
         Keep the edit focused on the user's requested change.
         Prefer several small, focused hunks over one large hunk when multiple areas need changes.
@@ -135,12 +127,7 @@ enum ToolGenerationPrompts {
         User request: \(userPrompt)
         Fixed package and target name: \(executableName).
         Edit ContentView.swift by returning a unified diff only.
-        \(diffHunkLimitInstruction(maximumDiffHunks))
-        The diff must patch ContentView.swift only.
-        Include enough unchanged context in each hunk to make it uniquely applicable.
-        Prefer small focused hunks instead of one broad rewrite.
-        Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
-        Do not rewrite the entire file unless the whole file is malformed.
+        \(diffTurnReminder(maximumDiffHunks))
         Current authoritative ContentView.swift:
         ```swift
         \(existingSource)
@@ -246,18 +233,30 @@ enum ToolGenerationPrompts {
         sections.append(
             """
             Return only a unified diff.
-            \(diffHunkLimitInstruction(maximumDiffHunks))
-            The diff must patch ContentView.swift only.
-            Include enough unchanged context in each hunk to make it uniquely applicable.
-            Do not return a full-file rewrite unless the entire file is malformed.
-            Do not wrap the diff in JSON, markdown, or prose.
-            Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
+            \(diffTurnReminder(maximumDiffHunks))
             Do not reuse removed source from previous repair outcomes.
             Make one coherent repair step, then stop.
             """
         )
 
         return sections.joined(separator: "\n\n")
+    }
+
+    private static let diffOutputContract = """
+        Return only a unified diff.
+        The diff must edit ContentView.swift only.
+        Use normal unified diff hunks with @@ headers and enough surrounding context to locate each edit uniquely.
+        Every @@ hunk must include at least one real + or - changed line; do not use @@ as an ellipsis or section separator.
+        Do not include prose, markdown fences, JSON, explanations, or unrelated rewrites in the diff.
+        Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
+        Do not rewrite the entire file unless the whole file is malformed.
+        """
+
+    private static func diffTurnReminder(_ maximumDiffHunks: Int?) -> String {
+        """
+        \(diffHunkLimitInstruction(maximumDiffHunks))
+        Follow the diff output contract from your instructions.
+        """
     }
 
     private static func diffHunkLimitInstruction(_ maximumDiffHunks: Int?) -> String {
@@ -271,7 +270,7 @@ enum ToolGenerationPrompts {
         Valid response shape example (format only; do not copy this content):
         --- ContentView.swift
         +++ ContentView.swift
-        @@
+        @@ -3,5 +3,5 @@
         -    Text("Old")
         +    Text("New")
         """

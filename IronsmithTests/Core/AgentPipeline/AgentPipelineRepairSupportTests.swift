@@ -537,12 +537,21 @@ extension AgentPipelineTests {
             #expect(prompt.contains("Valid response shape example"))
             #expect(prompt.contains("--- ContentView.swift"))
             #expect(prompt.contains("+++ ContentView.swift"))
+            #expect(prompt.contains("@@ -3,5 +3,5 @@"))
             #expect(prompt.contains("-    Text(\"Old\")"))
             #expect(prompt.contains("+    Text(\"New\")"))
+            #expect(prompt.contains("Every @@ hunk must include at least one real + or - changed line"))
             #expect(prompt.contains("Do not include apply-patch markers"))
+            #expect(prompt.contains("Do not rewrite the entire file unless the whole file is malformed"))
         }
         #expect(!(editPrompt.contains("Valid response shape example")))
         #expect(!(repairPrompt.contains("Valid response shape example")))
+        #expect(editPrompt.contains("Follow the diff output contract from your instructions."))
+        #expect(repairPrompt.contains("Follow the diff output contract from your instructions."))
+        #expect(!(editPrompt.contains("Every @@ hunk must include at least one real + or - changed line")))
+        #expect(!(repairPrompt.contains("Every @@ hunk must include at least one real + or - changed line")))
+        #expect(!(editPrompt.contains("Do not include apply-patch markers")))
+        #expect(!(repairPrompt.contains("Do not include apply-patch markers")))
     }
 
     @Test
