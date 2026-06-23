@@ -4,14 +4,19 @@ enum IronsmithModelContainerFactory {
     static func make(isRunningTests: Bool) throws -> ModelContainer {
         if isRunningTests {
             let config = ModelConfiguration(isStoredInMemoryOnly: true)
-            return try ModelContainer(
-                for: Tool.self,
-                ModelConfig.self,
-                ProviderConfig.self,
-                configurations: config
-            )
+            return try make(configuration: config)
         }
 
-        return try ModelContainer(for: Tool.self, ModelConfig.self, ProviderConfig.self)
+        let locations = try IronsmithPersistentStoreLocations.live()
+        try IronsmithPersistentStorePreparer(locations: locations).prepare()
+        return try make(configuration: ModelConfiguration(url: locations.storeURL))
+    }
+
+    static func make(configuration: ModelConfiguration) throws -> ModelContainer {
+        try ModelContainer(
+            for: Schema(versionedSchema: IronsmithSchemaV1.self),
+            migrationPlan: IronsmithSchemaMigrationPlan.self,
+            configurations: configuration
+        )
     }
 }
