@@ -34,7 +34,7 @@ extension AgentPipelineTests {
         )
 
         let task = Task {
-            try await runtime.generateTool(for: "Build a cancellable tool", status: { _ in })
+            try await runtime.generateTool(for: "Build a cancellable tool", settings: .default)
         }
         await Self.eventually {
             await probe.didStart
@@ -73,13 +73,13 @@ extension AgentPipelineTests {
                 return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
             iconClient: .noOp,
             metadataClient: .fallback()
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,
@@ -153,7 +153,7 @@ extension AgentPipelineTests {
         )
         let iconPrompt = "Notebook and compass"
         let refinedPrompt = "Build a polished focus notes helper with tags, search, pinned notes, and a calm compact layout."
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: appBundleClient,
@@ -168,7 +168,7 @@ extension AgentPipelineTests {
             promptRefinementClient: ToolPromptRefinementClient { _ in
                 refinedPrompt
             }
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,
@@ -246,13 +246,13 @@ extension AgentPipelineTests {
             }
             """
         ])
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
             iconClient: .noOp,
             metadataClient: .fallback()
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,
@@ -312,13 +312,13 @@ extension AgentPipelineTests {
             }
             """
         )
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
             iconClient: .noOp,
             metadataClient: .fallback()
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,

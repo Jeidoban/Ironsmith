@@ -18,26 +18,34 @@ extension AgentPipelineTests {
         fileClient: AgentFileClient = .live,
         processClient: SwiftPackageProcessClient = .live,
         appBundleClient: ToolAppBundleClient = .noOp(),
+        iconClient: ToolIconClient = .noOp,
         metadataClient: ToolMetadataClient = .fallback(),
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         promptRefinementEnabled: Bool = true,
         versionBackupClient: ToolVersionBackupClient = .live,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) -> SingleFileToolGenerationRuntime {
-        SingleFileToolGenerationRuntime(
+        let languageModelContext = AgentLanguageModelContext(
+            languageModel: languageModel,
+            options: generationOptions,
+            repairStrategy: repairStrategy,
+            promptRefinementEnabled: promptRefinementEnabled,
+            afterLanguageModelInvocation: afterLanguageModelInvocation
+        )
+        let dependencies = ToolGenerationRuntimeDependencies(
+            toolsDirectoryURL: toolsDirectoryURL,
+            fileClient: fileClient,
+            processClient: processClient,
+            appBundleClient: appBundleClient,
+            iconClient: iconClient,
+            metadataClient: metadataClient,
+            promptRefinementClient: promptRefinementClient,
+            versionBackupClient: versionBackupClient
+        )
+        return SingleFileToolGenerationRuntime(
             context: ToolGenerationRuntimeContext(
-                languageModel: languageModel,
-                generationOptions: generationOptions,
-                repairStrategy: repairStrategy,
-                toolsDirectoryURL: toolsDirectoryURL,
-                fileClient: fileClient,
-                processClient: processClient,
-                appBundleClient: appBundleClient,
-                metadataClient: metadataClient,
-                promptRefinementClient: promptRefinementClient,
-                promptRefinementEnabled: promptRefinementEnabled,
-                versionBackupClient: versionBackupClient,
-                afterLanguageModelInvocation: afterLanguageModelInvocation
+                languageModelContext: languageModelContext,
+                dependencies: dependencies
             )
         )
     }
@@ -295,25 +303,14 @@ actor FormatCapture {
 actor GenerationCapture {
     private(set) var prompt: String?
     private(set) var existingToolID: UUID?
-    private(set) var sandboxEnabled: Bool?
-    private(set) var sandboxPermissions: GeneratedAppSandboxPermissions?
-    private(set) var resourcePermissions: GeneratedAppResourcePermissions?
+    private(set) var settings: ToolGenerationSettings?
     private(set) var repairStrategy: ToolRepairStrategy?
 
-    func record(
-        prompt: String,
-        existingToolID: UUID?,
-        sandboxEnabled: Bool,
-        sandboxPermissions: GeneratedAppSandboxPermissions,
-        resourcePermissions: GeneratedAppResourcePermissions,
-        repairStrategy: ToolRepairStrategy
-    ) {
-        self.prompt = prompt
-        self.existingToolID = existingToolID
-        self.sandboxEnabled = sandboxEnabled
-        self.sandboxPermissions = sandboxPermissions
-        self.resourcePermissions = resourcePermissions
-        self.repairStrategy = repairStrategy
+    func record(_ request: ToolGenerationRequest) {
+        prompt = request.prompt
+        existingToolID = request.existingTool?.id
+        settings = request.settings
+        repairStrategy = request.languageModelContext.repairStrategy
     }
 }
 

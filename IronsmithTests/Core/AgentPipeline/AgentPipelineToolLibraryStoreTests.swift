@@ -13,28 +13,26 @@ extension AgentPipelineTests {
         let context = ModelContext(container)
         let packageRoot = URL(fileURLWithPath: "/tmp/fake-tool", isDirectory: true)
         let generationCapture = GenerationCapture()
-        let generationClient = ToolGenerationClient {
-            prompt,
-            existingTool,
-            sandboxEnabled,
-            sandboxPermissions,
-            resourcePermissions,
-            languageModelContext,
-            status in
-            await generationCapture.record(
-                prompt: prompt,
-                existingToolID: existingTool?.id,
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions,
-                repairStrategy: languageModelContext.repairStrategy
+        let manifest = ToolManifest(displayName: "Fake Tool", executableName: "FakeTool", files: [])
+        let generationClient = ToolGenerationClient { request in
+            await generationCapture.record(request)
+            try await request.lifecycle.prepareCreatedTool(
+                ToolGenerationPreparedTool(
+                    name: "Fake Tool",
+                    executableName: "FakeTool",
+                    bundleIdentifier: ToolBundleIdentifier.make(executableName: "FakeTool"),
+                    settings: request.settings,
+                    packageRootURL: packageRoot,
+                    manifest: manifest
+                ),
+                request.prompt
             )
-            status("Fake build")
             return ToolGenerationResult(
                 toolName: "Fake Tool",
                 executableName: "FakeTool",
+                settings: request.settings,
                 packageRootURL: packageRoot,
-                manifest: ToolManifest(displayName: "Fake Tool", executableName: "FakeTool", files: [])
+                manifest: manifest
             )
         }
         let runCapture = ToolRunCapture()
@@ -59,14 +57,14 @@ extension AgentPipelineTests {
         #expect(tools.first?.packageRootPath == packageRoot.path)
         #expect(store.prompt == "Make a mortgage calculator")
         #expect(!(store.isGenerating))
-        #expect(await generationCapture.sandboxPermissions?.enabled == [.internet, .userSelectedFiles])
-        #expect(await generationCapture.resourcePermissions?.enabled == [.microphone, .camera])
+        #expect(await generationCapture.settings?.sandboxPermissions.enabled == [.internet, .userSelectedFiles])
+        #expect(await generationCapture.settings?.resourcePermissions.enabled == [.microphone, .camera])
         #expect(await runCapture.ranToolIDs.isEmpty)
 
         let failingRunCapture = ToolRunCapture()
         let failingStore = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { _ in
                     throw FakeAgentError.expected
                 },
                 runnerClient: ToolRunnerClient { tool in

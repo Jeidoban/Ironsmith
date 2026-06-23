@@ -6,8 +6,6 @@ struct ToolAppBundleRequest: Equatable, Sendable {
     let bundleIdentifier: String
     let packageRootURL: URL
     let settings: ToolGenerationSettings
-    let sandboxPermissions: GeneratedAppSandboxPermissions
-    let resourcePermissions: GeneratedAppResourcePermissions
     let iconPrompt: String?
 
     var appKind: ToolAppKind {
@@ -22,33 +20,27 @@ struct ToolAppBundleRequest: Equatable, Sendable {
         settings.sandboxEnabled
     }
 
+    var sandboxPermissions: GeneratedAppSandboxPermissions {
+        settings.sandboxPermissions
+    }
+
+    var resourcePermissions: GeneratedAppResourcePermissions {
+        settings.resourcePermissions
+    }
+
     init(
         displayName: String,
         executableName: String,
         bundleIdentifier: String,
         packageRootURL: URL,
-        sandboxEnabled: Bool,
-        sandboxPermissions: GeneratedAppSandboxPermissions = .default,
-        resourcePermissions: GeneratedAppResourcePermissions = .none,
-        appKind: ToolAppKind = .window,
-        menuBarSystemImage: String = ToolMenuBarSymbol.fallback,
-        settings: ToolGenerationSettings? = nil,
+        settings: ToolGenerationSettings,
         iconPrompt: String? = nil
     ) {
         self.displayName = displayName
         self.executableName = executableName
         self.bundleIdentifier = bundleIdentifier
         self.packageRootURL = packageRootURL
-        let resolvedSettings = settings ?? ToolGenerationSettings(
-            appKind: appKind,
-            menuBarSystemImage: menuBarSystemImage,
-            sandboxEnabled: sandboxEnabled,
-            sandboxPermissions: sandboxPermissions,
-            resourcePermissions: resourcePermissions
-        )
-        self.settings = resolvedSettings
-        self.sandboxPermissions = resolvedSettings.sandboxPermissions
-        self.resourcePermissions = resolvedSettings.resourcePermissions
+        self.settings = settings
         self.iconPrompt = iconPrompt
     }
 
@@ -63,33 +55,28 @@ struct ToolAppBundleRequest: Equatable, Sendable {
         )
     }
 
-    static func forTool(
-        _ tool: Tool,
-        sandboxPermissions: GeneratedAppSandboxPermissions = .default,
-        resourcePermissions: GeneratedAppResourcePermissions = .none
-    ) -> ToolAppBundleRequest {
+    static func forTool(_ tool: Tool, defaults: ToolGenerationSettings) -> ToolAppBundleRequest {
         ToolAppBundleRequest(
             displayName: tool.name,
             executableName: tool.executableName,
             bundleIdentifier: tool.bundleIdentifier,
             packageRootURL: tool.packageRootURL,
-            sandboxEnabled: tool.sandboxEnabled,
-            settings: tool.generationSettings(
-                defaultSandboxPermissions: sandboxPermissions,
-                defaultResourcePermissions: resourcePermissions
-            ),
+            settings: tool.generationSettings(defaults: defaults),
             iconPrompt: nil
         )
     }
 
     static func forToolPreservingExistingBundlePermissions(_ tool: Tool) -> ToolAppBundleRequest {
-        forTool(
-            tool,
+        let defaults = ToolGenerationSettings(
+            appKind: tool.appKind,
+            menuBarSystemImage: tool.validatedMenuBarSystemImage,
+            sandboxEnabled: tool.sandboxEnabled,
             sandboxPermissions: GeneratedAppSandboxPermissions.inferred(
                 fromPackageAt: tool.packageRootURL,
                 sandboxEnabled: tool.sandboxEnabled
             ),
             resourcePermissions: GeneratedAppResourcePermissions.inferred(fromAppBundleAt: tool.appBundleURL)
         )
+        return forTool(tool, defaults: defaults)
     }
 }

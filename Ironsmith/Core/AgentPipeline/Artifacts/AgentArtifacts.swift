@@ -1,7 +1,7 @@
 import AnyLanguageModel
 import Foundation
 
-struct AgentLanguageModelContext {
+nonisolated struct AgentLanguageModelContext {
     let languageModel: any LanguageModel
     let metadataLanguageModel: any LanguageModel
     let options: GenerationOptions
@@ -184,23 +184,18 @@ struct ToolGenerationResult: Equatable, Sendable {
     let packageRootURL: URL
     let manifest: ToolManifest
 
-    var sandboxEnabled: Bool {
-        settings.sandboxEnabled
-    }
-
     init(
         toolName: String,
         executableName: String,
         bundleIdentifier: String? = nil,
-        sandboxEnabled: Bool = true,
-        settings: ToolGenerationSettings? = nil,
+        settings: ToolGenerationSettings,
         packageRootURL: URL,
         manifest: ToolManifest
     ) {
         self.toolName = toolName
         self.executableName = executableName
         self.bundleIdentifier = bundleIdentifier ?? ToolBundleIdentifier.make(executableName: executableName)
-        self.settings = settings ?? ToolGenerationSettings(sandboxEnabled: sandboxEnabled)
+        self.settings = settings
         self.packageRootURL = packageRootURL
         self.manifest = manifest
     }

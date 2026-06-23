@@ -69,8 +69,7 @@ extension AgentPipelineTests {
         )
         let result = try await runtime.generateTool(
             for: "Build a tiny tool",
-            settings: settings,
-            status: { _ in }
+            settings: settings
         )
 
         let contentViewURL = result.packageRootURL

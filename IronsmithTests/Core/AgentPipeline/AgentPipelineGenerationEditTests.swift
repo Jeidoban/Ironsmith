@@ -16,27 +16,12 @@ extension AgentPipelineTests {
         try context.save()
 
         let capture = GenerationCapture()
-        let generationClient = ToolGenerationClient {
-            prompt,
-            existingTool,
-            sandboxEnabled,
-            sandboxPermissions,
-            resourcePermissions,
-            context,
-            status in
-            await capture.record(
-                prompt: prompt,
-                existingToolID: existingTool?.id,
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions,
-                repairStrategy: context.repairStrategy
-            )
-            status("Fake edit")
+        let generationClient = ToolGenerationClient { request in
+            await capture.record(request)
             return ToolGenerationResult(
                 toolName: "Calculator",
                 executableName: "Calculator",
-                sandboxEnabled: sandboxEnabled,
+                settings: request.settings,
                 packageRootURL: URL(fileURLWithPath: "/tmp/calculator", isDirectory: true),
                 manifest: ToolManifest(
                     displayName: "Calculator",
@@ -78,9 +63,9 @@ extension AgentPipelineTests {
         #expect(tools.first?.pendingPrompt == nil)
         #expect(!(tools.first?.sandboxEnabled ?? false))
         #expect(await capture.existingToolID == existingTool.id)
-        #expect(!((await capture.sandboxEnabled) ?? false))
-        #expect(await capture.sandboxPermissions?.enabled == [.internet, .userSelectedFiles])
-        #expect(await capture.resourcePermissions?.enabled == [.location, .calendar])
+        #expect(await capture.settings?.sandboxEnabled == false)
+        #expect(await capture.settings?.sandboxPermissions.enabled == [.internet, .userSelectedFiles])
+        #expect(await capture.settings?.resourcePermissions.enabled == [.location, .calendar])
         #expect(await capture.repairStrategy == .deterministicOnly)
         #expect(await runCapture.ranToolIDs.isEmpty)
         #expect(!(store.isSelected(existingTool)))
@@ -110,12 +95,10 @@ extension AgentPipelineTests {
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
         )
-        var statuses: [String] = []
-
         let result = try await runtime.generateTool(
             for: "Change old to new",
             existingTool: tool,
-            status: { statuses.append($0) }
+            settings: .default
         )
 
         let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
@@ -126,8 +109,6 @@ extension AgentPipelineTests {
         #expect(contentView.contains(#"Text("new")"#))
         #expect(!(contentView.contains(#"Text("old")"#)))
         #expect(previousSource.contains(#"Text("old")"#))
-        #expect(statuses.contains("Editing Calculator"))
-        #expect(!(statuses.contains { $0.hasPrefix("Generating Calculator") }))
         #expect(await responses.count == 1)
     }
 
@@ -162,7 +143,7 @@ extension AgentPipelineTests {
         let result = try await runtime.generateTool(
             for: "Change old to new",
             existingTool: tool,
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
@@ -215,7 +196,7 @@ extension AgentPipelineTests {
         let result = try await runtime.generateTool(
             for: "Use full file fallback",
             existingTool: tool,
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
@@ -253,7 +234,7 @@ extension AgentPipelineTests {
 
         let result = try await runtime.generateTool(
             for: "Build a create mode tool",
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
@@ -311,12 +292,12 @@ extension AgentPipelineTests {
         _ = try await localRuntime.generateTool(
             for: "Change old to new",
             existingTool: localTool,
-            status: { _ in }
+            settings: .default
         )
         _ = try await remoteRuntime.generateTool(
             for: "Change old to new",
             existingTool: remoteTool,
-            status: { _ in }
+            settings: .default
         )
 
         let prompts = await promptCapture.prompts
@@ -376,7 +357,7 @@ extension AgentPipelineTests {
             _ = try await runtime.generateTool(
                 for: "Make it broken",
                 existingTool: tool,
-                status: { _ in }
+                settings: .default
             )
             Issue.record("Expected deterministic-only edit to fail after exhausting candidates.")
         } catch let error as ToolGenerationError {

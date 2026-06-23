@@ -18,31 +18,8 @@ struct SingleFileToolGenerationRuntime {
     func generateTool(
         for prompt: String,
         existingTool: Tool? = nil,
-        sandboxEnabled: Bool = true,
-        sandboxPermissions: GeneratedAppSandboxPermissions = .default,
-        resourcePermissions: GeneratedAppResourcePermissions = .none,
-        lifecycle: ToolGenerationLifecycle = .noop,
-        status: @escaping @MainActor (String) -> Void
-    ) async throws -> ToolGenerationResult {
-        try await generateTool(
-            for: prompt,
-            existingTool: existingTool,
-            settings: ToolGenerationSettings(
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions
-            ),
-            lifecycle: lifecycle,
-            status: status
-        )
-    }
-
-    func generateTool(
-        for prompt: String,
-        existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
-        lifecycle: ToolGenerationLifecycle = .noop,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle = .noop
     ) async throws -> ToolGenerationResult {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else {
@@ -58,24 +35,21 @@ struct SingleFileToolGenerationRuntime {
                     prompt: effectivePrompt,
                     existingTool: existingTool,
                     settings: settings,
-                    lifecycle: lifecycle,
-                    status: status
+                    lifecycle: lifecycle
                 )
             }
             return try await editTool(
                 prompt: effectivePrompt,
                 existingTool: existingTool,
                 settings: settings,
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
         }
 
         return try await createTool(
             prompt: trimmedPrompt,
             settings: settings,
-            lifecycle: lifecycle,
-            status: status
+            lifecycle: lifecycle
         )
     }
 
@@ -205,15 +179,13 @@ struct SingleFileToolGenerationRuntime {
         prompt: String,
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
-        lifecycle: ToolGenerationLifecycle,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let startingPhase = existingTool?.generationPhase ?? .initializing
         let setup: CreateToolSetup
         if let existingTool, let resumedSetup = try? loadCreateSetup(for: existingTool, settings: settings) {
             setup = resumedSetup
         } else {
-            status("Naming app")
             if existingTool == nil {
                 try await preparePlaceholderCreateTool(
                     prompt: prompt,
@@ -285,8 +257,7 @@ struct SingleFileToolGenerationRuntime {
                     manifest: setup.manifest,
                     settings: setup.settings,
                     iconPrompt: setup.iconPrompt,
-                    lifecycle: lifecycle,
-                    status: status
+                    lifecycle: lifecycle
                 )
             }
 
@@ -305,8 +276,7 @@ struct SingleFileToolGenerationRuntime {
                 layout: setup.layout,
                 contentViewPath: setup.contentViewPath,
                 generator: generator,
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
 
             return try await packageTool(
@@ -317,8 +287,7 @@ struct SingleFileToolGenerationRuntime {
                 manifest: setup.manifest,
                 settings: setup.settings,
                 iconPrompt: setup.iconPrompt,
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
         } catch is CancellationError {
             if !lifecycle.preservesCreatedPackageOnCancellation {
@@ -359,8 +328,7 @@ struct SingleFileToolGenerationRuntime {
         prompt: String,
         existingTool: Tool,
         settings: ToolGenerationSettings,
-        lifecycle: ToolGenerationLifecycle,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let manifest = try context.loadManifest(at: existingTool.agentManifestURL)
         let layout = ToolPackageLayout(
@@ -381,8 +349,7 @@ struct SingleFileToolGenerationRuntime {
                 manifest: manifest,
                 settings: settings,
                 iconPrompt: nil,
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
         }
         let existingSource = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
@@ -433,11 +400,9 @@ struct SingleFileToolGenerationRuntime {
                 contentViewPath: contentViewPath,
                 generator: generator,
                 failureRecovery: .restoreOriginalSource(existingSource),
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
             try Task.checkCancellation()
-            status("Packaging \(manifest.displayName)")
             try await lifecycle.updatePhase(.generating, .packaging, nil)
             _ = try await context.appBundleClient.buildInternalApp(
                 ToolAppBundleRequest(
@@ -445,7 +410,6 @@ struct SingleFileToolGenerationRuntime {
                     executableName: manifest.executableName,
                     bundleIdentifier: existingTool.bundleIdentifier,
                     packageRootURL: existingTool.packageRootURL,
-                    sandboxEnabled: settings.sandboxEnabled,
                     settings: settings
                 )
             )
@@ -486,8 +450,7 @@ struct SingleFileToolGenerationRuntime {
         contentViewPath: String,
         generator: ContentViewCandidateGenerator,
         failureRecovery: ContentViewBuildRepairLoop.FailureRecovery = .restoreBestCandidate,
-        lifecycle: ToolGenerationLifecycle,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle
     ) async throws {
         try await lifecycle.updatePhase(.generating, .repairing, nil)
         let repairLoop = ContentViewBuildRepairLoop(
@@ -501,8 +464,7 @@ struct SingleFileToolGenerationRuntime {
         )
         try await repairLoop.run(
             generator: generator,
-            failureRecovery: failureRecovery,
-            status: status
+            failureRecovery: failureRecovery
         )
     }
 
@@ -557,9 +519,7 @@ struct SingleFileToolGenerationRuntime {
         )
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialSource ? "continue create" : "create",
-            initialStatusVerb: resumePartialSource ? "Continuing" : "Generating",
-            retryStatusVerb: "Regenerating"
+            modeDescription: resumePartialSource ? "continue create" : "create"
         ) { session in
             if useCurrentSourceOnFirstAttempt && !didUseCurrentSource {
                 didUseCurrentSource = true
@@ -646,15 +606,11 @@ struct SingleFileToolGenerationRuntime {
 
         return ContentViewCandidateGenerator(
             modeDescription: resumePartialDiff ? "continue edit diff" : "edit",
-            initialStatusVerb: resumePartialDiff ? "Continuing" : "Editing",
-            retryStatusVerb: "Editing",
             instructions: ToolGenerationPrompts.diffEditInstructions,
             retriesInvalidCandidates: true,
             invalidCandidateFallback: ContentViewCandidateGenerator.InvalidCandidateFallback(
                 threshold: ToolGenerationRepairPolicy.invalidInitialEditDiffsBeforeFullFileEdit,
-                modeDescription: "edit whole-file fallback",
-                initialStatusVerb: "Editing",
-                retryStatusVerb: "Editing"
+                modeDescription: "edit whole-file fallback"
             ) { session in
                 try await regenerateEditedContentView(
                     userPrompt: userPrompt,
@@ -715,9 +671,7 @@ struct SingleFileToolGenerationRuntime {
         )
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialSource ? "continue edit source" : "edit",
-            initialStatusVerb: resumePartialSource ? "Continuing" : "Editing",
-            retryStatusVerb: "Editing"
+            modeDescription: resumePartialSource ? "continue edit source" : "edit"
         ) { session in
             if resumePartialSource && !didAttemptContinuation {
                 didAttemptContinuation = true
@@ -833,8 +787,7 @@ struct SingleFileToolGenerationRuntime {
         manifest: ToolManifest,
         settings: ToolGenerationSettings,
         iconPrompt: String?,
-        lifecycle: ToolGenerationLifecycle,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
         try Task.checkCancellation()
@@ -843,7 +796,6 @@ struct SingleFileToolGenerationRuntime {
         await context.processClient.stripQuarantine(binaryURL)
 
         try Task.checkCancellation()
-        status("Packaging \(displayName)")
         try await lifecycle.updatePhase(.generating, .packaging, nil)
         _ = try await context.appBundleClient.buildInternalApp(
             ToolAppBundleRequest(
@@ -851,7 +803,6 @@ struct SingleFileToolGenerationRuntime {
                 executableName: executableName,
                 bundleIdentifier: bundleIdentifier,
                 packageRootURL: packageRootURL,
-                sandboxEnabled: settings.sandboxEnabled,
                 settings: settings,
                 iconPrompt: iconPrompt
             )

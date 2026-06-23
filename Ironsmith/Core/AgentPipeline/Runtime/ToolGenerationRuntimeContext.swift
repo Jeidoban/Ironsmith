@@ -1,6 +1,59 @@
 import AnyLanguageModel
 import Foundation
 
+struct ToolGenerationRuntimeDependencies {
+    let toolsDirectoryURL: URL
+    let fileClient: AgentFileClient
+    let processClient: SwiftPackageProcessClient
+    let appBundleClient: ToolAppBundleClient
+    let iconClient: ToolIconClient
+    let metadataClient: ToolMetadataClient
+    let promptRefinementClient: ToolPromptRefinementClient
+    let versionBackupClient: ToolVersionBackupClient
+
+    init(
+        toolsDirectoryURL: URL,
+        fileClient: AgentFileClient,
+        processClient: SwiftPackageProcessClient,
+        appBundleClient: ToolAppBundleClient,
+        iconClient: ToolIconClient = .noOp,
+        metadataClient: ToolMetadataClient = .fallback(),
+        promptRefinementClient: ToolPromptRefinementClient = .disabled(),
+        versionBackupClient: ToolVersionBackupClient
+    ) {
+        self.toolsDirectoryURL = toolsDirectoryURL
+        self.fileClient = fileClient
+        self.processClient = processClient
+        self.appBundleClient = appBundleClient
+        self.iconClient = iconClient
+        self.metadataClient = metadataClient
+        self.promptRefinementClient = promptRefinementClient
+        self.versionBackupClient = versionBackupClient
+    }
+
+    static func live(
+        toolsDirectoryURL: URL = IronsmithPaths.toolsDirectory,
+        fileClient: AgentFileClient = .live,
+        processClient: SwiftPackageProcessClient = .live,
+        appBundleClient: ToolAppBundleClient = .live(),
+        iconClient: ToolIconClient = .live(),
+        metadataClient: ToolMetadataClient = .live(),
+        promptRefinementClient: ToolPromptRefinementClient = .live(),
+        versionBackupClient: ToolVersionBackupClient = .live
+    ) -> Self {
+        Self(
+            toolsDirectoryURL: toolsDirectoryURL,
+            fileClient: fileClient,
+            processClient: processClient,
+            appBundleClient: appBundleClient,
+            iconClient: iconClient,
+            metadataClient: metadataClient,
+            promptRefinementClient: promptRefinementClient,
+            versionBackupClient: versionBackupClient
+        )
+    }
+}
+
 struct ToolGenerationRuntimeContext {
     let languageModel: any LanguageModel
     let metadataLanguageModel: any LanguageModel
@@ -18,68 +71,23 @@ struct ToolGenerationRuntimeContext {
     let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
 
     init(
-        languageModel: any LanguageModel,
-        metadataLanguageModel: (any LanguageModel)?,
-        generationOptions: GenerationOptions,
-        repairStrategy: ToolRepairStrategy,
-        toolsDirectoryURL: URL,
-        fileClient: AgentFileClient,
-        processClient: SwiftPackageProcessClient,
-        appBundleClient: ToolAppBundleClient,
-        iconClient: ToolIconClient = .noOp,
-        metadataClient: ToolMetadataClient = .fallback(),
-        promptRefinementClient: ToolPromptRefinementClient = .disabled(),
-        promptRefinementEnabled: Bool = true,
-        versionBackupClient: ToolVersionBackupClient,
-        afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
+        languageModelContext: AgentLanguageModelContext,
+        dependencies: ToolGenerationRuntimeDependencies
     ) {
-        self.languageModel = languageModel
-        self.metadataLanguageModel = metadataLanguageModel ?? AnyLanguageModel.SystemLanguageModel.default
-        self.generationOptions = generationOptions
-        self.repairStrategy = repairStrategy
-        self.toolsDirectoryURL = toolsDirectoryURL
-        self.fileClient = fileClient
-        self.processClient = processClient
-        self.appBundleClient = appBundleClient
-        self.iconClient = iconClient
-        self.metadataClient = metadataClient
-        self.promptRefinementClient = promptRefinementClient
-        self.promptRefinementEnabled = promptRefinementEnabled
-        self.versionBackupClient = versionBackupClient
-        self.afterLanguageModelInvocation = afterLanguageModelInvocation
-    }
-
-    init(
-        languageModel: any LanguageModel,
-        generationOptions: GenerationOptions,
-        repairStrategy: ToolRepairStrategy,
-        toolsDirectoryURL: URL,
-        fileClient: AgentFileClient,
-        processClient: SwiftPackageProcessClient,
-        appBundleClient: ToolAppBundleClient,
-        iconClient: ToolIconClient = .noOp,
-        metadataClient: ToolMetadataClient = .fallback(),
-        promptRefinementClient: ToolPromptRefinementClient = .disabled(),
-        promptRefinementEnabled: Bool = true,
-        versionBackupClient: ToolVersionBackupClient,
-        afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
-    ) {
-        self.init(
-            languageModel: languageModel,
-            metadataLanguageModel: nil,
-            generationOptions: generationOptions,
-            repairStrategy: repairStrategy,
-            toolsDirectoryURL: toolsDirectoryURL,
-            fileClient: fileClient,
-            processClient: processClient,
-            appBundleClient: appBundleClient,
-            iconClient: iconClient,
-            metadataClient: metadataClient,
-            promptRefinementClient: promptRefinementClient,
-            promptRefinementEnabled: promptRefinementEnabled,
-            versionBackupClient: versionBackupClient,
-            afterLanguageModelInvocation: afterLanguageModelInvocation
-        )
+        self.languageModel = languageModelContext.languageModel
+        self.metadataLanguageModel = languageModelContext.metadataLanguageModel
+        self.generationOptions = languageModelContext.options
+        self.repairStrategy = languageModelContext.repairStrategy
+        self.toolsDirectoryURL = dependencies.toolsDirectoryURL
+        self.fileClient = dependencies.fileClient
+        self.processClient = dependencies.processClient
+        self.appBundleClient = dependencies.appBundleClient
+        self.iconClient = dependencies.iconClient
+        self.metadataClient = dependencies.metadataClient
+        self.promptRefinementClient = dependencies.promptRefinementClient
+        self.promptRefinementEnabled = languageModelContext.promptRefinementEnabled
+        self.versionBackupClient = dependencies.versionBackupClient
+        self.afterLanguageModelInvocation = languageModelContext.afterLanguageModelInvocation
     }
 
     func respond<Content, PromptContent>(

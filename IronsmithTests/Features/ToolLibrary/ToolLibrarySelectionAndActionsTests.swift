@@ -338,10 +338,11 @@ extension ToolLibraryTests {
         let runCapture = ToolRunCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: "Runner",
                         executableName: "Runner",
+                        settings: request.settings,
                         packageRootURL: tool.packageRootURL,
                         manifest: ToolManifest(displayName: "Runner", executableName: "Runner", files: [])
                     )
@@ -435,10 +436,11 @@ extension ToolLibraryTests {
         let buildCapture = ToolBuildCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: executableName,
                         executableName: executableName,
+                        settings: request.settings,
                         packageRootURL: packageRoot,
                         manifest: manifest
                     )
@@ -483,10 +485,11 @@ extension ToolLibraryTests {
         let finderCapture = ToolFinderCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: "Exporter",
                         executableName: "Exporter",
+                        settings: request.settings,
                         packageRootURL: URL(fileURLWithPath: "/tmp/exporter", isDirectory: true),
                         manifest: ToolManifest(displayName: "Exporter", executableName: "Exporter", files: [])
                     )
@@ -520,10 +523,11 @@ extension ToolLibraryTests {
         let capture = ToolFinderCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: "Finder Tool",
                         executableName: "FinderTool",
+                        settings: request.settings,
                         packageRootURL: tool.packageRootURL,
                         manifest: ToolManifest(displayName: "Finder Tool", executableName: "FinderTool", files: [])
                     )
@@ -570,10 +574,11 @@ extension ToolLibraryTests {
         let capture = ToolFinderCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: executableName,
                         executableName: executableName,
+                        settings: request.settings,
                         packageRootURL: packageRoot,
                         manifest: manifest
                     )
@@ -618,10 +623,11 @@ extension ToolLibraryTests {
         let capture = ToolFinderCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: executableName,
                         executableName: executableName,
+                        settings: request.settings,
                         packageRootURL: packageRoot,
                         manifest: manifest
                     )

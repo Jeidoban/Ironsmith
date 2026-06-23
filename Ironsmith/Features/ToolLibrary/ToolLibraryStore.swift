@@ -11,6 +11,17 @@ enum ToolLibraryPresentedErrorAction: Equatable {
     case buyIronsmithCredits
 }
 
+private enum ToolLibraryGenerationError: LocalizedError {
+    case missingPreparedTool
+
+    var errorDescription: String? {
+        switch self {
+        case .missingPreparedTool:
+            return "Ironsmith could not finish this app because generation did not prepare a library record."
+        }
+    }
+}
+
 private final class BindingBox<Value> {
     var value: Value
 
@@ -308,38 +319,22 @@ final class ToolLibraryStore {
             }
 
             let result = try await dependencies.generationClient.generateTool(
-                trimmedPrompt,
-                selectedTool,
-                submittedSettings,
-                languageModelContext,
-                lifecycle: lifecycle
-            ) { _ in }
+                ToolGenerationRequest(
+                    prompt: trimmedPrompt,
+                    existingTool: selectedTool,
+                    settings: submittedSettings,
+                    languageModelContext: languageModelContext,
+                    lifecycle: lifecycle
+                )
+            )
 
-            if let completedTool = selectedTool ?? activeTool {
-                applyCompletedGenerationResult(
-                    result,
-                    to: completedTool,
-                    prompt: trimmedPrompt
-                )
-                try modelContext.save()
-            } else {
-                let tool = Tool(
-                    name: result.toolName,
-                    executableName: result.executableName,
-                    bundleIdentifier: result.bundleIdentifier,
-                    sandboxEnabled: result.settings.sandboxEnabled,
-                    appKind: result.settings.appKind,
-                    menuBarSystemImage: result.settings.menuBarSystemImage,
-                    sandboxPermissions: result.settings.sandboxPermissions,
-                    resourcePermissions: result.settings.resourcePermissions,
-                    packageRootPath: result.packageRootURL.path,
-                    generationState: .ready,
-                    generationPhase: .completed
-                )
-                let repository = ToolRepository(modelContext: modelContext)
-                repository.insert(tool)
-                try repository.save()
-            }
+            let completedTool = try requirePreparedTool(selectedTool ?? activeTool)
+            applyCompletedGenerationResult(
+                result,
+                to: completedTool,
+                prompt: trimmedPrompt
+            )
+            try modelContext.save()
             prompt = Self.defaultPrompt
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
@@ -576,12 +571,14 @@ final class ToolLibraryStore {
             try modelContext.save()
 
             let result = try await dependencies.generationClient.generateTool(
-                resumePrompt,
-                tool,
-                settings,
-                languageModelContext,
-                lifecycle: lifecycle
-            ) { _ in }
+                ToolGenerationRequest(
+                    prompt: resumePrompt,
+                    existingTool: tool,
+                    settings: settings,
+                    languageModelContext: languageModelContext,
+                    lifecycle: lifecycle
+                )
+            )
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
             try modelContext.save()
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
@@ -743,6 +740,13 @@ final class ToolLibraryStore {
         tool.generationRepairErrorCount = nil
         removePendingDraft(for: tool)
         tool.updatedAt = .now
+    }
+
+    private func requirePreparedTool(_ tool: Tool?) throws -> Tool {
+        guard let tool else {
+            throw ToolLibraryGenerationError.missingPreparedTool
+        }
+        return tool
     }
 
     private func canContinueGeneration(_ tool: Tool) -> Bool {
