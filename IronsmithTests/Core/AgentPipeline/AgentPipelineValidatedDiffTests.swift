@@ -99,6 +99,52 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func applyValidatedDiffIgnoresContextOnlySeparatorHunks() throws {
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+          // MARK: - State
+          @State private var pulse = false
+
+          private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+          // MARK: - Body
+          var body: some View {
+            VStack(spacing: 14) {
+              Text("Cookie")
+            }
+          }
+        }
+        """
+        let diff = """
+        --- ContentView.swift
+        +++ ContentView.swift
+        @@
+         struct ContentView: View {
+           // MARK: - State
+           @State private var pulse = false
+        @@
+           private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+        +
+        +  private let punkAccent = Color.pink
+         
+           // MARK: - Body
+           var body: some View {
+        -    VStack(spacing: 14) {
+        +    VStack(spacing: 10) {
+               Text("Cookie")
+             }
+        """
+
+        let updated = try ContentViewRepairSupport.applyValidatedDiff(diff, to: source, maximumHunks: 1)
+
+        #expect(updated.contains("private let punkAccent = Color.pink"))
+        #expect(updated.contains("VStack(spacing: 10)"))
+        #expect(!(updated.contains("VStack(spacing: 14)")))
+    }
+
+    @Test
     func applyValidatedDiffAllowsUnlimitedHunksWhenUnbounded() throws {
         let source = """
         import SwiftUI
@@ -168,6 +214,30 @@ extension AgentPipelineTests {
         #expect(updated.contains("Text(\"Updated\")"))
         #expect(throws: ToolGenerationError.invalidRepairPatch) {
             try ContentViewRepairSupport.applyValidatedDiff(diff, to: source, maximumHunks: 1)
+        }
+    }
+
+    @Test
+    func applyValidatedDiffRejectsDiffWithOnlyContextHunks() {
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                Text("One")
+            }
+        }
+        """
+        let diff = """
+        --- ContentView.swift
+        +++ ContentView.swift
+        @@
+         struct ContentView: View {
+             var body: some View {
+        """
+
+        #expect(throws: ToolGenerationError.invalidRepairPatch) {
+            try ContentViewRepairSupport.applyValidatedDiff(diff, to: source, maximumHunks: nil)
         }
     }
 

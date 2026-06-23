@@ -22,15 +22,19 @@ extension ContentViewRepairSupport {
         guard !hunks.isEmpty else {
             throw invalidRepairDiff(reason: "diff contains no hunks")
         }
+        let changingHunks = hunks.filter(\.containsChangedLine)
+        guard !changingHunks.isEmpty else {
+            throw invalidRepairDiff(reason: "diff contains no changing hunks")
+        }
         if let maximumHunks {
             let boundedMaximumHunks = max(1, maximumHunks)
-            guard hunks.count <= boundedMaximumHunks else {
-                throw invalidRepairDiff(reason: "diff contains \(hunks.count) hunks; expected 1...\(boundedMaximumHunks)")
+            guard changingHunks.count <= boundedMaximumHunks else {
+                throw invalidRepairDiff(reason: "diff contains \(changingHunks.count) hunks; expected 1...\(boundedMaximumHunks)")
             }
         }
 
         var updatedSource = source
-        for hunk in hunks {
+        for hunk in changingHunks {
             updatedSource = try apply(hunk, to: updatedSource)
         }
         return updatedSource
@@ -42,6 +46,12 @@ extension ContentViewRepairSupport {
 
     private struct UnifiedDiffHunk: Equatable {
         var lines: [String]
+
+        var containsChangedLine: Bool {
+            lines.dropFirst().contains { line in
+                line.hasPrefix("+") || line.hasPrefix("-")
+            }
+        }
     }
 
     private static func sanitizedDiff(_ text: String) -> String {
