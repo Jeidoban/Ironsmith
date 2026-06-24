@@ -8,9 +8,4 @@ extension ContentViewBuildRepairLoop {
             instructions: instructions
         )
     }
-
-    func repairStatus(errorCount: Int) -> String {
-        let errorLabel = errorCount == 1 ? "error" : "errors"
-        return "Repairing \(errorCount) \(errorLabel)"
-    }
 }

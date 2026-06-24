@@ -59,7 +59,7 @@ extension AgentPipelineTests {
 
         let result = try await runtime.generateTool(
             for: "Build a broken modifier tool",
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(
@@ -137,7 +137,7 @@ extension AgentPipelineTests {
 
         let result = try await runtime.generateTool(
             for: "Build a spacing tool",
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(
@@ -205,7 +205,7 @@ extension AgentPipelineTests {
 
         let result = try await runtime.generateTool(
             for: "Build a repeated spacing tool",
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(
@@ -275,11 +275,9 @@ extension AgentPipelineTests {
                 await invocationCapture.record()
             }
         )
-        var statuses: [String] = []
-
         let result = try await runtime.generateTool(
             for: "Build a model repair tool",
-            status: { statuses.append($0) }
+            settings: .default
         )
 
         let contentView = try String(
@@ -287,9 +285,6 @@ extension AgentPipelineTests {
             encoding: .utf8
         )
         #expect(contentView.contains(#"Text("fixed by model repair")"#))
-        #expect(statuses.contains("Generating Build A Model Repair Tool"))
-        #expect(statuses.contains("Building Build A Model Repair Tool"))
-        #expect(statuses.contains("Repairing 1 error"))
         #expect(await responses.count == 2)
         #expect(await invocationCapture.count == 2)
         #expect(await builds.count == 2)
@@ -365,7 +360,7 @@ extension AgentPipelineTests {
 
         let result = try await runtime.generateTool(
             for: "Build a large model repair tool",
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(
@@ -445,7 +440,7 @@ extension AgentPipelineTests {
 
         let result = try await runtime.generateTool(
             for: "Build budget exhaustion tool",
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(
@@ -500,7 +495,7 @@ extension AgentPipelineTests {
         let result = try await runtime.generateTool(
             for: "Change old to new",
             existingTool: tool,
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)

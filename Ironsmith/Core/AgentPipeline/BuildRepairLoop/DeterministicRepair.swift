@@ -4,8 +4,7 @@ import Foundation
 extension ContentViewBuildRepairLoop {
     func applyDeterministicRepairsUntilStable(
         startingFrom initialState: BuildState,
-        phasePrefix: String,
-        status: @escaping @MainActor (String) -> Void
+        phasePrefix: String
     ) async throws -> BuildState? {
         var currentState = initialState
         var seenSignatures = Set<String>()
@@ -44,13 +43,13 @@ extension ContentViewBuildRepairLoop {
             }
 
             switch try await compileSourceMutation(
-                deterministicCandidate.source,
-                originalSource: currentState.source,
-                previousContentViewErrorCount: currentState.contentViewErrors.count,
-                phase: "\(phasePrefix) \(pass)",
-                statusMessage: "Building \(displayName)",
-                rollbackSubject: "Deterministic repair",
-                status: status
+                SourceMutationRequest(
+                    source: deterministicCandidate.source,
+                    originalSource: currentState.source,
+                    previousContentViewErrorCount: currentState.contentViewErrors.count,
+                    phase: "\(phasePrefix) \(pass)",
+                    rollbackSubject: "Deterministic repair"
+                )
             ) {
             case .finished:
                 return nil

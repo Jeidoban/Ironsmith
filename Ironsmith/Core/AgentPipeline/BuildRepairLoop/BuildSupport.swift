@@ -2,6 +2,14 @@ import AnyLanguageModel
 import Foundation
 
 extension ContentViewBuildRepairLoop {
+    struct SourceMutationRequest {
+        let source: String
+        let originalSource: String
+        let previousContentViewErrorCount: Int
+        let phase: String
+        let rollbackSubject: String
+    }
+
     func betterCandidate(
         current: SourceCandidate?,
         source: String,
@@ -125,43 +133,36 @@ extension ContentViewBuildRepairLoop {
         switch generationError {
         case .invalidRepairPatch, .noRepairPatchCandidate:
             return true
-        case .emptyPrompt, .compileFailed, .couldNotEncodeManifest:
+        case .emptyPrompt, .compileFailed:
             return false
         }
     }
 
     func compileSourceMutation(
-        _ source: String,
-        originalSource: String,
-        previousContentViewErrorCount: Int,
-        phase: String,
-        statusMessage: String,
-        rollbackSubject: String,
-        status: @escaping @MainActor (String) -> Void
+        _ request: SourceMutationRequest
     ) async throws -> SourceMutationBuildResult {
         try Task.checkCancellation()
-        try context.write(source, to: contentViewPath, packageRootURL: layout.packageRootURL)
+        try context.write(request.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
         try await Self.cleanContentViewSource(contentViewPath, layout: layout, context: context)
 
-        status(statusMessage)
-        guard let state = try await buildCurrentSource(phase: phase) else {
-            if try compiledContentViewIsPlaceholder(phase: phase) {
-                try context.write(originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
+        guard let state = try await buildCurrentSource(phase: request.phase) else {
+            if try compiledContentViewIsPlaceholder(phase: request.phase) {
+                try context.write(request.originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
                 return .rolledBack
             }
             return .finished
         }
 
-        guard state.contentViewErrors.count <= previousContentViewErrorCount else {
+        guard state.contentViewErrors.count <= request.previousContentViewErrorCount else {
             AgentDiagnosticsLog.append(
                 """
-                \(rollbackSubject) rolled back.
+                \(request.rollbackSubject) rolled back.
                 packageRoot: \(layout.packageRootURL.path)
-                previousContentViewErrorCount: \(previousContentViewErrorCount)
+                previousContentViewErrorCount: \(request.previousContentViewErrorCount)
                 newContentViewErrorCount: \(state.contentViewErrors.count)
                 """
             )
-            try context.write(originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            try context.write(request.originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
             return .rolledBack
         }
 
@@ -177,7 +178,7 @@ extension ContentViewBuildRepairLoop {
             return .invalidRepairPatch
         case .noRepairPatchCandidate:
             return .noDeterministicRepair
-        case .emptyPrompt, .compileFailed, .couldNotEncodeManifest:
+        case .emptyPrompt, .compileFailed:
             return nil
         }
     }

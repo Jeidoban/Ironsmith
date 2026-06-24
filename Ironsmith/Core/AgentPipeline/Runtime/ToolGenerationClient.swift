@@ -1,32 +1,24 @@
 import Foundation
 
-struct ToolGenerationPreparedTool {
+nonisolated struct ToolGenerationPreparedTool {
     let name: String
     let executableName: String
     let bundleIdentifier: String
     let settings: ToolGenerationSettings
     let packageRootURL: URL
-    let manifest: ToolManifest
-
-    var sandboxEnabled: Bool {
-        settings.sandboxEnabled
-    }
 
     init(
         name: String,
         executableName: String,
         bundleIdentifier: String,
-        sandboxEnabled: Bool = true,
-        settings: ToolGenerationSettings? = nil,
-        packageRootURL: URL,
-        manifest: ToolManifest
+        settings: ToolGenerationSettings,
+        packageRootURL: URL
     ) {
         self.name = name
         self.executableName = executableName
         self.bundleIdentifier = bundleIdentifier
-        self.settings = settings ?? ToolGenerationSettings(sandboxEnabled: sandboxEnabled)
+        self.settings = settings
         self.packageRootURL = packageRootURL
-        self.manifest = manifest
     }
 }
 
@@ -70,169 +62,57 @@ struct ToolGenerationLifecycle {
     }
 }
 
+nonisolated struct ToolGenerationRequest {
+    let prompt: String
+    let existingTool: Tool?
+    let settings: ToolGenerationSettings
+    let languageModelContext: AgentLanguageModelContext
+    let lifecycle: ToolGenerationLifecycle
+
+    init(
+        prompt: String,
+        existingTool: Tool? = nil,
+        settings: ToolGenerationSettings,
+        languageModelContext: AgentLanguageModelContext,
+        lifecycle: ToolGenerationLifecycle = .noop
+    ) {
+        self.prompt = prompt
+        self.existingTool = existingTool
+        self.settings = settings
+        self.languageModelContext = languageModelContext
+        self.lifecycle = lifecycle
+    }
+}
+
 struct ToolGenerationClient {
-    private var generateToolWithLifecycle: (
-        _ prompt: String,
-        _ existingTool: Tool?,
-        _ settings: ToolGenerationSettings,
-        _ languageModelContext: AgentLanguageModelContext,
-        _ lifecycle: ToolGenerationLifecycle,
-        _ status: @escaping @MainActor (String) -> Void
-    ) async throws -> ToolGenerationResult
+    private var generate: (ToolGenerationRequest) async throws -> ToolGenerationResult
 
-    func generateTool(
-        _ prompt: String,
-        _ existingTool: Tool?,
-        _ settings: ToolGenerationSettings,
-        _ languageModelContext: AgentLanguageModelContext,
-        lifecycle: ToolGenerationLifecycle = .noop,
-        status: @escaping @MainActor (String) -> Void
-    ) async throws -> ToolGenerationResult {
-        try await generateToolWithLifecycle(
-            prompt,
-            existingTool,
-            settings,
-            languageModelContext,
-            lifecycle,
-            status
-        )
-    }
-
-    func generateTool(
-        _ prompt: String,
-        _ existingTool: Tool?,
-        _ sandboxEnabled: Bool,
-        _ sandboxPermissions: GeneratedAppSandboxPermissions,
-        _ resourcePermissions: GeneratedAppResourcePermissions,
-        _ languageModelContext: AgentLanguageModelContext,
-        lifecycle: ToolGenerationLifecycle = .noop,
-        status: @escaping @MainActor (String) -> Void
-    ) async throws -> ToolGenerationResult {
-        try await generateTool(
-            prompt,
-            existingTool,
-            ToolGenerationSettings(
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions
-            ),
-            languageModelContext,
-            lifecycle: lifecycle,
-            status: status
-        )
+    func generateTool(_ request: ToolGenerationRequest) async throws -> ToolGenerationResult {
+        try await generate(request)
     }
 
     init(
-        _ generateTool: @escaping (
-            _ prompt: String,
-            _ existingTool: Tool?,
-            _ sandboxEnabled: Bool,
-            _ sandboxPermissions: GeneratedAppSandboxPermissions,
-            _ resourcePermissions: GeneratedAppResourcePermissions,
-            _ languageModelContext: AgentLanguageModelContext,
-            _ status: @escaping @MainActor (String) -> Void
-        ) async throws -> ToolGenerationResult
+        _ generate: @escaping (ToolGenerationRequest) async throws -> ToolGenerationResult
     ) {
-        self.generateToolWithLifecycle = {
-            prompt,
-            existingTool,
-            settings,
-            languageModelContext,
-            _,
-            status in
-            try await generateTool(
-                prompt,
-                existingTool,
-                settings.sandboxEnabled,
-                settings.sandboxPermissions,
-                settings.resourcePermissions,
-                languageModelContext,
-                status
-            )
-        }
-    }
-
-    init(
-        withLifecycle generateTool: @escaping (
-            _ prompt: String,
-            _ existingTool: Tool?,
-            _ sandboxEnabled: Bool,
-            _ sandboxPermissions: GeneratedAppSandboxPermissions,
-            _ resourcePermissions: GeneratedAppResourcePermissions,
-            _ languageModelContext: AgentLanguageModelContext,
-            _ lifecycle: ToolGenerationLifecycle,
-            _ status: @escaping @MainActor (String) -> Void
-        ) async throws -> ToolGenerationResult
-    ) {
-        self.generateToolWithLifecycle = {
-            prompt,
-            existingTool,
-            settings,
-            languageModelContext,
-            lifecycle,
-            status in
-            try await generateTool(
-                prompt,
-                existingTool,
-                settings.sandboxEnabled,
-                settings.sandboxPermissions,
-                settings.resourcePermissions,
-                languageModelContext,
-                lifecycle,
-                status
-            )
-        }
-    }
-
-    init(
-        withLifecycle generateTool: @escaping (
-            _ prompt: String,
-            _ existingTool: Tool?,
-            _ settings: ToolGenerationSettings,
-            _ languageModelContext: AgentLanguageModelContext,
-            _ lifecycle: ToolGenerationLifecycle,
-            _ status: @escaping @MainActor (String) -> Void
-        ) async throws -> ToolGenerationResult
-    ) {
-        self.generateToolWithLifecycle = generateTool
+        self.generate = generate
     }
 
     static func live(
-        toolsDirectoryURL: URL = IronsmithPaths.toolsDirectory,
-        fileClient: AgentFileClient = .live,
-        processClient: SwiftPackageProcessClient = .live,
-        appBundleClient: ToolAppBundleClient = .live(),
-        iconClient: ToolIconClient = .live(),
-        metadataClient: ToolMetadataClient = .live(),
-        promptRefinementClient: ToolPromptRefinementClient = .live(),
-        versionBackupClient: ToolVersionBackupClient = .live
+        dependencies: ToolGenerationRuntimeDependencies = .live()
     ) -> Self {
-        Self(withLifecycle: { prompt, existingTool, settings, languageModelContext, lifecycle, status in
+        Self { request in
             let context = ToolGenerationRuntimeContext(
-                languageModel: languageModelContext.languageModel,
-                metadataLanguageModel: languageModelContext.metadataLanguageModel,
-                generationOptions: languageModelContext.options,
-                repairStrategy: languageModelContext.repairStrategy,
-                toolsDirectoryURL: toolsDirectoryURL,
-                fileClient: fileClient,
-                processClient: processClient,
-                appBundleClient: appBundleClient,
-                iconClient: iconClient,
-                metadataClient: metadataClient,
-                promptRefinementClient: promptRefinementClient,
-                promptRefinementEnabled: languageModelContext.promptRefinementEnabled,
-                versionBackupClient: versionBackupClient,
-                afterLanguageModelInvocation: languageModelContext.afterLanguageModelInvocation
+                languageModelContext: request.languageModelContext,
+                dependencies: dependencies
             )
             let runtime = SingleFileToolGenerationRuntime(context: context)
             return try await runtime.generateTool(
-                for: prompt,
-                existingTool: existingTool,
-                settings: settings,
-                lifecycle: lifecycle,
-                status: status
+                for: request.prompt,
+                existingTool: request.existingTool,
+                settings: request.settings,
+                lifecycle: request.lifecycle
             )
-        })
+        }
     }
 }
 

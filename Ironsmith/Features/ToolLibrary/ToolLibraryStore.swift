@@ -11,6 +11,17 @@ enum ToolLibraryPresentedErrorAction: Equatable {
     case buyIronsmithCredits
 }
 
+private enum ToolLibraryGenerationError: LocalizedError {
+    case missingPreparedTool
+
+    var errorDescription: String? {
+        switch self {
+        case .missingPreparedTool:
+            return "Ironsmith could not finish this app because generation did not prepare a library record."
+        }
+    }
+}
+
 private final class BindingBox<Value> {
     var value: Value
 
@@ -237,12 +248,8 @@ final class ToolLibraryStore {
         }
 
         do {
-            let manifest = try Self.manifest(for: tool)
-            let layout = ToolPackageLayout(
-                packageRootURL: tool.packageRootURL,
-                executableName: manifest.executableName
-            )
-            let contentViewPath = manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName)
+            let layout = tool.packageLayout
+            let contentViewPath = tool.contentViewSourcePath
             let restoredSettings = try dependencies.versionBackupClient.restorePreviousVersion(
                 tool.packageRootURL,
                 contentViewPath,
@@ -251,7 +258,7 @@ final class ToolLibraryStore {
             tool.applyGenerationSettings(restoredSettings)
             try Self.writeAppEntry(
                 layout: layout,
-                displayName: manifest.displayName,
+                displayName: tool.name,
                 settings: restoredSettings
             )
             try await dependencies.buildClient.buildTool(tool)
@@ -308,38 +315,22 @@ final class ToolLibraryStore {
             }
 
             let result = try await dependencies.generationClient.generateTool(
-                trimmedPrompt,
-                selectedTool,
-                submittedSettings,
-                languageModelContext,
-                lifecycle: lifecycle
-            ) { _ in }
+                ToolGenerationRequest(
+                    prompt: trimmedPrompt,
+                    existingTool: selectedTool,
+                    settings: submittedSettings,
+                    languageModelContext: languageModelContext,
+                    lifecycle: lifecycle
+                )
+            )
 
-            if let completedTool = selectedTool ?? activeTool {
-                applyCompletedGenerationResult(
-                    result,
-                    to: completedTool,
-                    prompt: trimmedPrompt
-                )
-                try modelContext.save()
-            } else {
-                let tool = Tool(
-                    name: result.toolName,
-                    executableName: result.executableName,
-                    bundleIdentifier: result.bundleIdentifier,
-                    sandboxEnabled: result.settings.sandboxEnabled,
-                    appKind: result.settings.appKind,
-                    menuBarSystemImage: result.settings.menuBarSystemImage,
-                    sandboxPermissions: result.settings.sandboxPermissions,
-                    resourcePermissions: result.settings.resourcePermissions,
-                    packageRootPath: result.packageRootURL.path,
-                    generationState: .ready,
-                    generationPhase: .completed
-                )
-                let repository = ToolRepository(modelContext: modelContext)
-                repository.insert(tool)
-                try repository.save()
-            }
+            let completedTool = try requirePreparedTool(selectedTool ?? activeTool)
+            applyCompletedGenerationResult(
+                result,
+                to: completedTool,
+                prompt: trimmedPrompt
+            )
+            try modelContext.save()
             prompt = Self.defaultPrompt
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
@@ -576,12 +567,14 @@ final class ToolLibraryStore {
             try modelContext.save()
 
             let result = try await dependencies.generationClient.generateTool(
-                resumePrompt,
-                tool,
-                settings,
-                languageModelContext,
-                lifecycle: lifecycle
-            ) { _ in }
+                ToolGenerationRequest(
+                    prompt: resumePrompt,
+                    existingTool: tool,
+                    settings: settings,
+                    languageModelContext: languageModelContext,
+                    lifecycle: lifecycle
+                )
+            )
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
             try modelContext.save()
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
@@ -745,6 +738,13 @@ final class ToolLibraryStore {
         tool.updatedAt = .now
     }
 
+    private func requirePreparedTool(_ tool: Tool?) throws -> Tool {
+        guard let tool else {
+            throw ToolLibraryGenerationError.missingPreparedTool
+        }
+        return tool
+    }
+
     private func canContinueGeneration(_ tool: Tool) -> Bool {
         !isGenerating && (tool.generationState == .stopped || tool.generationState == .failed)
     }
@@ -767,23 +767,8 @@ final class ToolLibraryStore {
         return String(singleLine.prefix(240))
     }
 
-    private static func contentViewPath(for tool: Tool) throws -> String {
-        let manifest = try manifest(for: tool)
-        let layout = ToolPackageLayout(
-            packageRootURL: tool.packageRootURL,
-            executableName: manifest.executableName
-        )
-        return manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName)
-    }
-
-    private static func manifest(for tool: Tool) throws -> ToolManifest {
-        let data = try Data(contentsOf: tool.agentManifestURL)
-        return try JSONDecoder().decode(ToolManifest.self, from: data)
-    }
-
     private static func contentViewURL(for tool: Tool) throws -> URL {
-        let contentViewPath = try contentViewPath(for: tool)
-        return try ToolPackageLayout.packageFileURL(for: contentViewPath, packageRootURL: tool.packageRootURL)
+        try ToolPackageLayout.packageFileURL(for: tool.contentViewSourcePath, packageRootURL: tool.packageRootURL)
     }
 
     private static func writeAppEntry(

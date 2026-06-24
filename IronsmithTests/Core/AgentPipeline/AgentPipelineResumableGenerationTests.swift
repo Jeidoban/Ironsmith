@@ -18,7 +18,7 @@ extension AgentPipelineTests {
             }
         }
 
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
@@ -28,7 +28,7 @@ extension AgentPipelineTests {
                 return ToolMetadataSuggestion(displayName: "Named Later", iconPrompt: "")
             },
             promptRefinementClient: .disabled()
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,
@@ -80,7 +80,7 @@ extension AgentPipelineTests {
         struct ContentView: View {
         """
         let probe = StreamingResponseProbe()
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
@@ -89,7 +89,7 @@ extension AgentPipelineTests {
                 ToolMetadataSuggestion(displayName: "Paused Tool", iconPrompt: "")
             },
             promptRefinementClient: .disabled()
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,
@@ -183,7 +183,7 @@ extension AgentPipelineTests {
         let result = try await runtime.generateTool(
             for: "ignored because pending prompt is stored",
             existingTool: tool,
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
@@ -249,7 +249,7 @@ extension AgentPipelineTests {
         let result = try await runtime.generateTool(
             for: "ignored because pending prompt is stored",
             existingTool: tool,
-            status: { _ in }
+            settings: .default
         )
 
         let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)

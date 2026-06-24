@@ -4,7 +4,6 @@
 //
 
 import Foundation
-import SwiftData
 
 enum ToolGenerationState: String, Codable, CaseIterable, Equatable, Sendable {
     case ready
@@ -31,68 +30,7 @@ enum ToolGenerationMode: String, Codable, CaseIterable, Equatable, Sendable {
     case edit
 }
 
-@Model
-final class Tool {
-    @Attribute(.unique) var id: UUID
-    var name: String
-    var executableName: String
-    var bundleIdentifier: String
-    var sandboxEnabled: Bool
-    var appKindRawValue: String = ToolAppKind.window.rawValue
-    var menuBarSystemImage: String = ToolMenuBarSymbol.fallback
-    var sandboxPermissionRawValues: String?
-    var resourcePermissionRawValues: String?
-    var packageRootPath: String
-    var generationStateRawValue: String = ToolGenerationState.ready.rawValue
-    var generationPhaseRawValue: String? = ToolGenerationPhase.completed.rawValue
-    var generationModeRawValue: String?
-    var pendingPrompt: String?
-    var generationErrorSummary: String?
-    var generationRepairErrorCount: Int? = nil
-    var createdAt: Date
-    var updatedAt: Date
-
-    init(
-        id: UUID = UUID(),
-        name: String,
-        executableName: String? = nil,
-        bundleIdentifier: String? = nil,
-        sandboxEnabled: Bool = true,
-        appKind: ToolAppKind = .window,
-        menuBarSystemImage: String = ToolMenuBarSymbol.fallback,
-        sandboxPermissions: GeneratedAppSandboxPermissions? = nil,
-        resourcePermissions: GeneratedAppResourcePermissions? = nil,
-        packageRootPath: String,
-        generationState: ToolGenerationState = .ready,
-        generationPhase: ToolGenerationPhase? = .completed,
-        generationMode: ToolGenerationMode? = nil,
-        pendingPrompt: String? = nil,
-        generationErrorSummary: String? = nil,
-        generationRepairErrorCount: Int? = nil,
-        createdAt: Date = .now,
-        updatedAt: Date = .now
-    ) {
-        self.id = id
-        self.name = name
-        let resolvedExecutableName = executableName ?? ToolNameSanitizer.executableName(from: name)
-        self.executableName = resolvedExecutableName
-        self.bundleIdentifier = bundleIdentifier ?? ToolBundleIdentifier.make(executableName: resolvedExecutableName)
-        self.sandboxEnabled = sandboxEnabled
-        self.appKindRawValue = appKind.rawValue
-        self.menuBarSystemImage = ToolMenuBarSymbol.validated(menuBarSystemImage)
-        self.sandboxPermissionRawValues = sandboxPermissions?.rawValueList
-        self.resourcePermissionRawValues = resourcePermissions?.rawValueList
-        self.packageRootPath = packageRootPath
-        self.generationStateRawValue = generationState.rawValue
-        self.generationPhaseRawValue = generationPhase?.rawValue
-        self.generationModeRawValue = generationMode?.rawValue
-        self.pendingPrompt = pendingPrompt
-        self.generationErrorSummary = generationErrorSummary
-        self.generationRepairErrorCount = generationRepairErrorCount
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-    }
-}
+typealias Tool = IronsmithSchemaV1.Tool
 
 extension Tool {
     var generationState: ToolGenerationState {
@@ -196,12 +134,12 @@ extension Tool {
         packageRootURL.appendingPathComponent("Package.swift")
     }
 
-    var agentManifestURL: URL {
-        packageRootURL.appendingPathComponent(ToolPackageLayout.agentManifestFilename)
+    var packageLayout: ToolPackageLayout {
+        ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
     }
 
-    var manifestURL: URL {
-        agentManifestURL
+    var contentViewSourcePath: String {
+        packageLayout.contentViewSourcePath
     }
 
     var protocolsDirectoryURL: URL {

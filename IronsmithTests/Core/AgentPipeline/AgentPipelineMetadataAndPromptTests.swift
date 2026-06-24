@@ -173,8 +173,7 @@ extension AgentPipelineTests {
 
         _ = try await runtime.generateTool(
             for: "Make a timer",
-            settings: ToolGenerationSettings(appKind: .menuBar),
-            status: { _ in }
+            settings: ToolGenerationSettings(appKind: .menuBar)
         )
 
         let prompts = await promptCapture.prompts
@@ -216,7 +215,7 @@ extension AgentPipelineTests {
             promptRefinementEnabled: false
         )
 
-        _ = try await runtime.generateTool(for: "Make a habit tracker", status: { _ in })
+        _ = try await runtime.generateTool(for: "Make a habit tracker", settings: .default)
 
         let prompts = await promptCapture.prompts
         #expect(prompts.first?.contains("User request: Make a habit tracker") == true)
@@ -263,7 +262,7 @@ extension AgentPipelineTests {
         _ = try await runtime.generateTool(
             for: "Change old to new",
             existingTool: tool,
-            status: { _ in }
+            settings: .default
         )
 
         let prompts = await promptCapture.prompts

@@ -16,7 +16,7 @@ extension ToolLibraryTests {
 
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { _ in
                     throw CancellationError()
                 },
                 runnerClient: ToolRunnerClient { _ in }
@@ -40,7 +40,7 @@ extension ToolLibraryTests {
 
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { _ in
                     throw NSError(
                         domain: NSURLErrorDomain,
                         code: NSURLErrorCancelled,
@@ -70,30 +70,28 @@ extension ToolLibraryTests {
         await inferenceStore.loadIfNeeded(modelContext: context)
 
         let packageRoot = root.appendingPathComponent("LateCreate", isDirectory: true)
-        let manifest = ToolManifest(displayName: "Late Create", executableName: "LateCreate", files: [])
         let gate = LateGenerationCompletionGate()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient(withLifecycle: { prompt, _, sandboxEnabled, _, _, _, lifecycle, _ in
-                    try await lifecycle.prepareCreatedTool(
+                generationClient: ToolGenerationClient { request in
+                    try await request.lifecycle.prepareCreatedTool(
                         ToolGenerationPreparedTool(
                             name: "Late Create",
                             executableName: "LateCreate",
                             bundleIdentifier: ToolBundleIdentifier.make(executableName: "LateCreate"),
-                            sandboxEnabled: sandboxEnabled,
-                            packageRootURL: packageRoot,
-                            manifest: manifest
+                            settings: request.settings,
+                            packageRootURL: packageRoot
                         ),
-                        prompt
+                        request.prompt
                     )
                     await gate.startAndWaitForRelease()
                     return ToolGenerationResult(
                         toolName: "Late Create",
                         executableName: "LateCreate",
-                        packageRootURL: packageRoot,
-                        manifest: manifest
+                        settings: request.settings,
+                        packageRootURL: packageRoot
                     )
-                }),
+                },
                 runnerClient: ToolRunnerClient { _ in }
             )
         )
@@ -125,7 +123,6 @@ extension ToolLibraryTests {
         await inferenceStore.loadIfNeeded(modelContext: context)
 
         let packageRoot = root.appendingPathComponent("LateResume", isDirectory: true)
-        let manifest = ToolManifest(displayName: "Late Resume", executableName: "LateResume", files: [])
         let tool = StoredTool(
             name: "Late Resume",
             executableName: "LateResume",
@@ -141,15 +138,15 @@ extension ToolLibraryTests {
         let gate = LateGenerationCompletionGate()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient(withLifecycle: { _, _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     await gate.startAndWaitForRelease()
                     return ToolGenerationResult(
                         toolName: "Late Resume",
                         executableName: "LateResume",
-                        packageRootURL: packageRoot,
-                        manifest: manifest
+                        settings: request.settings,
+                        packageRootURL: packageRoot
                     )
-                }),
+                },
                 runnerClient: ToolRunnerClient { _ in }
             )
         )
@@ -207,7 +204,7 @@ extension ToolLibraryTests {
 
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { _ in
                     Issue.record("Generation should not start without credits.")
                     throw CancellationError()
                 },
@@ -219,7 +216,7 @@ extension ToolLibraryTests {
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         #expect(store.presentedErrorMessage == InferenceStoreError.insufficientIronsmithCredits.localizedDescription)
-        #expect(store.presentedErrorAction == .buyIronsmithCredits)
+        #expect(store.presentedErrorAction == ToolLibraryPresentedErrorAction.buyIronsmithCredits)
         #expect(!(store.isGenerating))
     }
 
@@ -247,7 +244,7 @@ extension ToolLibraryTests {
 
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { _ in
                     throw NSError(domain: "AnyLanguageModel.AnyLanguageModelError", code: 0)
                 },
                 runnerClient: ToolRunnerClient { _ in }
@@ -288,14 +285,24 @@ extension ToolLibraryTests {
         let packageRoot = URL(fileURLWithPath: "/tmp/ironsmith-credit-refresh", isDirectory: true)
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, languageModelContext, _ in
-                    await languageModelContext.afterLanguageModelInvocation()
-                    await languageModelContext.afterLanguageModelInvocation()
+                generationClient: ToolGenerationClient { request in
+                    try await request.lifecycle.prepareCreatedTool(
+                        ToolGenerationPreparedTool(
+                            name: "Credit Tool",
+                            executableName: "CreditTool",
+                            bundleIdentifier: ToolBundleIdentifier.make(executableName: "CreditTool"),
+                            settings: request.settings,
+                            packageRootURL: packageRoot
+                        ),
+                        request.prompt
+                    )
+                    await request.languageModelContext.afterLanguageModelInvocation()
+                    await request.languageModelContext.afterLanguageModelInvocation()
                     return ToolGenerationResult(
                         toolName: "Credit Tool",
                         executableName: "CreditTool",
-                        packageRootURL: packageRoot,
-                        manifest: ToolManifest(displayName: "Credit Tool", executableName: "CreditTool", files: [])
+                        settings: request.settings,
+                        packageRootURL: packageRoot
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in }

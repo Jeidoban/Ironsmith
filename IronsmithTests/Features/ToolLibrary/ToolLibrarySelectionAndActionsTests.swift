@@ -338,12 +338,12 @@ extension ToolLibraryTests {
         let runCapture = ToolRunCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: "Runner",
                         executableName: "Runner",
-                        packageRootURL: tool.packageRootURL,
-                        manifest: ToolManifest(displayName: "Runner", executableName: "Runner", files: [])
+                        settings: request.settings,
+                        packageRootURL: tool.packageRootURL
                     )
                 },
                 runnerClient: ToolRunnerClient { tool in
@@ -381,19 +381,11 @@ extension ToolLibraryTests {
         let executableName = "VersionedTool"
         let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
         let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
-        let contentViewPath = layout.sourcePath(for: layout.defaultContentViewFileName)
+        let contentViewPath = layout.contentViewSourcePath
         let contentViewURL = packageRoot.appendingPathComponent(contentViewPath)
         let appEntryURL = packageRoot.appendingPathComponent(layout.appEntrySourcePath)
         let previousURL = layout.previousContentViewVersionURL
-        let manifest = ToolManifest(
-            displayName: executableName,
-            executableName: executableName,
-            files: [
-                ToolManifestFile(path: contentViewPath, description: "Primary SwiftUI screen.")
-            ]
-        )
         try FileManager.default.createDirectory(at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(manifest).write(to: layout.agentManifestURL)
         let previousSettings = ToolGenerationSettings(
             appKind: .window,
             sandboxEnabled: true,
@@ -435,12 +427,12 @@ extension ToolLibraryTests {
         let buildCapture = ToolBuildCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: executableName,
                         executableName: executableName,
-                        packageRootURL: packageRoot,
-                        manifest: manifest
+                        settings: request.settings,
+                        packageRootURL: packageRoot
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in },
@@ -483,12 +475,12 @@ extension ToolLibraryTests {
         let finderCapture = ToolFinderCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: "Exporter",
                         executableName: "Exporter",
-                        packageRootURL: URL(fileURLWithPath: "/tmp/exporter", isDirectory: true),
-                        manifest: ToolManifest(displayName: "Exporter", executableName: "Exporter", files: [])
+                        settings: request.settings,
+                        packageRootURL: URL(fileURLWithPath: "/tmp/exporter", isDirectory: true)
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in },
@@ -520,12 +512,12 @@ extension ToolLibraryTests {
         let capture = ToolFinderCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: "Finder Tool",
                         executableName: "FinderTool",
-                        packageRootURL: tool.packageRootURL,
-                        manifest: ToolManifest(displayName: "Finder Tool", executableName: "FinderTool", files: [])
+                        settings: request.settings,
+                        packageRootURL: tool.packageRootURL
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in },
@@ -553,29 +545,21 @@ extension ToolLibraryTests {
         let executableName = "SourceViewer"
         let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
         let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
-        let contentViewPath = layout.sourcePath(for: layout.defaultContentViewFileName)
+        let contentViewPath = layout.contentViewSourcePath
         let contentViewURL = packageRoot.appendingPathComponent(contentViewPath)
-        let manifest = ToolManifest(
-            displayName: executableName,
-            executableName: executableName,
-            files: [
-                ToolManifestFile(path: contentViewPath, description: "Primary SwiftUI screen.")
-            ]
-        )
         try FileManager.default.createDirectory(at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(manifest).write(to: layout.agentManifestURL)
         try "import SwiftUI\n".write(to: contentViewURL, atomically: true, encoding: .utf8)
 
-        let tool = Tool(name: executableName, packageRootPath: packageRoot.path)
+        let tool = Tool(name: executableName, executableName: executableName, packageRootPath: packageRoot.path)
         let capture = ToolFinderCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
+                generationClient: ToolGenerationClient { request in
                     ToolGenerationResult(
                         toolName: executableName,
                         executableName: executableName,
-                        packageRootURL: packageRoot,
-                        manifest: manifest
+                        settings: request.settings,
+                        packageRootURL: packageRoot
                     )
                 },
                 runnerClient: ToolRunnerClient { _ in },
@@ -593,54 +577,6 @@ extension ToolLibraryTests {
 
         #expect(await capture.openedURL == contentViewURL.standardizedFileURL)
         #expect(store.presentedErrorMessage == nil)
-    }
-
-    @MainActor
-    @Test
-    func toolLibraryStoreRejectsSourcePathsOutsidePackage() async throws {
-        let root = try Self.makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let executableName = "BadSourceViewer"
-        let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
-        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
-        let manifest = ToolManifest(
-            displayName: executableName,
-            executableName: executableName,
-            files: [
-                ToolManifestFile(path: "../outside.swift", description: "Escaping source.")
-            ]
-        )
-        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
-        try JSONEncoder().encode(manifest).write(to: layout.agentManifestURL)
-
-        let tool = Tool(name: executableName, packageRootPath: packageRoot.path)
-        let capture = ToolFinderCapture()
-        let store = ToolLibraryStore(
-            dependencies: ToolLibraryDependencies(
-                generationClient: ToolGenerationClient { _, _, _, _, _, _, _ in
-                    ToolGenerationResult(
-                        toolName: executableName,
-                        executableName: executableName,
-                        packageRootURL: packageRoot,
-                        manifest: manifest
-                    )
-                },
-                runnerClient: ToolRunnerClient { _ in },
-                finderClient: ToolFinderClient(
-                    showToolDirectory: { _ in },
-                    revealURL: { _ in },
-                    openURL: { url in
-                        await capture.record(url)
-                    }
-                )
-            )
-        )
-
-        await store.viewSource(tool)
-
-        #expect(await capture.openedURL == nil)
-        #expect(store.presentedErrorMessage?.contains("outside the generated package") == true)
     }
 
     @MainActor

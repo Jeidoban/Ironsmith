@@ -8,13 +8,12 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
-    func toolPathHelpersSeparatePackageAndAgentManifests() {
+    func toolPathHelpersExposePackageLayout() {
         let tool = StoredTool(name: "Demo", packageRootPath: "/tmp/DemoTool")
 
         #expect(tool.packageRootURL.path == "/tmp/DemoTool")
         #expect(tool.packageManifestURL.path == "/tmp/DemoTool/Package.swift")
-        #expect(tool.agentManifestURL.path == "/tmp/DemoTool/ironsmith-manifest.json")
-        #expect(tool.manifestURL == tool.agentManifestURL)
+        #expect(tool.contentViewSourcePath == "Sources/Demo/ContentView.swift")
 
         let layout = ToolPackageLayout(
             packageRootURL: URL(fileURLWithPath: "/tmp/DemoTool", isDirectory: true),
@@ -22,6 +21,7 @@ extension AgentPipelineTests {
         )
         #expect(layout.appEntrySourcePath == "Sources/DemoTool/DemoTool.swift")
         #expect(layout.sourcePath(for: "ContentView.swift") == "Sources/DemoTool/ContentView.swift")
+        #expect(layout.contentViewSourcePath == "Sources/DemoTool/ContentView.swift")
         #expect(layout.packageManifestContent().contains("swiftLanguageModes: [.v6]"))
         #expect(layout.fixedAppEntrySource().contains("ContentView()"))
     }
@@ -119,39 +119,25 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func agentArtifactsRoundTripThroughJSON() throws {
-        let manifest = ToolManifest(
-            displayName: "Clipboard Cleaner",
-            executableName: "ClipboardCleaner",
-            files: [
-                ToolManifestFile(
-                    path: "Sources/ClipboardCleaner/main.swift",
-                    description: "Entry point."
-                )
-            ]
-        )
-
-        let encoder = JSONEncoder()
-        let decoder = JSONDecoder()
-
-        #expect(try decoder.decode(ToolManifest.self, from: encoder.encode(manifest)) == manifest)
-    }
-
-    @MainActor
-    @Test
     func runtimeContextPackageFileURLsDenyEscapes() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let context = ToolGenerationRuntimeContext(
+        let languageModelContext = AgentLanguageModelContext(
             languageModel: EmptyLanguageModel(),
-            generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            options: GenerationOptions(),
+            repairStrategy: .modelDiff(maxHunksPerTurn: 1)
+        )
+        let dependencies = ToolGenerationRuntimeDependencies(
             toolsDirectoryURL: root,
             fileClient: .live,
             processClient: .live,
             appBundleClient: .noOp(),
             versionBackupClient: .live
+        )
+        let context = ToolGenerationRuntimeContext(
+            languageModelContext: languageModelContext,
+            dependencies: dependencies
         )
         let resolved = try context.packageFileURL(
             for: "Sources/Demo/main.swift",
@@ -293,8 +279,9 @@ extension AgentPipelineTests {
             executableName: "SandboxedTool",
             bundleIdentifier: "com.ironsmith.tests.sandboxed-tool",
             packageRootURL: packageRoot,
-            sandboxEnabled: true,
-            resourcePermissions: GeneratedAppResourcePermissions(GeneratedAppResourcePermission.allCases)
+            settings: ToolGenerationSettings(
+                resourcePermissions: GeneratedAppResourcePermissions(GeneratedAppResourcePermission.allCases)
+            )
         )
 
         let appURL = try await client.buildInternalApp(request)
@@ -383,8 +370,7 @@ extension AgentPipelineTests {
             executableName: "ExistingWindowTool",
             bundleIdentifier: "com.ironsmith.tests.existing-window-tool",
             packageRootURL: packageRoot,
-            sandboxEnabled: false,
-            settings: ToolGenerationSettings(appKind: .menuBar)
+            settings: ToolGenerationSettings(appKind: .menuBar, sandboxEnabled: false)
         )
 
         _ = try await client.buildInternalApp(request)
@@ -431,8 +417,7 @@ extension AgentPipelineTests {
                 executableName: executableName,
                 bundleIdentifier: "com.ironsmith.tests.\(executableName.lowercased())",
                 packageRootURL: packageRoot,
-                sandboxEnabled: true,
-                sandboxPermissions: sandboxPermissions
+                settings: ToolGenerationSettings(sandboxPermissions: sandboxPermissions)
             )
             let client = ToolAppBundleClient.live(
                 processClient: processClient,
@@ -589,8 +574,10 @@ extension AgentPipelineTests {
             executableName: "ExportedTool",
             bundleIdentifier: "com.ironsmith.tests.exported-tool",
             packageRootURL: packageRoot,
-            sandboxEnabled: false,
-            resourcePermissions: GeneratedAppResourcePermissions([.contacts, .photoLibrary, .appleEvents])
+            settings: ToolGenerationSettings(
+                sandboxEnabled: false,
+                resourcePermissions: GeneratedAppResourcePermissions([.contacts, .photoLibrary, .appleEvents])
+            )
         )
 
         let appURL = try await client.exportApp(request, applicationsDirectory)
@@ -652,7 +639,6 @@ extension AgentPipelineTests {
             executableName: "MenuBarTool",
             bundleIdentifier: "com.ironsmith.tests.menu-bar-tool",
             packageRootURL: packageRoot,
-            sandboxEnabled: true,
             settings: ToolGenerationSettings(appKind: .menuBar)
         )
 
@@ -722,7 +708,7 @@ extension AgentPipelineTests {
             executableName: "RestoredTool",
             bundleIdentifier: "com.ironsmith.tests.restored-tool",
             packageRootURL: packageRoot,
-            sandboxEnabled: false
+            settings: ToolGenerationSettings(sandboxEnabled: false)
         )
 
         do {
@@ -783,7 +769,7 @@ extension AgentPipelineTests {
             executableName: "NoIconTool",
             bundleIdentifier: "com.ironsmith.tests.no-icon-tool",
             packageRootURL: packageRoot,
-            sandboxEnabled: true
+            settings: .default
         )
 
         let appURL = try await client.buildInternalApp(request)

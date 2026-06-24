@@ -4,7 +4,6 @@ import Foundation
 extension ContentViewBuildRepairLoop {
     func runModelRepairForCurrentCandidate(
         startingFrom initialState: BuildState,
-        status: @escaping @MainActor (String) -> Void,
         bestCandidate: inout SourceCandidate?
     ) async throws -> CandidateRepairResult {
         var state = initialState
@@ -22,7 +21,6 @@ extension ContentViewBuildRepairLoop {
                 return .failed(state)
             }
             try await lifecycle.updateRepairErrorCount(state.contentViewErrors.count)
-            status(repairStatus(errorCount: state.contentViewErrors.count))
             let originalSource = state.source
             let contentViewErrors = state.contentViewErrors
             let failedCandidateSignature = ContentViewRepairSupport.repairStallKey(
@@ -88,21 +86,20 @@ extension ContentViewBuildRepairLoop {
             }
 
             switch try await compileSourceMutation(
-                repairCandidate.source,
-                originalSource: originalSource,
-                previousContentViewErrorCount: contentViewErrors.count,
-                phase: "repair attempt \(attempt)",
-                statusMessage: "Building \(displayName)",
-                rollbackSubject: "Repair diff",
-                status: status
+                SourceMutationRequest(
+                    source: repairCandidate.source,
+                    originalSource: originalSource,
+                    previousContentViewErrorCount: contentViewErrors.count,
+                    phase: "repair attempt \(attempt)",
+                    rollbackSubject: "Repair diff"
+                )
             ) {
             case .finished:
                 return .finished
             case .accepted(let acceptedState):
                 guard let stableState = try await applyDeterministicRepairsUntilStable(
                     startingFrom: acceptedState,
-                    phasePrefix: "model repair \(attempt) deterministic repair",
-                    status: status
+                    phasePrefix: "model repair \(attempt) deterministic repair"
                 ) else {
                     return .finished
                 }

@@ -34,7 +34,7 @@ extension AgentPipelineTests {
         )
 
         let task = Task {
-            try await runtime.generateTool(for: "Build a cancellable tool", status: { _ in })
+            try await runtime.generateTool(for: "Build a cancellable tool", settings: .default)
         }
         await Self.eventually {
             await probe.didStart
@@ -73,13 +73,13 @@ extension AgentPipelineTests {
                 return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
             iconClient: .noOp,
             metadataClient: .fallback()
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,
@@ -108,7 +108,7 @@ extension AgentPipelineTests {
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
         #expect(tool.name == "Build A Hello Command")
         #expect(FileManager.default.fileExists(atPath: tool.packageManifestURL.path))
-        #expect(FileManager.default.fileExists(atPath: tool.agentManifestURL.path))
+        #expect(!FileManager.default.fileExists(atPath: tool.packageRootURL.appendingPathComponent("ironsmith-manifest.json").path))
         #expect(FileManager.default.fileExists(atPath: tool.packageRootURL.appendingPathComponent("Sources/BuildAHelloCommand/BuildAHelloCommand.swift").path))
         #expect(FileManager.default.fileExists(atPath: tool.packageRootURL.appendingPathComponent("Sources/BuildAHelloCommand/ContentView.swift").path))
 
@@ -153,7 +153,7 @@ extension AgentPipelineTests {
         )
         let iconPrompt = "Notebook and compass"
         let refinedPrompt = "Build a polished focus notes helper with tags, search, pinned notes, and a calm compact layout."
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: appBundleClient,
@@ -168,7 +168,7 @@ extension AgentPipelineTests {
             promptRefinementClient: ToolPromptRefinementClient { _ in
                 refinedPrompt
             }
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,
@@ -246,13 +246,13 @@ extension AgentPipelineTests {
             }
             """
         ])
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
             iconClient: .noOp,
             metadataClient: .fallback()
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,
@@ -271,10 +271,9 @@ extension AgentPipelineTests {
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
-        let manifestData = try Data(contentsOf: tool.agentManifestURL)
-        let manifest = try JSONDecoder().decode(ToolManifest.self, from: manifestData)
+        let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: tool.executableName)
         let contentView = try String(
-            contentsOf: tool.packageRootURL.appendingPathComponent("Sources/\(manifest.executableName)/ContentView.swift"),
+            contentsOf: tool.packageRootURL.appendingPathComponent(layout.contentViewSourcePath),
             encoding: .utf8
         )
         #expect(contentView.contains(#"Text("real regenerated tool")"#))
@@ -312,13 +311,13 @@ extension AgentPipelineTests {
             }
             """
         )
-        let generationClient = ToolGenerationClient.live(
+        let generationClient = ToolGenerationClient.live(dependencies: .live(
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
             iconClient: .noOp,
             metadataClient: .fallback()
-        )
+        ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: generationClient,
@@ -337,10 +336,9 @@ extension AgentPipelineTests {
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
-        let manifestData = try Data(contentsOf: tool.agentManifestURL)
-        let manifest = try JSONDecoder().decode(ToolManifest.self, from: manifestData)
+        let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: tool.executableName)
         let contentView = try String(
-            contentsOf: tool.packageRootURL.appendingPathComponent("Sources/\(manifest.executableName)/ContentView.swift"),
+            contentsOf: tool.packageRootURL.appendingPathComponent(layout.contentViewSourcePath),
             encoding: .utf8
         )
         #expect(contentView.contains(#"Text("retried after context window")"#))

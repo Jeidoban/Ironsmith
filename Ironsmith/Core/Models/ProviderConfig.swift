@@ -4,7 +4,6 @@
 //
 
 import Foundation
-import SwiftData
 
 enum ProviderKind: String, Codable, CaseIterable, Identifiable {
     case local
@@ -29,34 +28,7 @@ enum ProviderAuthMode: String, Codable, CaseIterable {
     case platformCredits = "platform_credits"
 }
 
-@Model
-final class ProviderConfig {
-    @Attribute(.unique) var id: UUID
-    var identifier: String
-    var displayName: String
-    @Attribute(originalName: "baseURLTemplate") var baseURLString: String
-    var authMode: ProviderAuthMode
-    var origin: ProviderOrigin
-    var isEnabled: Bool
-
-    init(
-        id: UUID = UUID(),
-        identifier: String,
-        displayName: String,
-        baseURLString: String,
-        authMode: ProviderAuthMode,
-        origin: ProviderOrigin,
-        isEnabled: Bool = true
-    ) {
-        self.id = id
-        self.identifier = identifier
-        self.displayName = displayName
-        self.baseURLString = baseURLString
-        self.authMode = authMode
-        self.origin = origin
-        self.isEnabled = isEnabled
-    }
-}
+typealias ProviderConfig = IronsmithSchemaV1.ProviderConfig
 
 extension ProviderConfig {
     static let localProviderIdentifier = "local"

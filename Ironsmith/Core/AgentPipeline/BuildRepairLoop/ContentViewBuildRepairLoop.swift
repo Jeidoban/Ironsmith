@@ -77,8 +77,7 @@ struct ContentViewBuildRepairLoop {
 
     func run(
         generator: ContentViewCandidateGenerator,
-        failureRecovery: FailureRecovery = .restoreBestCandidate,
-        status: @escaping @MainActor (String) -> Void
+        failureRecovery: FailureRecovery = .restoreBestCandidate
     ) async throws {
         var activeGenerator = generator
         var bestCandidate: SourceCandidate?
@@ -103,8 +102,6 @@ struct ContentViewBuildRepairLoop {
                     )
                 }
 
-                let statusVerb = isInitialAttempt ? activeGenerator.initialStatusVerb : activeGenerator.retryStatusVerb
-                status("\(statusVerb) \(displayName)")
                 do {
                     try await activeGenerator.writeFreshCandidate(makeGenerationSession(instructions: activeGenerator.instructions))
                     try Task.checkCancellation()
@@ -174,7 +171,6 @@ struct ContentViewBuildRepairLoop {
                 }
 
                 let phase = isInitialAttempt ? "initial compile" : "regenerated compile \(generationAttempt - 1)"
-                status("Building \(displayName)")
                 guard var state = try await buildCurrentSource(phase: phase) else {
                     if try compiledContentViewIsPlaceholder(phase: phase) {
                         pendingRegenerationReason = "compiled ContentView.swift was only the placeholder scaffold"
@@ -186,8 +182,7 @@ struct ContentViewBuildRepairLoop {
 
                 guard let stableState = try await applyDeterministicRepairsUntilStable(
                     startingFrom: state,
-                    phasePrefix: "\(phase) deterministic repair",
-                    status: status
+                    phasePrefix: "\(phase) deterministic repair"
                 ) else {
                     return
                 }
@@ -219,7 +214,6 @@ struct ContentViewBuildRepairLoop {
 
                 switch try await runModelRepairForCurrentCandidate(
                     startingFrom: state,
-                    status: status,
                     bestCandidate: &bestCandidate
                 ) {
                 case .finished:

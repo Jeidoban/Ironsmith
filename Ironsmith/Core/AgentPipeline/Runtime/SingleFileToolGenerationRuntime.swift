@@ -10,7 +10,6 @@ struct SingleFileToolGenerationRuntime {
         let bundleIdentifier: String
         let layout: ToolPackageLayout
         let contentViewPath: String
-        let manifest: ToolManifest
         let iconPrompt: String?
         let settings: ToolGenerationSettings
     }
@@ -18,31 +17,8 @@ struct SingleFileToolGenerationRuntime {
     func generateTool(
         for prompt: String,
         existingTool: Tool? = nil,
-        sandboxEnabled: Bool = true,
-        sandboxPermissions: GeneratedAppSandboxPermissions = .default,
-        resourcePermissions: GeneratedAppResourcePermissions = .none,
-        lifecycle: ToolGenerationLifecycle = .noop,
-        status: @escaping @MainActor (String) -> Void
-    ) async throws -> ToolGenerationResult {
-        try await generateTool(
-            for: prompt,
-            existingTool: existingTool,
-            settings: ToolGenerationSettings(
-                sandboxEnabled: sandboxEnabled,
-                sandboxPermissions: sandboxPermissions,
-                resourcePermissions: resourcePermissions
-            ),
-            lifecycle: lifecycle,
-            status: status
-        )
-    }
-
-    func generateTool(
-        for prompt: String,
-        existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
-        lifecycle: ToolGenerationLifecycle = .noop,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle = .noop
     ) async throws -> ToolGenerationResult {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else {
@@ -58,24 +34,21 @@ struct SingleFileToolGenerationRuntime {
                     prompt: effectivePrompt,
                     existingTool: existingTool,
                     settings: settings,
-                    lifecycle: lifecycle,
-                    status: status
+                    lifecycle: lifecycle
                 )
             }
             return try await editTool(
                 prompt: effectivePrompt,
                 existingTool: existingTool,
                 settings: settings,
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
         }
 
         return try await createTool(
             prompt: trimmedPrompt,
             settings: settings,
-            lifecycle: lifecycle,
-            status: status
+            lifecycle: lifecycle
         )
     }
 
@@ -94,19 +67,20 @@ struct SingleFileToolGenerationRuntime {
     private func loadCreateSetup(
         for tool: Tool,
         settings: ToolGenerationSettings
-    ) throws -> CreateToolSetup {
-        let manifest = try context.loadManifest(at: tool.agentManifestURL)
+    ) -> CreateToolSetup? {
         let layout = ToolPackageLayout(
             packageRootURL: tool.packageRootURL,
-            executableName: manifest.executableName
+            executableName: tool.executableName
         )
+        guard context.fileClient.fileExists(layout.packageManifestURL) else {
+            return nil
+        }
         return CreateToolSetup(
-            displayName: manifest.displayName,
-            executableName: manifest.executableName,
+            displayName: tool.name,
+            executableName: tool.executableName,
             bundleIdentifier: tool.bundleIdentifier,
             layout: layout,
-            contentViewPath: manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName),
-            manifest: manifest,
+            contentViewPath: layout.contentViewSourcePath,
             iconPrompt: nil,
             settings: settings
         )
@@ -124,17 +98,7 @@ struct SingleFileToolGenerationRuntime {
         let bundleIdentifier = ToolBundleIdentifier.make(executableName: executableName)
         let packageRootURL = try context.makeUniquePackageRoot(displayName: displayName)
         let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
-        let contentViewPath = layout.sourcePath(for: layout.defaultContentViewFileName)
-        let manifest = ToolManifest(
-            displayName: displayName,
-            executableName: executableName,
-            files: [
-                ToolManifestFile(
-                    path: contentViewPath,
-                    description: "Primary SwiftUI screen and supporting app logic."
-                )
-            ]
-        )
+        let contentViewPath = layout.contentViewSourcePath
 
         try context.fileClient.createDirectory(layout.sourceDirectoryURL)
         try context.write(layout.packageManifestContent(), to: "Package.swift", packageRootURL: layout.packageRootURL)
@@ -143,15 +107,13 @@ struct SingleFileToolGenerationRuntime {
             to: layout.appEntrySourcePath,
             packageRootURL: layout.packageRootURL
         )
-        try context.writeManifest(manifest, packageRootURL: layout.packageRootURL)
         try await lifecycle.prepareCreatedTool(
             ToolGenerationPreparedTool(
                 name: displayName,
                 executableName: executableName,
                 bundleIdentifier: bundleIdentifier,
                 settings: resolvedSettings,
-                packageRootURL: packageRootURL,
-                manifest: manifest
+                packageRootURL: packageRootURL
             ),
             prompt
         )
@@ -162,7 +124,6 @@ struct SingleFileToolGenerationRuntime {
             bundleIdentifier: bundleIdentifier,
             layout: layout,
             contentViewPath: contentViewPath,
-            manifest: manifest,
             iconPrompt: metadata.iconPrompt,
             settings: resolvedSettings
         )
@@ -176,26 +137,13 @@ struct SingleFileToolGenerationRuntime {
         let displayName = "New App"
         let executableName = ToolNameSanitizer.executableName(from: displayName)
         let packageRootURL = try context.makeUniquePackageRoot(displayName: displayName)
-        let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
-        let contentViewPath = layout.sourcePath(for: layout.defaultContentViewFileName)
-        let manifest = ToolManifest(
-            displayName: displayName,
-            executableName: executableName,
-            files: [
-                ToolManifestFile(
-                    path: contentViewPath,
-                    description: "Primary SwiftUI screen and supporting app logic."
-                )
-            ]
-        )
         try await lifecycle.prepareCreatedTool(
             ToolGenerationPreparedTool(
                 name: displayName,
                 executableName: executableName,
                 bundleIdentifier: ToolBundleIdentifier.make(executableName: executableName),
                 settings: settings,
-                packageRootURL: packageRootURL,
-                manifest: manifest
+                packageRootURL: packageRootURL
             ),
             prompt
         )
@@ -205,15 +153,13 @@ struct SingleFileToolGenerationRuntime {
         prompt: String,
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
-        lifecycle: ToolGenerationLifecycle,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let startingPhase = existingTool?.generationPhase ?? .initializing
         let setup: CreateToolSetup
-        if let existingTool, let resumedSetup = try? loadCreateSetup(for: existingTool, settings: settings) {
+        if let existingTool, let resumedSetup = loadCreateSetup(for: existingTool, settings: settings) {
             setup = resumedSetup
         } else {
-            status("Naming app")
             if existingTool == nil {
                 try await preparePlaceholderCreateTool(
                     prompt: prompt,
@@ -282,11 +228,9 @@ struct SingleFileToolGenerationRuntime {
                     executableName: setup.executableName,
                     bundleIdentifier: setup.bundleIdentifier,
                     packageRootURL: setup.layout.packageRootURL,
-                    manifest: setup.manifest,
                     settings: setup.settings,
                     iconPrompt: setup.iconPrompt,
-                    lifecycle: lifecycle,
-                    status: status
+                    lifecycle: lifecycle
                 )
             }
 
@@ -305,8 +249,7 @@ struct SingleFileToolGenerationRuntime {
                 layout: setup.layout,
                 contentViewPath: setup.contentViewPath,
                 generator: generator,
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
 
             return try await packageTool(
@@ -314,11 +257,9 @@ struct SingleFileToolGenerationRuntime {
                 executableName: setup.executableName,
                 bundleIdentifier: setup.bundleIdentifier,
                 packageRootURL: setup.layout.packageRootURL,
-                manifest: setup.manifest,
                 settings: setup.settings,
                 iconPrompt: setup.iconPrompt,
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
         } catch is CancellationError {
             if !lifecycle.preservesCreatedPackageOnCancellation {
@@ -359,30 +300,26 @@ struct SingleFileToolGenerationRuntime {
         prompt: String,
         existingTool: Tool,
         settings: ToolGenerationSettings,
-        lifecycle: ToolGenerationLifecycle,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
-        let manifest = try context.loadManifest(at: existingTool.agentManifestURL)
         let layout = ToolPackageLayout(
             packageRootURL: existingTool.packageRootURL,
-            executableName: manifest.executableName
+            executableName: existingTool.executableName
         )
-        let contentViewPath = manifest.files.first?.path ?? layout.sourcePath(for: layout.defaultContentViewFileName)
+        let contentViewPath = layout.contentViewSourcePath
         let startingPhase = existingTool.isGenerationReady
             ? ToolGenerationPhase.planning
             : (existingTool.generationPhase ?? .generatingEditDiff)
         if !existingTool.isGenerationReady,
            startingPhase == .packaging || startingPhase == .completed {
             return try await packageTool(
-                displayName: manifest.displayName,
-                executableName: manifest.executableName,
+                displayName: existingTool.name,
+                executableName: existingTool.executableName,
                 bundleIdentifier: existingTool.bundleIdentifier,
                 packageRootURL: existingTool.packageRootURL,
-                manifest: manifest,
                 settings: settings,
                 iconPrompt: nil,
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
         }
         let existingSource = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
@@ -400,8 +337,8 @@ struct SingleFileToolGenerationRuntime {
             """
             Tool generation started.
             mode: edit
-            displayName: \(manifest.displayName)
-            executableName: \(manifest.executableName)
+            displayName: \(existingTool.name)
+            executableName: \(existingTool.executableName)
             packageRoot: \(existingTool.packageRootURL.path)
             phase: \(startingPhase.rawValue)
             prompt: \(AgentDiagnosticsLog.compact(prompt, limit: 240))
@@ -413,11 +350,10 @@ struct SingleFileToolGenerationRuntime {
             try Task.checkCancellation()
             // The model only edits ContentView.swift; Ironsmith owns the fixed app scene wrapper.
             try context.write(
-                layout.fixedAppEntrySource(displayName: manifest.displayName, settings: settings),
+                layout.fixedAppEntrySource(displayName: existingTool.name, settings: settings),
                 to: layout.appEntrySourcePath,
                 packageRootURL: layout.packageRootURL
             )
-            try context.writeManifest(manifest, packageRootURL: layout.packageRootURL)
             let generator = editGenerator(
                 userPrompt: prompt,
                 layout: layout,
@@ -428,24 +364,21 @@ struct SingleFileToolGenerationRuntime {
                 resumePartialSource: startingPhase == .generatingSource
             )
             try await compileGeneratedTool(
-                displayName: manifest.displayName,
+                displayName: existingTool.name,
                 layout: layout,
                 contentViewPath: contentViewPath,
                 generator: generator,
                 failureRecovery: .restoreOriginalSource(existingSource),
-                lifecycle: lifecycle,
-                status: status
+                lifecycle: lifecycle
             )
             try Task.checkCancellation()
-            status("Packaging \(manifest.displayName)")
             try await lifecycle.updatePhase(.generating, .packaging, nil)
             _ = try await context.appBundleClient.buildInternalApp(
                 ToolAppBundleRequest(
-                    displayName: manifest.displayName,
-                    executableName: manifest.executableName,
+                    displayName: existingTool.name,
+                    executableName: existingTool.executableName,
                     bundleIdentifier: existingTool.bundleIdentifier,
                     packageRootURL: existingTool.packageRootURL,
-                    sandboxEnabled: settings.sandboxEnabled,
                     settings: settings
                 )
             )
@@ -467,16 +400,15 @@ struct SingleFileToolGenerationRuntime {
         }
 
         let binDirectory = try await context.processClient.showBinPath(existingTool.packageRootURL)
-        let binaryURL = binDirectory.appendingPathComponent(manifest.executableName)
+        let binaryURL = binDirectory.appendingPathComponent(existingTool.executableName)
         await context.processClient.stripQuarantine(binaryURL)
 
         return ToolGenerationResult(
-            toolName: manifest.displayName,
-            executableName: manifest.executableName,
+            toolName: existingTool.name,
+            executableName: existingTool.executableName,
             bundleIdentifier: existingTool.bundleIdentifier,
             settings: settings,
-            packageRootURL: existingTool.packageRootURL,
-            manifest: manifest
+            packageRootURL: existingTool.packageRootURL
         )
     }
 
@@ -486,8 +418,7 @@ struct SingleFileToolGenerationRuntime {
         contentViewPath: String,
         generator: ContentViewCandidateGenerator,
         failureRecovery: ContentViewBuildRepairLoop.FailureRecovery = .restoreBestCandidate,
-        lifecycle: ToolGenerationLifecycle,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle
     ) async throws {
         try await lifecycle.updatePhase(.generating, .repairing, nil)
         let repairLoop = ContentViewBuildRepairLoop(
@@ -501,8 +432,7 @@ struct SingleFileToolGenerationRuntime {
         )
         try await repairLoop.run(
             generator: generator,
-            failureRecovery: failureRecovery,
-            status: status
+            failureRecovery: failureRecovery
         )
     }
 
@@ -557,9 +487,7 @@ struct SingleFileToolGenerationRuntime {
         )
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialSource ? "continue create" : "create",
-            initialStatusVerb: resumePartialSource ? "Continuing" : "Generating",
-            retryStatusVerb: "Regenerating"
+            modeDescription: resumePartialSource ? "continue create" : "create"
         ) { session in
             if useCurrentSourceOnFirstAttempt && !didUseCurrentSource {
                 didUseCurrentSource = true
@@ -646,15 +574,11 @@ struct SingleFileToolGenerationRuntime {
 
         return ContentViewCandidateGenerator(
             modeDescription: resumePartialDiff ? "continue edit diff" : "edit",
-            initialStatusVerb: resumePartialDiff ? "Continuing" : "Editing",
-            retryStatusVerb: "Editing",
             instructions: ToolGenerationPrompts.diffEditInstructions,
             retriesInvalidCandidates: true,
             invalidCandidateFallback: ContentViewCandidateGenerator.InvalidCandidateFallback(
                 threshold: ToolGenerationRepairPolicy.invalidInitialEditDiffsBeforeFullFileEdit,
-                modeDescription: "edit whole-file fallback",
-                initialStatusVerb: "Editing",
-                retryStatusVerb: "Editing"
+                modeDescription: "edit whole-file fallback"
             ) { session in
                 try await regenerateEditedContentView(
                     userPrompt: userPrompt,
@@ -715,9 +639,7 @@ struct SingleFileToolGenerationRuntime {
         )
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialSource ? "continue edit source" : "edit",
-            initialStatusVerb: resumePartialSource ? "Continuing" : "Editing",
-            retryStatusVerb: "Editing"
+            modeDescription: resumePartialSource ? "continue edit source" : "edit"
         ) { session in
             if resumePartialSource && !didAttemptContinuation {
                 didAttemptContinuation = true
@@ -830,11 +752,9 @@ struct SingleFileToolGenerationRuntime {
         executableName: String,
         bundleIdentifier: String,
         packageRootURL: URL,
-        manifest: ToolManifest,
         settings: ToolGenerationSettings,
         iconPrompt: String?,
-        lifecycle: ToolGenerationLifecycle,
-        status: @escaping @MainActor (String) -> Void
+        lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
         try Task.checkCancellation()
@@ -843,7 +763,6 @@ struct SingleFileToolGenerationRuntime {
         await context.processClient.stripQuarantine(binaryURL)
 
         try Task.checkCancellation()
-        status("Packaging \(displayName)")
         try await lifecycle.updatePhase(.generating, .packaging, nil)
         _ = try await context.appBundleClient.buildInternalApp(
             ToolAppBundleRequest(
@@ -851,7 +770,6 @@ struct SingleFileToolGenerationRuntime {
                 executableName: executableName,
                 bundleIdentifier: bundleIdentifier,
                 packageRootURL: packageRootURL,
-                sandboxEnabled: settings.sandboxEnabled,
                 settings: settings,
                 iconPrompt: iconPrompt
             )
@@ -863,8 +781,7 @@ struct SingleFileToolGenerationRuntime {
             executableName: executableName,
             bundleIdentifier: bundleIdentifier,
             settings: settings,
-            packageRootURL: packageRootURL,
-            manifest: manifest
+            packageRootURL: packageRootURL
         )
     }
 
