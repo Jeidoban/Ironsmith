@@ -15,6 +15,7 @@ struct ToolRowView: View {
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onRun: () -> Void
+    let onRename: () -> Void
     let onRevert: () -> Void
     let onExport: () -> Void
     let onShowInFinder: () -> Void
@@ -153,6 +154,8 @@ struct ToolRowView: View {
         .disabled(!(tool.isGenerationReady || canContinue || isGenerating))
 
         Divider()
+        Button("Rename App...", action: onRename)
+            .disabled(isGenerating)
         Button("Go Back to Previous Version", action: onRevert)
             .disabled(!tool.isGenerationReady || !canRevert)
         Button("Export App", action: onExport)
@@ -290,6 +293,7 @@ struct ToolRowView: View {
         onSelect: {},
         onEdit: {},
         onRun: {},
+        onRename: {},
         onRevert: {},
         onExport: {},
         onShowInFinder: {},

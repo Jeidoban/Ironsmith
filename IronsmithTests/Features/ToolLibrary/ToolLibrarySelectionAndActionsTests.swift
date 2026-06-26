@@ -48,6 +48,39 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func toolLibraryStoreRenamesSelectedToolAndMovesAppBundle() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("RenamePackage", isDirectory: true)
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let tool = Tool(
+            name: "Old Name",
+            executableName: "RenamePackage",
+            packageRootPath: packageRoot.path
+        )
+        context.insert(tool)
+        try FileManager.default.createDirectory(at: tool.appBundleURL, withIntermediateDirectories: true)
+        try context.save()
+
+        let oldBundleURL = tool.appBundleURL
+        let newBundleURL = packageRoot.appendingPathComponent("New Name.app", isDirectory: true)
+        let toolLibraryState = ToolLibraryStore()
+        toolLibraryState.selectForEditing(tool)
+
+        toolLibraryState.rename(tool, to: "  New Name  ", in: context)
+
+        #expect(tool.name == "New Name")
+        #expect(toolLibraryState.promptPlaceholder == "Describe changes for New Name…")
+        #expect(!(FileManager.default.fileExists(atPath: oldBundleURL.path)))
+        #expect(FileManager.default.fileExists(atPath: newBundleURL.path))
+        #expect(try context.fetch(FetchDescriptor<StoredTool>()).first?.name == "New Name")
+        #expect(toolLibraryState.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStoreExplicitEditSelectionKeepsSelectedToolSelected() {
         let toolLibraryState = ToolLibraryStore()
         let tool = Tool(name: "Calculator", packageRootPath: "/tmp/calculator")

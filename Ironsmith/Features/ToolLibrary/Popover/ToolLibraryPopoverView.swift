@@ -20,6 +20,8 @@ struct ToolLibraryPopoverView: View {
     private let welcomeOnboardingStore: WelcomeOnboardingStore
     @State private var toolLibraryStore = ToolLibraryStore()
     @State private var toolPendingDeletion: Tool?
+    @State private var toolPendingRename: Tool?
+    @State private var pendingRenameName = ""
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
     @State private var isShowingModelPicker = false
@@ -85,6 +87,9 @@ struct ToolLibraryPopoverView: View {
                                     Task {
                                         await toolLibraryStore.run(tool)
                                     }
+                                },
+                                onRename: {
+                                    beginRenaming(tool)
                                 },
                                 onRevert: {
                                     Task {
@@ -270,6 +275,21 @@ struct ToolLibraryPopoverView: View {
             }
         } message: {
             Text(toolPendingDeletion.map { "Delete \($0.name)? This can't be undone." } ?? "Delete this app? This can't be undone.")
+        }
+        .alert(
+            "Rename App",
+            isPresented: renameAlertBinding
+        ) {
+            TextField("App Name", text: $pendingRenameName)
+            Button("Cancel", role: .cancel) {
+                clearPendingRename()
+            }
+            Button("Save") {
+                commitPendingRename()
+            }
+            .disabled(pendingRenameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Enter a new display name for this app.")
         }
         .sheet(
             isPresented: $isShowingWelcomeOnboarding,
@@ -460,6 +480,22 @@ struct ToolLibraryPopoverView: View {
         isPromptFocused = true
     }
 
+    private func beginRenaming(_ tool: Tool) {
+        toolPendingRename = tool
+        pendingRenameName = tool.name
+    }
+
+    private func commitPendingRename() {
+        guard let toolPendingRename else { return }
+        toolLibraryStore.rename(toolPendingRename, to: pendingRenameName, in: modelContext)
+        clearPendingRename()
+    }
+
+    private func clearPendingRename() {
+        toolPendingRename = nil
+        pendingRenameName = ""
+    }
+
     private var shouldShowEmptyState: Bool {
         shouldForceNoApps || tools.isEmpty
     }
@@ -536,6 +572,17 @@ struct ToolLibraryPopoverView: View {
             set: { isPresented in
                 if !isPresented {
                     toolPendingDeletion = nil
+                }
+            }
+        )
+    }
+
+    private var renameAlertBinding: Binding<Bool> {
+        Binding(
+            get: { toolPendingRename != nil },
+            set: { isPresented in
+                if !isPresented {
+                    clearPendingRename()
                 }
             }
         )

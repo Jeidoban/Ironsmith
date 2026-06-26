@@ -22,6 +22,17 @@ private enum ToolLibraryGenerationError: LocalizedError {
     }
 }
 
+private enum ToolLibraryRenameError: LocalizedError {
+    case appBundleAlreadyExists(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .appBundleAlreadyExists(let name):
+            return "Could not rename this app because \(name) already exists."
+        }
+    }
+}
+
 private final class BindingBox<Value> {
     var value: Value
 
@@ -159,6 +170,35 @@ final class ToolLibraryStore {
             try removePackageIfExists(packageRootURL)
         } catch {
             presentError("Deleted app from the library, but could not remove its files: \(error.localizedDescription)")
+        }
+    }
+
+    func rename(_ tool: Tool, to proposedName: String, in modelContext: ModelContext) {
+        guard !(isGenerating && tool.generationState == .generating) else { return }
+
+        let trimmedName = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, trimmedName != tool.name else { return }
+
+        let originalName = tool.name
+        var movedAppBundle: (oldURL: URL, newURL: URL)?
+
+        do {
+            movedAppBundle = try moveAppBundleForRename(tool, to: trimmedName)
+            tool.name = trimmedName
+            tool.updatedAt = .now
+            if selectedToolID == tool.id {
+                selectedToolName = trimmedName
+            }
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            if let movedAppBundle {
+                try? FileManager.default.moveItem(at: movedAppBundle.newURL, to: movedAppBundle.oldURL)
+            }
+            if selectedToolID == tool.id {
+                selectedToolName = originalName
+            }
+            presentError(error.localizedDescription)
         }
     }
 
@@ -758,6 +798,30 @@ final class ToolLibraryStore {
     private func removePackageIfExists(_ packageRootURL: URL) throws {
         guard FileManager.default.fileExists(atPath: packageRootURL.path) else { return }
         try FileManager.default.removeItem(at: packageRootURL)
+    }
+
+    private func moveAppBundleForRename(
+        _ tool: Tool,
+        to newName: String
+    ) throws -> (oldURL: URL, newURL: URL)? {
+        let oldURL = tool.appBundleURL
+        let newURL = tool.packageRootURL.appendingPathComponent(
+            "\(ToolNameSanitizer.appBundleName(from: newName)).app",
+            isDirectory: true
+        )
+
+        guard oldURL.path != newURL.path,
+              FileManager.default.fileExists(atPath: oldURL.path)
+        else {
+            return nil
+        }
+
+        guard !FileManager.default.fileExists(atPath: newURL.path) else {
+            throw ToolLibraryRenameError.appBundleAlreadyExists(newURL.lastPathComponent)
+        }
+
+        try FileManager.default.moveItem(at: oldURL, to: newURL)
+        return (oldURL, newURL)
     }
 
     private static func shortSummary(for message: String) -> String {
