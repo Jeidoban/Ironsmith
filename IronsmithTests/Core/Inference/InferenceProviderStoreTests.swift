@@ -124,13 +124,14 @@ extension InferenceTests {
                 remoteDiscoveryHook: {
                     await discoveryGate.wait()
                 }
-            )
+            ),
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
         )
 
         await inferenceStore.loadIfNeeded(modelContext: context)
 
         #expect(inferenceStore.hasLoadedModels)
-        #expect(inferenceStore.selectedModel?.source == .appleFoundation)
+        #expect(inferenceStore.selectedModel == nil)
         await discoveryGate.open()
     }
 

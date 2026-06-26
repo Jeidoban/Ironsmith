@@ -58,6 +58,11 @@ final class InferenceStore {
     var isRefreshingIronsmithAccount = false
     var isRefreshingIronsmithCreditPacks = false
     var isCreatingIronsmithCheckoutSession = false
+    var isAppleFoundationModelEnabled: Bool {
+        didSet {
+            appleFoundationModelPreferenceStore.isEnabled = isAppleFoundationModelEnabled
+        }
+    }
     var generationPreferences: GenerationPreferencesStore
     var modelSelection: ModelSelectionStore
 
@@ -67,15 +72,21 @@ final class InferenceStore {
     var pendingIronsmithAccountRefreshAfterCheckout = false
     var repository: InferenceRepository?
     let dependencies: InferenceDependencies
+    @ObservationIgnored private var appleFoundationModelPreferenceStore: AppleFoundationModelPreferenceStore
 
     init(
         dependencies: InferenceDependencies? = nil,
         generationPreferences: GenerationPreferencesStore? = nil,
-        modelSelection: ModelSelectionStore? = nil
+        modelSelection: ModelSelectionStore? = nil,
+        appleFoundationModelPreferenceStore: AppleFoundationModelPreferenceStore? = nil
     ) {
+        let appleFoundationModelPreferenceStore =
+            appleFoundationModelPreferenceStore ?? AppleFoundationModelPreferenceStore()
         self.dependencies = dependencies ?? .live
         self.generationPreferences = generationPreferences ?? GenerationPreferencesStore()
         self.modelSelection = modelSelection ?? ModelSelectionStore()
+        self.appleFoundationModelPreferenceStore = appleFoundationModelPreferenceStore
+        self.isAppleFoundationModelEnabled = appleFoundationModelPreferenceStore.isEnabled
         selectedModelID = self.modelSelection.selectedModelID
     }
 

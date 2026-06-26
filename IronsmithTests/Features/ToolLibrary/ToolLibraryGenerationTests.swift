@@ -11,7 +11,10 @@ extension ToolLibraryTests {
     func toolLibraryStoreSuppressesGenerationCancellationErrors() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
-        let inferenceStore = InferenceStore(dependencies: Self.inferenceDependencies())
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
         await inferenceStore.loadIfNeeded(modelContext: context)
 
         let store = ToolLibraryStore(
@@ -35,7 +38,10 @@ extension ToolLibraryTests {
     func toolLibraryStoreSuppressesCancelledURLSessionGenerationErrors() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
-        let inferenceStore = InferenceStore(dependencies: Self.inferenceDependencies())
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
         await inferenceStore.loadIfNeeded(modelContext: context)
 
         let store = ToolLibraryStore(
@@ -66,7 +72,10 @@ extension ToolLibraryTests {
 
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
-        let inferenceStore = InferenceStore(dependencies: Self.inferenceDependencies())
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
         await inferenceStore.loadIfNeeded(modelContext: context)
 
         let packageRoot = root.appendingPathComponent("LateCreate", isDirectory: true)
@@ -119,7 +128,10 @@ extension ToolLibraryTests {
 
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
-        let inferenceStore = InferenceStore(dependencies: Self.inferenceDependencies())
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
         await inferenceStore.loadIfNeeded(modelContext: context)
 
         let packageRoot = root.appendingPathComponent("LateResume", isDirectory: true)

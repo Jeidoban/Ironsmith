@@ -139,6 +139,14 @@ extension ToolLibraryTests {
         return userDefaults
     }
 
+    static func appleFoundationModelPreferenceStore(
+        isEnabled: Bool = true
+    ) throws -> AppleFoundationModelPreferenceStore {
+        let store = AppleFoundationModelPreferenceStore(userDefaults: try makeIsolatedUserDefaults())
+        store.isEnabled = isEnabled
+        return store
+    }
+
     static func remoteModel(
         provider: ProviderConfig,
         estimatedToolCredits: Int?

@@ -13,6 +13,7 @@ struct ToolRowView: View {
     let isExporting: Bool
     let canRevert: Bool
     let onSelect: () -> Void
+    let onEdit: () -> Void
     let onRun: () -> Void
     let onRevert: () -> Void
     let onExport: () -> Void
@@ -60,24 +61,16 @@ struct ToolRowView: View {
                 ToolRowClickHandlingView(
                     ignoredLeadingWidth: 64,
                     onSelect: tool.isGenerationReady ? onSelect : {},
-                    onRun: tool.isGenerationReady ? onRun : {}
+                    onRun: tool.isGenerationReady ? onRun : {},
+                    contextMenu: contextMenuConfiguration
                 )
+            }
+            .contextMenu {
+                appActionsMenu
             }
 
             Menu {
-                Button("Go Back to Previous Version", action: onRevert)
-                    .disabled(!tool.isGenerationReady || !canRevert)
-                Button("Export App", action: onExport)
-                    .disabled(!tool.isGenerationReady)
-                Button("View Source", action: onViewSource)
-                    .disabled(!tool.isGenerationReady)
-                Button("Show in Finder", action: onShowInFinder)
-                Divider()
-                if shouldDiscardFromMenu {
-                    Button("Discard Edit", role: .destructive, action: onDiscard)
-                } else {
-                    Button("Delete App", role: .destructive, action: onDelete)
-                }
+                appActionsMenu
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 18, weight: .semibold))
@@ -136,6 +129,46 @@ struct ToolRowView: View {
                 .accessibilityIdentifier("run-tool-\(tool.id.uuidString)")
             }
         }
+    }
+
+    @ViewBuilder
+    private var appActionsMenu: some View {
+        Button("Edit App", action: onEdit)
+            .disabled(!tool.isGenerationReady)
+        Button("Launch App", action: onRun)
+            .disabled(!tool.isGenerationReady)
+        Divider()
+        Button("Go Back to Previous Version", action: onRevert)
+            .disabled(!tool.isGenerationReady || !canRevert)
+        Button("Export App", action: onExport)
+            .disabled(!tool.isGenerationReady)
+        Button("View Source", action: onViewSource)
+            .disabled(!tool.isGenerationReady)
+        Button("Show in Finder", action: onShowInFinder)
+        Divider()
+        if shouldDiscardFromMenu {
+            Button("Discard Edit", role: .destructive, action: onDiscard)
+        } else {
+            Button("Delete App", role: .destructive, action: onDelete)
+        }
+    }
+
+    private var contextMenuConfiguration: ToolRowContextMenuConfiguration {
+        ToolRowContextMenuConfiguration(
+            canEditOrLaunch: tool.isGenerationReady,
+            canRevert: tool.isGenerationReady && canRevert,
+            canExport: tool.isGenerationReady,
+            canViewSource: tool.isGenerationReady,
+            shouldDiscard: shouldDiscardFromMenu,
+            onEdit: onEdit,
+            onRun: onRun,
+            onRevert: onRevert,
+            onExport: onExport,
+            onViewSource: onViewSource,
+            onShowInFinder: onShowInFinder,
+            onDiscard: onDiscard,
+            onDelete: onDelete
+        )
     }
 
     private func iconProgressOverlay(_ accessibilityLabel: String) -> some View {
@@ -238,6 +271,7 @@ struct ToolRowView: View {
         isExporting: false,
         canRevert: true,
         onSelect: {},
+        onEdit: {},
         onRun: {},
         onRevert: {},
         onExport: {},
@@ -390,12 +424,14 @@ private struct ToolRowClickHandlingView: NSViewRepresentable {
     let ignoredLeadingWidth: CGFloat
     let onSelect: () -> Void
     let onRun: () -> Void
+    let contextMenu: ToolRowContextMenuConfiguration
 
     func makeNSView(context: Context) -> ClickHandlingNSView {
         let view = ClickHandlingNSView()
         view.ignoredLeadingWidth = ignoredLeadingWidth
         view.onSelect = onSelect
         view.onRun = onRun
+        view.contextMenuConfiguration = self.contextMenu
         return view
     }
 
@@ -403,12 +439,15 @@ private struct ToolRowClickHandlingView: NSViewRepresentable {
         nsView.ignoredLeadingWidth = ignoredLeadingWidth
         nsView.onSelect = onSelect
         nsView.onRun = onRun
+        nsView.contextMenuConfiguration = self.contextMenu
     }
 
     final class ClickHandlingNSView: NSView {
         var ignoredLeadingWidth: CGFloat = 0
         var onSelect: (() -> Void)?
         var onRun: (() -> Void)?
+        var contextMenuConfiguration: ToolRowContextMenuConfiguration?
+        private var activeMenuTarget: ToolRowContextMenuTarget?
 
         override var acceptsFirstResponder: Bool { true }
 
@@ -426,5 +465,97 @@ private struct ToolRowClickHandlingView: NSViewRepresentable {
                 onSelect?()
             }
         }
+
+        override func rightMouseDown(with event: NSEvent) {
+            guard let contextMenuConfiguration else { return }
+            let target = ToolRowContextMenuTarget(configuration: contextMenuConfiguration)
+            activeMenuTarget = target
+            let menu = target.makeMenu()
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+            activeMenuTarget = nil
+        }
+    }
+}
+
+private struct ToolRowContextMenuConfiguration {
+    let canEditOrLaunch: Bool
+    let canRevert: Bool
+    let canExport: Bool
+    let canViewSource: Bool
+    let shouldDiscard: Bool
+    let onEdit: () -> Void
+    let onRun: () -> Void
+    let onRevert: () -> Void
+    let onExport: () -> Void
+    let onViewSource: () -> Void
+    let onShowInFinder: () -> Void
+    let onDiscard: () -> Void
+    let onDelete: () -> Void
+}
+
+private final class ToolRowContextMenuTarget: NSObject {
+    private let configuration: ToolRowContextMenuConfiguration
+
+    init(configuration: ToolRowContextMenuConfiguration) {
+        self.configuration = configuration
+    }
+
+    func makeMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(item("Edit App", #selector(edit), enabled: configuration.canEditOrLaunch))
+        menu.addItem(item("Launch App", #selector(run), enabled: configuration.canEditOrLaunch))
+        menu.addItem(.separator())
+        menu.addItem(item("Go Back to Previous Version", #selector(revert), enabled: configuration.canRevert))
+        menu.addItem(item("Export App", #selector(export), enabled: configuration.canExport))
+        menu.addItem(item("View Source", #selector(viewSource), enabled: configuration.canViewSource))
+        menu.addItem(item("Show in Finder", #selector(showInFinder), enabled: true))
+        menu.addItem(.separator())
+
+        if configuration.shouldDiscard {
+            menu.addItem(item("Discard Edit", #selector(discard), enabled: true))
+        } else {
+            menu.addItem(item("Delete App", #selector(deleteApp), enabled: true))
+        }
+
+        return menu
+    }
+
+    private func item(_ title: String, _ action: Selector, enabled: Bool) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.isEnabled = enabled
+        return item
+    }
+
+    @objc private func edit() {
+        configuration.onEdit()
+    }
+
+    @objc private func run() {
+        configuration.onRun()
+    }
+
+    @objc private func revert() {
+        configuration.onRevert()
+    }
+
+    @objc private func export() {
+        configuration.onExport()
+    }
+
+    @objc private func viewSource() {
+        configuration.onViewSource()
+    }
+
+    @objc private func showInFinder() {
+        configuration.onShowInFinder()
+    }
+
+    @objc private func discard() {
+        configuration.onDiscard()
+    }
+
+    @objc private func deleteApp() {
+        configuration.onDelete()
     }
 }

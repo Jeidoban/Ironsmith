@@ -12,7 +12,16 @@ enum SettingsPreviewState {
     static func make(
         selectedModel: Selection = .appleFoundation
     ) -> InferenceStore {
-        let inferenceStore = InferenceStore()
+        let suiteName = "Ironsmith.SettingsPreviewState.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+        let appleFoundationModelPreferenceStore = AppleFoundationModelPreferenceStore(
+            userDefaults: userDefaults
+        )
+        appleFoundationModelPreferenceStore.isEnabled = selectedModel == .appleFoundation
+        let inferenceStore = InferenceStore(
+            appleFoundationModelPreferenceStore: appleFoundationModelPreferenceStore
+        )
 
         let localProvider = ProviderConfig(
             identifier: ProviderConfig.localProviderIdentifier,

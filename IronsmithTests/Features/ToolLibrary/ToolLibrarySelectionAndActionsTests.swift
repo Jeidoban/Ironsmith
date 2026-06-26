@@ -48,6 +48,19 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func toolLibraryStoreExplicitEditSelectionKeepsSelectedToolSelected() {
+        let toolLibraryState = ToolLibraryStore()
+        let tool = Tool(name: "Calculator", packageRootPath: "/tmp/calculator")
+
+        toolLibraryState.selectForEditing(tool)
+        toolLibraryState.selectForEditing(tool)
+
+        #expect(toolLibraryState.isSelected(tool))
+        #expect(toolLibraryState.promptPlaceholder == "Describe changes for Calculator…")
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStoreKeepsNextGenerationSettingsInMemoryAcrossSelection() {
         let toolLibraryState = ToolLibraryStore()
         let tool = Tool(

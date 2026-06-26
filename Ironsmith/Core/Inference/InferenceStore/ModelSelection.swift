@@ -2,9 +2,10 @@ import Foundation
 
 extension InferenceStore {
     var availableModels: [ModelConfig] {
-        let installedPersistedModels = persistedModels.filter {
-            $0.installState == .installed || $0.installState == .builtIn
-        }
+        let installedPersistedModels = enabledPersistedModels
+            .filter {
+                $0.installState == .installed || $0.installState == .builtIn
+            }
         return (installedPersistedModels + remoteModels)
             .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
@@ -21,6 +22,12 @@ extension InferenceStore {
 
     func clearSelectedModelFallbackMessage() {
         selectedModelFallbackMessage = nil
+    }
+
+    func setAppleFoundationModelEnabled(_ isEnabled: Bool) {
+        guard isAppleFoundationModelEnabled != isEnabled else { return }
+        isAppleFoundationModelEnabled = isEnabled
+        reconcileSelectedModel()
     }
 
     @discardableResult
@@ -55,25 +62,14 @@ extension InferenceStore {
             return
         }
 
-        if let foundation = availableModels.first(where: { $0.source == .appleFoundation }) {
-            selectModel(
-                foundation.selectionIdentifier,
-                fallbackMessage: unavailableSelectionID.map {
-                    let modelName = Self.modelName(fromSelectionIdentifier: $0)
-                    return
-                        "The previously selected AI model, \(modelName), is not available. Switching back to Apple Foundation Model."
-                }
-            )
-        } else {
-            selectModel(
-                availableModels.first?.selectionIdentifier,
-                fallbackMessage: unavailableSelectionID.map {
-                    let modelName = Self.modelName(fromSelectionIdentifier: $0)
-                    return
-                        "The previously selected AI model, \(modelName), is not available. Switching to the first available AI model."
-                }
-            )
-        }
+        selectModel(
+            availableModels.first?.selectionIdentifier,
+            fallbackMessage: unavailableSelectionID.map {
+                let modelName = Self.modelName(fromSelectionIdentifier: $0)
+                return
+                    "The previously selected AI model, \(modelName), is not available. Switching to the first available AI model."
+            }
+        )
     }
 
     func selectModel(_ selectionIdentifier: String?) {
@@ -88,5 +84,11 @@ extension InferenceStore {
 
     private static func modelName(fromSelectionIdentifier selectionIdentifier: String) -> String {
         selectionIdentifier.components(separatedBy: "::").last ?? selectionIdentifier
+    }
+
+    var enabledPersistedModels: [ModelConfig] {
+        persistedModels.filter {
+            isAppleFoundationModelEnabled || $0.source != .appleFoundation
+        }
     }
 }

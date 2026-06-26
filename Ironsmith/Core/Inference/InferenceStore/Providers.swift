@@ -21,7 +21,7 @@ extension InferenceStore {
     }
 
     func models(for provider: ProviderConfig) -> [ModelConfig] {
-        let source = provider.kind == .local ? persistedModels : remoteModels
+        let source = provider.kind == .local ? enabledPersistedModels : remoteModels
         return
             source
             .filter { $0.providerIdentifier == provider.identifier }

@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftData
 import SwiftUI
 
@@ -6,6 +7,7 @@ struct ToolLibraryPopoverView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     @Environment(IronsmithRouteStore.self) private var routeStore
     @Environment(MenuBarPopoverPresentationStore.self) private var menuBarPopoverPresentationStore
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
     #if DEBUG
@@ -18,6 +20,8 @@ struct ToolLibraryPopoverView: View {
     @State private var toolPendingDeletion: Tool?
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
+    @State private var isSigningInToIronsmith = false
+    @FocusState private var isPromptFocused: Bool
 
     @MainActor
     init() {
@@ -50,7 +54,14 @@ struct ToolLibraryPopoverView: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     if tools.isEmpty {
-                        ToolLibraryEmptyStateView()
+                        ToolLibraryEmptyStateView(
+                            showsNoModelActions: shouldShowNoModelsEmptyState,
+                            isSigningInToIronsmith: isSigningInToIronsmith,
+                            onAddProvider: {
+                                routeStore.open(.settings(.addProvider(initialKind: nil)))
+                            },
+                            onSignInToIronsmith: signInToIronsmith
+                        )
                     } else {
                         ForEach(tools) { tool in
                             // Clicking the row selects edit mode; the context menu
@@ -66,6 +77,9 @@ struct ToolLibraryPopoverView: View {
                                         for: tool,
                                         defaultSettings: defaultGenerationSettings
                                     )
+                                },
+                                onEdit: {
+                                    selectToolForEditing(tool)
                                 },
                                 onRun: {
                                     Task {
@@ -132,6 +146,7 @@ struct ToolLibraryPopoverView: View {
                 showsSandboxControl: showSandboxOverride,
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
+                isPromptFocused: $isPromptFocused,
                 onSubmit: {
                     guard inferenceStore.selectedModel != nil else { return }
                     if !showSandboxOverride {
@@ -219,6 +234,21 @@ struct ToolLibraryPopoverView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(inferenceStore.selectedModelFallbackMessage ?? "")
+        }
+        .alert(
+            "Sign In Failed",
+            isPresented: Binding(
+                get: { inferenceStore.presentedErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        inferenceStore.clearPresentedError()
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(inferenceStore.presentedErrorMessage ?? "")
         }
         .confirmationDialog(
             "Delete App?",
@@ -370,8 +400,40 @@ struct ToolLibraryPopoverView: View {
         routeStore.open(.settings(.buyIronsmithCredits))
     }
 
+    private func signInToIronsmith() {
+        guard !isSigningInToIronsmith else { return }
+        isSigningInToIronsmith = true
+
+        Task {
+            let didSignIn = await inferenceStore.signInToIronsmithWithAppleOAuth { @MainActor url in
+                try await webAuthenticationSession.authenticate(
+                    using: url,
+                    callbackURLScheme: IronsmithOAuthRedirect.appCallbackScheme
+                )
+            }
+
+            await MainActor.run {
+                isSigningInToIronsmith = false
+                guard didSignIn else { return }
+                inferenceStore.selectIronsmithModel(
+                    identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier
+                )
+            }
+        }
+    }
+
+    private func selectToolForEditing(_ tool: Tool) {
+        guard tool.isGenerationReady else { return }
+        toolLibraryStore.selectForEditing(tool, defaultSettings: defaultGenerationSettings)
+        isPromptFocused = true
+    }
+
     private var shouldShowNoModelMessage: Bool {
         inferenceStore.hasLoadedModels && inferenceStore.selectedModel == nil
+    }
+
+    private var shouldShowNoModelsEmptyState: Bool {
+        inferenceStore.hasLoadedModels && inferenceStore.availableModels.isEmpty
     }
 
     private func presentWelcomeOnboardingIfNeeded() {

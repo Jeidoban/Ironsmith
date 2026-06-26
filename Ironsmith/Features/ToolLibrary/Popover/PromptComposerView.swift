@@ -15,6 +15,7 @@ struct PromptComposerView: View {
     let showsSandboxControl: Bool
     let isSubmitEnabled: Bool
     let isSubmitting: Bool
+    let isPromptFocused: FocusState<Bool>.Binding
     let onSubmit: () -> Void
     let onCancel: () -> Void
     @State private var pendingPermission: GeneratedAppResourcePermission?
@@ -32,6 +33,7 @@ struct PromptComposerView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
+                .focused(isPromptFocused)
                 .accessibilityIdentifier("tool-prompt-field")
 
             HStack {
@@ -200,37 +202,37 @@ struct PromptComposerView: View {
 }
 
 #Preview("Create Prompt") {
-    PromptComposerView(
-        prompt: .constant(""),
-        sandboxEnabled: .constant(true),
-        appKind: .constant(.window),
-        sandboxPermissions: .constant(.default),
-        resourcePermissions: .constant(.none),
-        placeholder: "Describe a new app to build…",
-        showsSandboxControl: false,
-        isSubmitEnabled: false,
-        isSubmitting: false,
-        onSubmit: {},
-        onCancel: {}
-    )
-    .padding()
-    .frame(width: 360)
+    PromptComposerPreview(isEditing: false)
 }
 
 #Preview("Edit Prompt") {
-    PromptComposerView(
-        prompt: .constant(""),
-        sandboxEnabled: .constant(false),
-        appKind: .constant(.menuBar),
-        sandboxPermissions: .constant(.default),
-        resourcePermissions: .constant(GeneratedAppResourcePermissions([.camera])),
-        placeholder: "Describe changes for Clipboard Cleaner…",
-        showsSandboxControl: true,
-        isSubmitEnabled: true,
-        isSubmitting: false,
-        onSubmit: {},
-        onCancel: {}
-    )
-    .padding()
-    .frame(width: 360)
+    PromptComposerPreview(isEditing: true)
+}
+
+private struct PromptComposerPreview: View {
+    let isEditing: Bool
+    @FocusState private var isPromptFocused: Bool
+
+    var body: some View {
+        PromptComposerView(
+            prompt: .constant(""),
+            sandboxEnabled: .constant(!isEditing),
+            appKind: .constant(isEditing ? .menuBar : .window),
+            sandboxPermissions: .constant(.default),
+            resourcePermissions: .constant(
+                isEditing ? GeneratedAppResourcePermissions([.camera]) : .none
+            ),
+            placeholder: isEditing
+                ? "Describe changes for Clipboard Cleaner…"
+                : "Describe a new app to build…",
+            showsSandboxControl: isEditing,
+            isSubmitEnabled: isEditing,
+            isSubmitting: false,
+            isPromptFocused: $isPromptFocused,
+            onSubmit: {},
+            onCancel: {}
+        )
+        .padding()
+        .frame(width: 360)
+    }
 }

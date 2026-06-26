@@ -92,7 +92,8 @@ extension AgentPipelineTests {
                     makeLanguageModel: { _, _ in languageModel }
                 )
             ),
-            generationPreferences: Self.generationPreferences()
+            generationPreferences: Self.generationPreferences(),
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
         )
         store.providers = [provider]
         store.persistedModels = [model]
@@ -106,6 +107,15 @@ extension AgentPipelineTests {
         let userDefaults = UserDefaults(suiteName: suiteName)!
         userDefaults.removePersistentDomain(forName: suiteName)
         return GenerationPreferencesStore(userDefaults: userDefaults)
+    }
+
+    static func appleFoundationModelPreferenceStore() -> AppleFoundationModelPreferenceStore {
+        let suiteName = "IronsmithTests.AgentPipeline.AppleFoundation.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+        let store = AppleFoundationModelPreferenceStore(userDefaults: userDefaults)
+        store.isEnabled = true
+        return store
     }
 
     static func eventually(

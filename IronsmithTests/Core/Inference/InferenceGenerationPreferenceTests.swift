@@ -410,7 +410,10 @@ extension InferenceTests {
     @MainActor
     @Test
     func appleFoundationUsesDeterministicOnlyRepairStrategy() async throws {
-        let store = Self.dependenciesBackedStore()
+        let store = InferenceStore(
+            dependencies: Self.dependencies(),
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore(isEnabled: true)
+        )
         let provider = ProviderCatalog.makeProvider(for: .local)!
         let model = ModelConfig(
             identifier: ModelConfig.appleFoundationIdentifier,

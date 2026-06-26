@@ -100,7 +100,10 @@ extension InferenceTests {
             source: .remote,
             installState: .installed
         )
-        let inferenceStore = InferenceStore(dependencies: Self.dependencies())
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(),
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
         inferenceStore.providers = [
             ProviderCatalog.makeProvider(for: .local)!,
             ProviderCatalog.makeProvider(for: .openAI)!,
@@ -111,8 +114,51 @@ extension InferenceTests {
 
         #expect(localModel.selectionIdentifier == "\(ProviderConfig.localProviderIdentifier)::\(ModelConfig.appleFoundationIdentifier)")
         #expect(remoteModel.selectionIdentifier == "\(ProviderKind.openAI.rawValue)::gpt-test")
-        #expect(inferenceStore.availableModels.count == 2)
+        #expect(inferenceStore.availableModels.count == 1)
+        #expect(!(inferenceStore.availableModels.contains { $0.source == .appleFoundation }))
         #expect(inferenceStore.selectedModel?.identifier == "gpt-test")
+
+        inferenceStore.setAppleFoundationModelEnabled(true)
+
+        #expect(inferenceStore.availableModels.count == 2)
+        #expect(inferenceStore.availableModels.contains { $0.source == .appleFoundation })
+    }
+
+    @MainActor
+    @Test
+    func localProviderModelsHideAppleFoundationUntilEnabled() throws {
+        let localProvider = try #require(ProviderCatalog.makeProvider(for: .local))
+        let foundationModel = ModelConfig(
+            identifier: ModelConfig.appleFoundationIdentifier,
+            displayName: "Apple Foundation Model",
+            providerIdentifier: ProviderConfig.localProviderIdentifier,
+            source: .appleFoundation,
+            installState: .builtIn
+        )
+        let mlxModel = ModelConfig(
+            identifier: "local-test-model",
+            displayName: "Local Test Model",
+            providerIdentifier: ProviderConfig.localProviderIdentifier,
+            source: .mlx,
+            installState: .installed
+        )
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(),
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
+        inferenceStore.providers = [localProvider]
+        inferenceStore.persistedModels = [foundationModel, mlxModel]
+
+        #expect(inferenceStore.models(for: localProvider).map(\.identifier) == [mlxModel.identifier])
+
+        inferenceStore.setAppleFoundationModelEnabled(true)
+
+        #expect(
+            inferenceStore.models(for: localProvider).map(\.identifier) == [
+                ModelConfig.appleFoundationIdentifier,
+                mlxModel.identifier,
+            ]
+        )
     }
 
     @MainActor
@@ -177,20 +223,22 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func invalidPersistedModelSelectionFallsBackToAvailableModel() async throws {
+    func invalidPersistedModelSelectionClearsWhenNoEnabledModelIsAvailable() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
         let selection = Self.modelSelection()
         selection.selectedModelID = "missing::model"
         let store = InferenceStore(
             dependencies: Self.dependencies(),
-            modelSelection: selection
+            modelSelection: selection,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
         )
 
         await store.loadIfNeeded(modelContext: context)
 
-        #expect(store.selectedModel?.source == .appleFoundation)
-        #expect(selection.selectedModelID == store.selectedModelID)
+        #expect(store.selectedModel == nil)
+        #expect(store.selectedModelID == nil)
+        #expect(selection.selectedModelID == nil)
         #expect(store.selectedModelFallbackMessage?.contains("AI model") == true)
 
         await store.prepareSettings(modelContext: context)
@@ -198,6 +246,36 @@ extension InferenceTests {
 
         store.selectModel(store.selectedModelID)
         #expect(store.selectedModelFallbackMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func invalidPersistedModelSelectionFallsBackToFirstEnabledModel() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let selection = Self.modelSelection()
+        selection.selectedModelID = "missing::model"
+        let mlxModel = ModelConfig(
+            identifier: "local-test-model",
+            displayName: "Local Test Model",
+            providerIdentifier: ProviderConfig.localProviderIdentifier,
+            source: .mlx,
+            installState: .installed
+        )
+        context.insert(mlxModel)
+        try context.save()
+        let store = InferenceStore(
+            dependencies: Self.dependencies(),
+            modelSelection: selection,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
+
+        await store.loadIfNeeded(modelContext: context)
+
+        #expect(store.selectedModelID == mlxModel.selectionIdentifier)
+        #expect(store.selectedModel?.identifier == mlxModel.identifier)
+        #expect(selection.selectedModelID == mlxModel.selectionIdentifier)
+        #expect(store.selectedModelFallbackMessage?.contains("first available AI model") == true)
     }
 
     @MainActor

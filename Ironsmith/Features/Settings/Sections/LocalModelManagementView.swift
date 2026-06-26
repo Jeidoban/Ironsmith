@@ -3,6 +3,8 @@ import SwiftUI
 struct LocalModelManagementView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     let provider: ProviderConfig
+    @AppStorage(IronsmithPreferenceKeys.appleFoundationModelEnabled)
+    private var appleFoundationModelEnabled = false
     @State private var modelPendingDeletion: ModelConfig?
 
     @MainActor
@@ -32,6 +34,10 @@ struct LocalModelManagementView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Toggle("Enable Apple Foundation Model", isOn: appleFoundationModelEnabledBinding)
+                .help("Allows Ironsmith to use Apple's built-in local model for simple requests.")
+                .padding(.bottom, 2)
+
             ForEach(rows, id: \.id) { row in
                 HStack(spacing: 10) {
                     ModelLogoView(
@@ -119,6 +125,16 @@ struct LocalModelManagementView: View {
                 modelPendingDeletion?.displayName
                     ?? "This AI model will be removed from local storage.")
         }
+    }
+
+    private var appleFoundationModelEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { appleFoundationModelEnabled },
+            set: { isEnabled in
+                appleFoundationModelEnabled = isEnabled
+                inferenceStore.setAppleFoundationModelEnabled(isEnabled)
+            }
+        )
     }
 
     private var deleteConfirmationBinding: Binding<Bool> {
