@@ -13,6 +13,8 @@ struct ToolLibraryPopoverView: View {
     #if DEBUG
     @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowWelcomeOnboarding)
     private var debugAlwaysShowWelcomeOnboarding = false
+    @AppStorage(IronsmithPreferenceKeys.debugPopoverEmptyStateMode)
+    private var debugPopoverEmptyStateModeRawValue = ToolLibraryDebugPopoverEmptyStateMode.off.rawValue
     #endif
     let appUpdateStore: AppUpdateStore
     private let welcomeOnboardingStore: WelcomeOnboardingStore
@@ -42,7 +44,7 @@ struct ToolLibraryPopoverView: View {
         VStack(spacing: 14) {
             ToolLibraryPopoverHeaderView(
                 appUpdateStore: appUpdateStore,
-                isLoadingModels: !inferenceStore.hasLoadedModels,
+                isLoadingModels: !inferenceStore.hasLoadedModels && !shouldForceNoModels,
                 shouldShowNoModelMessage: shouldShowNoModelMessage,
                 selectedModelStatusText: selectedModelStatusText,
                 selectedIronsmithCreditWarningText: selectedIronsmithCreditWarningText,
@@ -53,13 +55,10 @@ struct ToolLibraryPopoverView: View {
 
             ScrollView {
                 LazyVStack(spacing: 10) {
-                    if tools.isEmpty {
+                    if shouldShowEmptyState {
                         ToolLibraryEmptyStateView(
                             showsNoModelActions: shouldShowNoModelsEmptyState,
                             isSigningInToIronsmith: isSigningInToIronsmith,
-                            onAddProvider: {
-                                routeStore.open(.settings(.addProvider(initialKind: nil)))
-                            },
                             onSignInToIronsmith: signInToIronsmith
                         )
                     } else {
@@ -148,7 +147,7 @@ struct ToolLibraryPopoverView: View {
                 isSubmitting: toolLibraryStore.isGenerating,
                 isPromptFocused: $isPromptFocused,
                 onSubmit: {
-                    guard inferenceStore.selectedModel != nil else { return }
+                    guard inferenceStore.selectedModel != nil, !shouldForceNoModels else { return }
                     if !showSandboxOverride {
                         toolLibraryStore.sandboxEnabled = true
                     }
@@ -281,10 +280,14 @@ struct ToolLibraryPopoverView: View {
     }
 
     private var canSubmitPrompt: Bool {
-        toolLibraryStore.canSubmitPrompt && inferenceStore.selectedModel != nil
+        toolLibraryStore.canSubmitPrompt && inferenceStore.selectedModel != nil && !shouldForceNoModels
     }
 
     private var selectedModelStatusText: String? {
+        guard !shouldForceNoModels else {
+            return nil
+        }
+
         guard let selectedModelDisplayName else {
             return nil
         }
@@ -336,7 +339,11 @@ struct ToolLibraryPopoverView: View {
     }
 
     private var selectedIronsmithCreditWarningText: String? {
-        ToolLibraryCreditWarning.message(
+        guard !shouldForceNoModels else {
+            return nil
+        }
+
+        return ToolLibraryCreditWarning.message(
             model: inferenceStore.selectedModel,
             provider: selectedProvider,
             balanceCredits: inferenceStore.ironsmithAccountSummary?.credits.balanceCredits
@@ -428,13 +435,39 @@ struct ToolLibraryPopoverView: View {
         isPromptFocused = true
     }
 
+    private var shouldShowEmptyState: Bool {
+        shouldForceNoApps || tools.isEmpty
+    }
+
     private var shouldShowNoModelMessage: Bool {
-        inferenceStore.hasLoadedModels && inferenceStore.selectedModel == nil
+        shouldForceNoModels || (inferenceStore.hasLoadedModels && inferenceStore.selectedModel == nil)
     }
 
     private var shouldShowNoModelsEmptyState: Bool {
-        inferenceStore.hasLoadedModels && inferenceStore.availableModels.isEmpty
+        shouldForceNoModels || (inferenceStore.hasLoadedModels && inferenceStore.availableModels.isEmpty)
     }
+
+    private var shouldForceNoApps: Bool {
+        #if DEBUG
+        debugPopoverEmptyStateMode.forcesNoApps
+        #else
+        false
+        #endif
+    }
+
+    private var shouldForceNoModels: Bool {
+        #if DEBUG
+        debugPopoverEmptyStateMode.forcesNoModels
+        #else
+        false
+        #endif
+    }
+
+    #if DEBUG
+    private var debugPopoverEmptyStateMode: ToolLibraryDebugPopoverEmptyStateMode {
+        ToolLibraryDebugPopoverEmptyStateMode(rawValue: debugPopoverEmptyStateModeRawValue) ?? .off
+    }
+    #endif
 
     private func presentWelcomeOnboardingIfNeeded() {
         guard inferenceStore.hasLoadedModels else { return }

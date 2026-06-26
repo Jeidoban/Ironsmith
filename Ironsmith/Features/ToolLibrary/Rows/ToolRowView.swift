@@ -30,26 +30,33 @@ struct ToolRowView: View {
             HStack(spacing: 10) {
                 icon
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(tool.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    if let generationStatusText {
-                        Text(generationStatusText)
-                            .font(.caption)
-                            .foregroundStyle(statusStyle)
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(tool.name)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
+
+                        if let generationStatusText {
+                            Text(generationStatusText)
+                                .font(.caption)
+                                .foregroundStyle(statusStyle)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+
+                    if isExporting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel("Exporting \(tool.name)")
                     }
                 }
-
-                Spacer()
-
-                if isExporting {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("Exporting \(tool.name)")
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard tool.isGenerationReady else { return }
+                    onSelect()
                 }
             }
             .padding(.horizontal, 12)
@@ -57,14 +64,6 @@ struct ToolRowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(backgroundStyle, in: RoundedRectangle(cornerRadius: 14))
             .contentShape(RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                ToolRowClickHandlingView(
-                    ignoredLeadingWidth: 64,
-                    onSelect: tool.isGenerationReady ? onSelect : {},
-                    onRun: tool.isGenerationReady ? onRun : {},
-                    contextMenu: contextMenuConfiguration
-                )
-            }
             .contextMenu {
                 appActionsMenu
             }
@@ -133,10 +132,26 @@ struct ToolRowView: View {
 
     @ViewBuilder
     private var appActionsMenu: some View {
-        Button("Edit App", action: onEdit)
-            .disabled(!tool.isGenerationReady)
-        Button("Launch App", action: onRun)
-            .disabled(!tool.isGenerationReady)
+        Button(editActionTitle) {
+            if isSelected {
+                onSelect()
+            } else {
+                onEdit()
+            }
+        }
+        .disabled(!(isSelected || tool.isGenerationReady))
+
+        Button(launchActionTitle) {
+            if isGenerating {
+                onStop()
+            } else if canContinue {
+                onContinue()
+            } else {
+                onRun()
+            }
+        }
+        .disabled(!(tool.isGenerationReady || canContinue || isGenerating))
+
         Divider()
         Button("Go Back to Previous Version", action: onRevert)
             .disabled(!tool.isGenerationReady || !canRevert)
@@ -153,22 +168,20 @@ struct ToolRowView: View {
         }
     }
 
-    private var contextMenuConfiguration: ToolRowContextMenuConfiguration {
-        ToolRowContextMenuConfiguration(
-            canEditOrLaunch: tool.isGenerationReady,
-            canRevert: tool.isGenerationReady && canRevert,
-            canExport: tool.isGenerationReady,
-            canViewSource: tool.isGenerationReady,
-            shouldDiscard: shouldDiscardFromMenu,
-            onEdit: onEdit,
-            onRun: onRun,
-            onRevert: onRevert,
-            onExport: onExport,
-            onViewSource: onViewSource,
-            onShowInFinder: onShowInFinder,
-            onDiscard: onDiscard,
-            onDelete: onDelete
-        )
+    private var editActionTitle: String {
+        isSelected ? "Exit Edit Mode" : "Edit App"
+    }
+
+    private var launchActionTitle: String {
+        if isGenerating {
+            return "Stop Generating"
+        }
+
+        if canContinue {
+            return "Continue Generating"
+        }
+
+        return "Launch App"
     }
 
     private func iconProgressOverlay(_ accessibilityLabel: String) -> some View {
@@ -221,6 +234,10 @@ struct ToolRowView: View {
 
     private var canContinue: Bool {
         tool.generationState == .stopped || tool.generationState == .failed
+    }
+
+    private var isGenerating: Bool {
+        tool.generationState == .generating
     }
 
     private var shouldDiscardFromMenu: Bool {
@@ -417,145 +434,5 @@ private struct IconProgressBadge: View {
         .onDisappear {
             isSpinning = false
         }
-    }
-}
-
-private struct ToolRowClickHandlingView: NSViewRepresentable {
-    let ignoredLeadingWidth: CGFloat
-    let onSelect: () -> Void
-    let onRun: () -> Void
-    let contextMenu: ToolRowContextMenuConfiguration
-
-    func makeNSView(context: Context) -> ClickHandlingNSView {
-        let view = ClickHandlingNSView()
-        view.ignoredLeadingWidth = ignoredLeadingWidth
-        view.onSelect = onSelect
-        view.onRun = onRun
-        view.contextMenuConfiguration = self.contextMenu
-        return view
-    }
-
-    func updateNSView(_ nsView: ClickHandlingNSView, context: Context) {
-        nsView.ignoredLeadingWidth = ignoredLeadingWidth
-        nsView.onSelect = onSelect
-        nsView.onRun = onRun
-        nsView.contextMenuConfiguration = self.contextMenu
-    }
-
-    final class ClickHandlingNSView: NSView {
-        var ignoredLeadingWidth: CGFloat = 0
-        var onSelect: (() -> Void)?
-        var onRun: (() -> Void)?
-        var contextMenuConfiguration: ToolRowContextMenuConfiguration?
-        private var activeMenuTarget: ToolRowContextMenuTarget?
-
-        override var acceptsFirstResponder: Bool { true }
-
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            guard point.x >= ignoredLeadingWidth else {
-                return nil
-            }
-            return super.hitTest(point)
-        }
-
-        override func mouseDown(with event: NSEvent) {
-            if event.clickCount == 2 {
-                onRun?()
-            } else {
-                onSelect?()
-            }
-        }
-
-        override func rightMouseDown(with event: NSEvent) {
-            guard let contextMenuConfiguration else { return }
-            let target = ToolRowContextMenuTarget(configuration: contextMenuConfiguration)
-            activeMenuTarget = target
-            let menu = target.makeMenu()
-            NSMenu.popUpContextMenu(menu, with: event, for: self)
-            activeMenuTarget = nil
-        }
-    }
-}
-
-private struct ToolRowContextMenuConfiguration {
-    let canEditOrLaunch: Bool
-    let canRevert: Bool
-    let canExport: Bool
-    let canViewSource: Bool
-    let shouldDiscard: Bool
-    let onEdit: () -> Void
-    let onRun: () -> Void
-    let onRevert: () -> Void
-    let onExport: () -> Void
-    let onViewSource: () -> Void
-    let onShowInFinder: () -> Void
-    let onDiscard: () -> Void
-    let onDelete: () -> Void
-}
-
-private final class ToolRowContextMenuTarget: NSObject {
-    private let configuration: ToolRowContextMenuConfiguration
-
-    init(configuration: ToolRowContextMenuConfiguration) {
-        self.configuration = configuration
-    }
-
-    func makeMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.addItem(item("Edit App", #selector(edit), enabled: configuration.canEditOrLaunch))
-        menu.addItem(item("Launch App", #selector(run), enabled: configuration.canEditOrLaunch))
-        menu.addItem(.separator())
-        menu.addItem(item("Go Back to Previous Version", #selector(revert), enabled: configuration.canRevert))
-        menu.addItem(item("Export App", #selector(export), enabled: configuration.canExport))
-        menu.addItem(item("View Source", #selector(viewSource), enabled: configuration.canViewSource))
-        menu.addItem(item("Show in Finder", #selector(showInFinder), enabled: true))
-        menu.addItem(.separator())
-
-        if configuration.shouldDiscard {
-            menu.addItem(item("Discard Edit", #selector(discard), enabled: true))
-        } else {
-            menu.addItem(item("Delete App", #selector(deleteApp), enabled: true))
-        }
-
-        return menu
-    }
-
-    private func item(_ title: String, _ action: Selector, enabled: Bool) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        item.isEnabled = enabled
-        return item
-    }
-
-    @objc private func edit() {
-        configuration.onEdit()
-    }
-
-    @objc private func run() {
-        configuration.onRun()
-    }
-
-    @objc private func revert() {
-        configuration.onRevert()
-    }
-
-    @objc private func export() {
-        configuration.onExport()
-    }
-
-    @objc private func viewSource() {
-        configuration.onViewSource()
-    }
-
-    @objc private func showInFinder() {
-        configuration.onShowInFinder()
-    }
-
-    @objc private func discard() {
-        configuration.onDiscard()
-    }
-
-    @objc private func deleteApp() {
-        configuration.onDelete()
     }
 }

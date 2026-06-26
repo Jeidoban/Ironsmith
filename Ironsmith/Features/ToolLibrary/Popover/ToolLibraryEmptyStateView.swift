@@ -3,18 +3,15 @@ import SwiftUI
 struct ToolLibraryEmptyStateView: View {
     let showsNoModelActions: Bool
     let isSigningInToIronsmith: Bool
-    let onAddProvider: () -> Void
     let onSignInToIronsmith: () -> Void
 
     init(
         showsNoModelActions: Bool = false,
         isSigningInToIronsmith: Bool = false,
-        onAddProvider: @escaping () -> Void = {},
         onSignInToIronsmith: @escaping () -> Void = {}
     ) {
         self.showsNoModelActions = showsNoModelActions
         self.isSigningInToIronsmith = isSigningInToIronsmith
-        self.onAddProvider = onAddProvider
         self.onSignInToIronsmith = onSignInToIronsmith
     }
 
@@ -38,24 +35,19 @@ struct ToolLibraryEmptyStateView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if showsNoModelActions {
-                VStack(spacing: 8) {
-                    Button("Add Provider", action: onAddProvider)
-                        .buttonStyle(.bordered)
-
-                    Button(action: onSignInToIronsmith) {
-                        HStack(spacing: 6) {
-                            if isSigningInToIronsmith {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .accessibilityLabel("Signing in")
-                            }
-                            Text(isSigningInToIronsmith ? "Signing In..." : "Sign in to Ironsmith")
+                Button(action: onSignInToIronsmith) {
+                    HStack(spacing: 6) {
+                        if isSigningInToIronsmith {
+                            ProgressView()
+                                .controlSize(.small)
+                                .accessibilityLabel("Signing in")
                         }
-                        .frame(minWidth: 154)
+                        Text(isSigningInToIronsmith ? "Signing In..." : "Sign in to Ironsmith")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isSigningInToIronsmith)
+                    .frame(minWidth: 154)
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSigningInToIronsmith)
                 .padding(.top, 4)
             }
         }
@@ -74,6 +66,7 @@ struct ToolLibraryEmptyStateView: View {
                 "No AI models are available. Add a provider in settings or sign into Ironsmith for immediate access."
         }
 
-        return "Create a new one from the prompt box below, or change the selected AI model in Settings."
+        return
+            "Create a new one from the prompt box below, or change the selected AI model in Settings."
     }
 }

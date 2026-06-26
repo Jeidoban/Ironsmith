@@ -5,18 +5,26 @@ struct LocalModelManagementView: View {
     let provider: ProviderConfig
     @AppStorage(IronsmithPreferenceKeys.appleFoundationModelEnabled)
     private var appleFoundationModelEnabled = false
+    @AppStorage(IronsmithPreferenceKeys.hasPresentedAppleFoundationModelWarning)
+    private var hasPresentedAppleFoundationModelWarning = false
+    #if DEBUG
+        @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowAppleFoundationModelWarning)
+        private var debugAlwaysShowAppleFoundationModelWarning = false
+    #endif
     @State private var modelPendingDeletion: ModelConfig?
+    @State private var isShowingAppleFoundationModelWarning = false
 
     @MainActor
     private var rows: [LocalModelRow] {
-        let localModels = inferenceStore.models(for: provider)
+        let localModels = inferenceStore.persistedModels
+            .filter { $0.providerIdentifier == provider.identifier }
         let modelRows =
             localModels
             .filter {
                 $0.installState == .installed || $0.installState == .builtIn
                     || $0.installState == .downloading
             }
-            .map(LocalModelRow.init(model:))
+            .map { LocalModelRow(model: $0, isAppleFoundationEnabled: appleFoundationModelEnabled) }
 
         let knownIdentifiers = Set(modelRows.map(\.identifier))
         let catalogRows = MLXModelCatalog.all
@@ -34,10 +42,6 @@ struct LocalModelManagementView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Enable Apple Foundation Model", isOn: appleFoundationModelEnabledBinding)
-                .help("Allows Ironsmith to use Apple's built-in local model for simple requests.")
-                .padding(.bottom, 2)
-
             ForEach(rows, id: \.id) { row in
                 HStack(spacing: 10) {
                     ModelLogoView(
@@ -66,6 +70,16 @@ struct LocalModelManagementView: View {
                     Spacer()
 
                     switch row.state {
+                    case .appleFoundation:
+                        Toggle(
+                            "Enable Apple Foundation Model",
+                            isOn: appleFoundationModelEnabledBinding
+                        )
+                        .labelsHidden()
+                        .help(
+                            "Allows Ironsmith to use Apple's built-in local model for simple requests."
+                        )
+                        .accessibilityLabel("Enable Apple Foundation Model")
                     case .builtIn:
                         Text("Built in")
                             .font(.caption)
@@ -125,16 +139,47 @@ struct LocalModelManagementView: View {
                 modelPendingDeletion?.displayName
                     ?? "This AI model will be removed from local storage.")
         }
+        .alert(
+            "Foundation Model Information",
+            isPresented: $isShowingAppleFoundationModelWarning
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(
+                "The Apple Foundation Model is only useful for very simple apps and demos. It's recommended to use a more capable AI model."
+            )
+        }
     }
 
     private var appleFoundationModelEnabledBinding: Binding<Bool> {
         Binding(
             get: { appleFoundationModelEnabled },
             set: { isEnabled in
+                let wasEnabled = appleFoundationModelEnabled
                 appleFoundationModelEnabled = isEnabled
                 inferenceStore.setAppleFoundationModelEnabled(isEnabled)
+                if isEnabled && !wasEnabled {
+                    presentAppleFoundationModelWarningIfNeeded()
+                }
             }
         )
+    }
+
+    private func presentAppleFoundationModelWarningIfNeeded() {
+        guard shouldShowAppleFoundationModelWarning else { return }
+
+        hasPresentedAppleFoundationModelWarning = true
+        isShowingAppleFoundationModelWarning = true
+    }
+
+    private var shouldShowAppleFoundationModelWarning: Bool {
+        #if DEBUG
+            if debugAlwaysShowAppleFoundationModelWarning {
+                return true
+            }
+        #endif
+
+        return !hasPresentedAppleFoundationModelWarning
     }
 
     private var deleteConfirmationBinding: Binding<Bool> {
@@ -159,6 +204,8 @@ private struct LocalModelRow: Identifiable {
 
     var isInstalled: Bool {
         switch state {
+        case .appleFoundation(let isEnabled):
+            isEnabled
         case .builtIn, .installed:
             true
         case .downloading, .available:
@@ -166,10 +213,15 @@ private struct LocalModelRow: Identifiable {
         }
     }
 
-    init(model: ModelConfig) {
+    init(model: ModelConfig, isAppleFoundationEnabled: Bool) {
         identifier = model.identifier
         displayName = model.displayName
         detailText = model.source == .appleFoundation ? "Apple Foundation Model" : model.identifier
+
+        if model.source == .appleFoundation {
+            state = .appleFoundation(isEnabled: isAppleFoundationEnabled)
+            return
+        }
 
         switch model.installState {
         case .builtIn:
@@ -191,6 +243,7 @@ private struct LocalModelRow: Identifiable {
     }
 
     enum State {
+        case appleFoundation(isEnabled: Bool)
         case builtIn
         case installed(ModelConfig)
         case downloading(Double)
