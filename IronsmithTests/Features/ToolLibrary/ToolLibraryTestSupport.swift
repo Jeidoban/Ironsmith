@@ -208,9 +208,15 @@ actor IronsmithAccountFetchCapture {
 
 actor ToolBuildCapture {
     private(set) var builtPackageRoot: URL?
+    private(set) var builtSettings: ToolGenerationSettings?
 
     func record(_ url: URL) {
         builtPackageRoot = url
+    }
+
+    func record(_ tool: Ironsmith.Tool) {
+        builtPackageRoot = tool.packageRootURL
+        builtSettings = tool.generationSettings(defaults: .default)
     }
 }
 

@@ -56,6 +56,8 @@ final class ToolLibraryStore {
     var resourcePermissions = GeneratedAppResourcePermissions.none
     var runningToolID: UUID?
     var exportingToolID: UUID?
+    var rebuildingToolID: UUID?
+    var restoringToolID: UUID?
     private(set) var selectedToolID: UUID?
     private(set) var selectedToolName: String?
     private var restorableToolIDs = Set<UUID>()
@@ -83,7 +85,10 @@ final class ToolLibraryStore {
     }
 
     var canSubmitPrompt: Bool {
-        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isGenerating
+        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isGenerating
+            && rebuildingToolID == nil
+            && restoringToolID == nil
     }
 
     var hasSelectedTool: Bool {
@@ -153,7 +158,10 @@ final class ToolLibraryStore {
     }
 
     func delete(_ tool: Tool, in modelContext: ModelContext) {
-        guard !(isGenerating && tool.generationState == .generating) else { return }
+        guard rebuildingToolID != tool.id,
+              restoringToolID != tool.id,
+              !(isGenerating && tool.generationState == .generating)
+        else { return }
         let packageRootURL = tool.packageRootURL
         handleDeletedTool(tool)
         modelContext.delete(tool)
@@ -174,7 +182,10 @@ final class ToolLibraryStore {
     }
 
     func rename(_ tool: Tool, to proposedName: String, in modelContext: ModelContext) {
-        guard !(isGenerating && tool.generationState == .generating) else { return }
+        guard rebuildingToolID != tool.id,
+              restoringToolID != tool.id,
+              !(isGenerating && tool.generationState == .generating)
+        else { return }
 
         let trimmedName = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty, trimmedName != tool.name else { return }
@@ -250,7 +261,12 @@ final class ToolLibraryStore {
         modelContext: ModelContext,
         inferenceStore: InferenceStore
     ) {
-        guard canContinueGeneration(tool), generationTask == nil else { return }
+        guard canContinueGeneration(tool),
+              generationTask == nil,
+              !isGenerating,
+              rebuildingToolID == nil,
+              restoringToolID == nil
+        else { return }
         generationTask = Task { @MainActor in
             await resumeGeneration(tool, modelContext: modelContext, inferenceStore: inferenceStore)
             generationTask = nil
@@ -258,7 +274,11 @@ final class ToolLibraryStore {
     }
 
     func discardGeneration(_ tool: Tool, in modelContext: ModelContext) {
-        guard !isGenerating, canContinueGeneration(tool) else { return }
+        guard !isGenerating,
+              rebuildingToolID != tool.id,
+              restoringToolID != tool.id,
+              canContinueGeneration(tool)
+        else { return }
         let packageRootURL = tool.packageRootURL
         removePendingDraft(for: tool)
 
@@ -280,11 +300,13 @@ final class ToolLibraryStore {
     }
 
     func restorePreviousVersion(_ tool: Tool, in modelContext: ModelContext) async {
-        guard !isGenerating, tool.isGenerationReady else { return }
+        guard !isGenerating, rebuildingToolID == nil, restoringToolID == nil, tool.isGenerationReady else { return }
         isGenerating = true
+        restoringToolID = tool.id
         clearPresentedErrorState()
         defer {
             isGenerating = false
+            restoringToolID = nil
         }
 
         do {
@@ -306,6 +328,34 @@ final class ToolLibraryStore {
             if selectedToolID == tool.id {
                 applyComposerSettings(restoredSettings)
             }
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            presentError(error.localizedDescription)
+        }
+    }
+
+    func rebuild(_ tool: Tool, in modelContext: ModelContext) async {
+        guard !isGenerating, rebuildingToolID == nil, restoringToolID == nil, tool.isGenerationReady else { return }
+        rebuildingToolID = tool.id
+        clearPresentedErrorState()
+        defer {
+            rebuildingToolID = nil
+        }
+
+        let settings = selectedToolID == tool.id
+            ? currentComposerSettings
+            : tool.generationSettings(defaults: .default)
+
+        do {
+            tool.applyGenerationSettings(settings)
+            try Self.writeAppEntry(
+                layout: tool.packageLayout,
+                displayName: tool.name,
+                settings: settings
+            )
+            try await dependencies.buildClient.buildTool(tool)
+            tool.updatedAt = .now
             try modelContext.save()
         } catch {
             modelContext.rollback()
@@ -466,7 +516,7 @@ final class ToolLibraryStore {
     }
 
     func run(_ tool: Tool) async {
-        guard tool.isGenerationReady, runningToolID == nil else { return }
+        guard tool.isGenerationReady, runningToolID == nil, rebuildingToolID == nil, restoringToolID == nil else { return }
         runningToolID = tool.id
         defer { runningToolID = nil }
 
@@ -478,7 +528,12 @@ final class ToolLibraryStore {
     }
 
     func export(_ tool: Tool) async {
-        guard tool.isGenerationReady, exportingToolID == nil, !isGenerating else { return }
+        guard tool.isGenerationReady,
+              exportingToolID == nil,
+              rebuildingToolID == nil,
+              restoringToolID == nil,
+              !isGenerating
+        else { return }
         exportingToolID = tool.id
         defer {
             exportingToolID = nil

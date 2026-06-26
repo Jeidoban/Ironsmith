@@ -78,6 +78,8 @@ struct ToolAppBundleClient {
         processClient: SwiftPackageProcessClient,
         iconClient: ToolIconClient
     ) async throws -> URL {
+        try writeFixedAppEntrySource(for: request, fileManager: fileManager)
+
         let buildResult = try await processClient.buildRelease(request.packageRootURL)
         guard buildResult.succeeded else {
             throw ToolAppBundleError.releaseBuildFailed(buildResult.combinedOutput)
@@ -171,6 +173,20 @@ struct ToolAppBundleClient {
 
         await processClient.stripQuarantine(destinationAppURL)
         return destinationAppURL
+    }
+
+    private static func writeFixedAppEntrySource(
+        for request: ToolAppBundleRequest,
+        fileManager: FileManager
+    ) throws {
+        let layout = request.layout
+        let appEntryURL = try layout.packageFileURL(for: layout.appEntrySourcePath)
+        try fileManager.createDirectory(
+            at: appEntryURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try layout.fixedAppEntrySource(displayName: request.displayName, settings: request.settings)
+            .write(to: appEntryURL, atomically: true, encoding: .utf8)
     }
 
     private static func temporarySiblingAppBundleURL(for destinationAppURL: URL, label: String) -> URL {

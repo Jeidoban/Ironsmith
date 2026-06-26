@@ -72,6 +72,8 @@ struct ToolLibraryPopoverView: View {
                                 isSelected: toolLibraryStore.isSelected(tool),
                                 isRunning: toolLibraryStore.runningToolID == tool.id,
                                 isExporting: toolLibraryStore.exportingToolID == tool.id,
+                                isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
+                                isRestoring: toolLibraryStore.restoringToolID == tool.id,
                                 canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
                                 onSelect: {
                                     toolLibraryStore.toggleSelection(
@@ -89,6 +91,11 @@ struct ToolLibraryPopoverView: View {
                                 },
                                 onRename: {
                                     beginRenaming(tool)
+                                },
+                                onRebuild: {
+                                    Task {
+                                        await toolLibraryStore.rebuild(tool, in: modelContext)
+                                    }
                                 },
                                 onRevert: {
                                     Task {

@@ -312,7 +312,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func appBundlerDoesNotRewritePackageAppEntryWhenBuildingBundle() async throws {
+    func appBundlerRefreshesPackageAppEntryWhenBuildingBundle() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -376,7 +376,9 @@ extension AgentPipelineTests {
         _ = try await client.buildInternalApp(request)
 
         let currentAppEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)
-        #expect(currentAppEntrySource == originalAppEntrySource)
+        #expect(currentAppEntrySource != originalAppEntrySource)
+        #expect(currentAppEntrySource.contains("MenuBarExtra(\"Existing Window Tool\", systemImage:"))
+        #expect(!(currentAppEntrySource.contains("WindowGroup")))
     }
 
     @MainActor

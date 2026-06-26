@@ -33,6 +33,14 @@ extension AgentPipelineTests {
             bundleIdentifier: "com.ironsmith.tests.runner",
             packageRootPath: root.path
         )
+        let layout = tool.packageLayout
+        let appEntryURL = try layout.packageFileURL(for: layout.appEntrySourcePath)
+        try FileManager.default.createDirectory(
+            at: appEntryURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try layout.fixedAppEntrySource(displayName: tool.name, settings: tool.generationSettings(defaults: .default))
+            .write(to: appEntryURL, atomically: true, encoding: .utf8)
         try Self.writePlistDictionary(
             [
                 "CFBundleExecutable": "Runner",
@@ -129,6 +137,68 @@ extension AgentPipelineTests {
         try await runner.runTool(tool)
 
         #expect(await capture.builtRequests.map(\.executableName) == ["OldRunner"])
+        #expect(await capture.launchedURL == tool.appBundleURL)
+    }
+
+    @MainActor
+    @Test
+    func toolRunnerRebuildsWindowBundleWhenPackageAppEntryIsStale() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let tool = StoredTool(
+            name: "Half Migrated Runner",
+            executableName: "HalfMigratedRunner",
+            bundleIdentifier: "com.ironsmith.tests.half-migrated-runner",
+            packageRootPath: root.path
+        )
+        let layout = tool.packageLayout
+        let appEntryURL = try layout.packageFileURL(for: layout.appEntrySourcePath)
+        try FileManager.default.createDirectory(
+            at: appEntryURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try """
+        import SwiftUI
+
+        @main
+        struct HalfMigratedRunner: App {
+            var body: some Scene {
+                WindowGroup {
+                    ContentView()
+                }
+            }
+        }
+        """.write(to: appEntryURL, atomically: true, encoding: .utf8)
+        try Self.writePlistDictionary(
+            [
+                "CFBundleExecutable": "HalfMigratedRunner",
+                "IronsmithQuitOnLastWindowClose": true,
+            ],
+            to: tool.appBundleURL
+                .appendingPathComponent("Contents", isDirectory: true)
+                .appendingPathComponent("Info.plist")
+        )
+
+        let capture = AppBundleCapture()
+        let appBundleClient = ToolAppBundleClient(
+            buildInternalApp: { request in
+                await capture.recordBuild(request)
+                return request.internalAppBundleURL
+            },
+            exportApp: { request, applicationsDirectoryURL in
+                applicationsDirectoryURL.appendingPathComponent("\(request.displayName).app", isDirectory: true)
+            },
+            launchApp: { url in
+                await capture.recordLaunch(url)
+            },
+            appExists: { _ in true }
+        )
+        let runner = ToolRunnerClient.live(appBundleClient: appBundleClient)
+
+        try await runner.runTool(tool)
+
+        #expect(await capture.builtRequests.map(\.executableName) == ["HalfMigratedRunner"])
         #expect(await capture.launchedURL == tool.appBundleURL)
     }
 

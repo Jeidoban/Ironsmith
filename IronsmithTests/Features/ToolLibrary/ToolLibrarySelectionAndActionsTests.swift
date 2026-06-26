@@ -506,6 +506,85 @@ extension ToolLibraryTests {
         #expect(!(restoredAppEntrySource.contains("MenuBarExtra")))
         #expect(await buildCapture.builtPackageRoot == packageRoot)
         #expect(tool.generationState == .ready)
+        #expect(store.restoringToolID == nil)
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreRebuildsSelectedToolWithCurrentComposerSettings() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let executableName = "RebuildableTool"
+        let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
+        let appEntryURL = packageRoot.appendingPathComponent(layout.appEntrySourcePath)
+        let initialSettings = ToolGenerationSettings(
+            appKind: .window,
+            sandboxEnabled: true,
+            sandboxPermissions: GeneratedAppSandboxPermissions([.userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions.none
+        )
+        let rebuiltSettings = ToolGenerationSettings(
+            appKind: .menuBar,
+            menuBarSystemImage: "timer",
+            sandboxEnabled: false,
+            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            resourcePermissions: GeneratedAppResourcePermissions([.microphone])
+        )
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let tool = Tool(
+            name: executableName,
+            sandboxEnabled: initialSettings.sandboxEnabled,
+            appKind: initialSettings.appKind,
+            menuBarSystemImage: initialSettings.menuBarSystemImage,
+            sandboxPermissions: initialSettings.sandboxPermissions,
+            resourcePermissions: initialSettings.resourcePermissions,
+            packageRootPath: packageRoot.path
+        )
+        context.insert(tool)
+        try context.save()
+
+        let buildCapture = ToolBuildCapture()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { request in
+                    ToolGenerationResult(
+                        toolName: executableName,
+                        executableName: executableName,
+                        settings: request.settings,
+                        packageRootURL: packageRoot
+                    )
+                },
+                runnerClient: ToolRunnerClient { _ in },
+                buildClient: ToolBuildClient { tool in
+                    await buildCapture.record(tool)
+                }
+            )
+        )
+        store.selectForEditing(tool)
+        store.appKind = rebuiltSettings.appKind
+        store.menuBarSystemImage = rebuiltSettings.menuBarSystemImage
+        store.sandboxEnabled = rebuiltSettings.sandboxEnabled
+        store.sandboxPermissions = rebuiltSettings.sandboxPermissions
+        store.resourcePermissions = rebuiltSettings.resourcePermissions
+
+        await store.rebuild(tool, in: context)
+
+        let rebuiltAppEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)
+        #expect(tool.appKind == .menuBar)
+        #expect(tool.validatedMenuBarSystemImage == "timer")
+        #expect(!(tool.sandboxEnabled))
+        #expect(tool.storedSandboxPermissions?.enabled == [.internet])
+        #expect(tool.storedResourcePermissions?.enabled == [.microphone])
+        #expect(rebuiltAppEntrySource.contains("MenuBarExtra"))
+        #expect(!(rebuiltAppEntrySource.contains("WindowGroup")))
+        #expect(await buildCapture.builtPackageRoot == packageRoot)
+        #expect(await buildCapture.builtSettings == rebuiltSettings)
+        #expect(store.rebuildingToolID == nil)
+        #expect(store.presentedErrorMessage == nil)
     }
 
     @MainActor

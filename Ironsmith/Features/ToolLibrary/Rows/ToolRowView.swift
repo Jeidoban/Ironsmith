@@ -11,11 +11,14 @@ struct ToolRowView: View {
     let isSelected: Bool
     let isRunning: Bool
     let isExporting: Bool
+    let isRebuilding: Bool
+    let isRestoring: Bool
     let canRevert: Bool
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onRun: () -> Void
     let onRename: () -> Void
+    let onRebuild: () -> Void
     let onRevert: () -> Void
     let onExport: () -> Void
     let onShowInFinder: () -> Void
@@ -47,17 +50,6 @@ struct ToolRowView: View {
                     }
 
                     Spacer()
-
-                    if isExporting {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityLabel("Exporting \(tool.name)")
-                    }
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    guard tool.isGenerationReady else { return }
-                    onSelect()
                 }
             }
             .padding(.horizontal, 12)
@@ -65,6 +57,10 @@ struct ToolRowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(backgroundStyle, in: RoundedRectangle(cornerRadius: 14))
             .contentShape(RoundedRectangle(cornerRadius: 14))
+            .onTapGesture {
+                guard tool.isGenerationReady else { return }
+                onSelect()
+            }
             .contextMenu {
                 appActionsMenu
             }
@@ -107,6 +103,12 @@ struct ToolRowView: View {
                 iconProgressOverlay("Generating \(tool.name)")
             } else if isRunning {
                 iconProgressOverlay("Running \(tool.name)")
+            } else if isRestoring {
+                iconProgressOverlay("Restoring \(tool.name)")
+            } else if isRebuilding {
+                iconProgressOverlay("Rebuilding \(tool.name)")
+            } else if isExporting {
+                iconProgressOverlay("Exporting \(tool.name)")
             } else if isHoveringRow && canContinue {
                 Button(action: onContinue) {
                     Image(systemName: "play.fill")
@@ -151,23 +153,27 @@ struct ToolRowView: View {
                 onRun()
             }
         }
-        .disabled(!(tool.isGenerationReady || canContinue || isGenerating))
+        .disabled(isBusy || !(tool.isGenerationReady || canContinue || isGenerating))
 
         Divider()
         Button("Rename App...", action: onRename)
-            .disabled(isGenerating)
+            .disabled(isGenerating || isBusy)
+        Button("Rebuild App", action: onRebuild)
+            .disabled(!tool.isGenerationReady || isBusy)
         Button("Go Back to Previous Version", action: onRevert)
-            .disabled(!tool.isGenerationReady || !canRevert)
+            .disabled(!tool.isGenerationReady || !canRevert || isBusy)
         Button("Export App", action: onExport)
-            .disabled(!tool.isGenerationReady)
+            .disabled(!tool.isGenerationReady || isBusy)
         Button("View Source", action: onViewSource)
             .disabled(!tool.isGenerationReady)
         Button("Show in Finder", action: onShowInFinder)
         Divider()
         if shouldDiscardFromMenu {
             Button("Discard Edit", role: .destructive, action: onDiscard)
+                .disabled(isBusy)
         } else {
             Button("Delete App", role: .destructive, action: onDelete)
+                .disabled(isBusy)
         }
     }
 
@@ -243,6 +249,10 @@ struct ToolRowView: View {
         tool.generationState == .generating
     }
 
+    private var isBusy: Bool {
+        isRunning || isExporting || isRebuilding || isRestoring
+    }
+
     private var shouldDiscardFromMenu: Bool {
         canContinue && tool.generationMode == .edit
     }
@@ -269,7 +279,7 @@ struct ToolRowView: View {
             return AnyShapeStyle(.tint.opacity(0.14))
         }
 
-        if isExporting {
+        if isExporting || isRebuilding || isRestoring {
             return AnyShapeStyle(.tint.opacity(0.14))
         }
 
@@ -289,11 +299,14 @@ struct ToolRowView: View {
         isSelected: true,
         isRunning: false,
         isExporting: false,
+        isRebuilding: false,
+        isRestoring: false,
         canRevert: true,
         onSelect: {},
         onEdit: {},
         onRun: {},
         onRename: {},
+        onRebuild: {},
         onRevert: {},
         onExport: {},
         onShowInFinder: {},
