@@ -48,7 +48,6 @@ struct ToolLibraryPopoverView: View {
             ToolLibraryPopoverHeaderView(
                 appUpdateStore: appUpdateStore,
                 isLoadingModels: !inferenceStore.hasLoadedModels && !shouldForceNoModels,
-                shouldShowNoModelMessage: shouldShowNoModelMessage,
                 selectedModelStatusText: selectedModelStatusText,
                 selectedIronsmithCreditWarningText: selectedIronsmithCreditWarningText,
                 onOpenSettings: {
@@ -498,10 +497,6 @@ struct ToolLibraryPopoverView: View {
 
     private var shouldShowEmptyState: Bool {
         shouldForceNoApps || tools.isEmpty
-    }
-
-    private var shouldShowNoModelMessage: Bool {
-        shouldForceNoModels || (inferenceStore.hasLoadedModels && inferenceStore.selectedModel == nil)
     }
 
     private var shouldShowNoModelsEmptyState: Bool {

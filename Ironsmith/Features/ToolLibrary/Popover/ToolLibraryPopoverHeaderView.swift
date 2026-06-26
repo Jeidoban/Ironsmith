@@ -6,7 +6,6 @@ struct ToolLibraryPopoverHeaderView: View {
 
     let appUpdateStore: AppUpdateStore
     let isLoadingModels: Bool
-    let shouldShowNoModelMessage: Bool
     let selectedModelStatusText: String?
     let selectedIronsmithCreditWarningText: String?
     let onOpenSettings: () -> Void
@@ -102,12 +101,6 @@ struct ToolLibraryPopoverHeaderView: View {
             }
             .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
-        } else if shouldShowNoModelMessage {
-            Text("No AI model available. Add a provider in Settings.")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
         } else if let selectedModelStatusText {
             Text(selectedModelStatusText)
                 .font(.caption.weight(.medium))
@@ -117,6 +110,6 @@ struct ToolLibraryPopoverHeaderView: View {
     }
 
     private var shouldShowModelStatus: Bool {
-        isLoadingModels || shouldShowNoModelMessage || selectedModelStatusText != nil
+        isLoadingModels || selectedModelStatusText != nil
     }
 }
