@@ -74,8 +74,10 @@ struct ToolLibraryPopoverHeaderView: View {
                 .font(.headline.weight(.semibold))
                 .lineLimit(1)
 
-            modelStatus
-                .frame(height: 18, alignment: .topLeading)
+            if shouldShowModelStatus {
+                modelStatus
+                    .frame(height: 18, alignment: .topLeading)
+            }
 
             if let selectedIronsmithCreditWarningText {
                 Text(selectedIronsmithCreditWarningText)
@@ -112,5 +114,9 @@ struct ToolLibraryPopoverHeaderView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+    }
+
+    private var shouldShowModelStatus: Bool {
+        isLoadingModels || shouldShowNoModelMessage || selectedModelStatusText != nil
     }
 }

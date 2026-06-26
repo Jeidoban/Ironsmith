@@ -13,9 +13,12 @@ struct PromptComposerView: View {
     @Binding var resourcePermissions: GeneratedAppResourcePermissions
     let placeholder: String
     let showsSandboxControl: Bool
+    let modelPickerTitle: String
+    let isModelPickerEnabled: Bool
     let isSubmitEnabled: Bool
     let isSubmitting: Bool
     let isPromptFocused: FocusState<Bool>.Binding
+    let onChooseModel: () -> Void
     let onSubmit: () -> Void
     let onCancel: () -> Void
     @State private var pendingPermission: GeneratedAppResourcePermission?
@@ -39,34 +42,14 @@ struct PromptComposerView: View {
             HStack {
                 generationSettingsMenu
 
-                Spacer()
+                Spacer(minLength: 6)
 
-                Button {
-                    if isSubmitting {
-                        onCancel()
-                    } else {
-                        onSubmit()
-                    }
-                } label: {
-                    if isSubmitting {
-                        Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 24))
-                    } else {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 24))
-                    }
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(submitButtonForegroundStyle)
-                .disabled(!isSubmitEnabled && !isSubmitting)
-                .help(isSubmitting ? "Stop generation" : "Generate")
-                .accessibilityLabel(isSubmitting ? "Stop generation" : "Generate app")
-                .accessibilityHint(
-                    isSubmitting
-                        ? "Cancels the current app generation."
-                        : "Starts generating an app from the prompt."
-                )
-                .accessibilityIdentifier(isSubmitting ? "stop-generation-button" : "submit-generation-button")
+                modelPickerButton
+                    .layoutPriority(1)
+
+                Spacer(minLength: 6)
+
+                submitButton
             }
         }
         .alert(
@@ -134,6 +117,64 @@ struct PromptComposerView: View {
         .accessibilityLabel("Generation settings")
         .accessibilityIdentifier("generation-settings-menu")
         .disabled(isSubmitting)
+    }
+
+    private var modelPickerButton: some View {
+        Button(action: onChooseModel) {
+            HStack(spacing: 5) {
+                Text(modelPickerTitle)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .minimumScaleFactor(0.86)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .frame(maxWidth: 184)
+            .background(.quaternary.opacity(0.36), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .opacity(isModelPickerEnabled && !isSubmitting ? 1 : 0.55)
+        .disabled(!isModelPickerEnabled || isSubmitting)
+        .help("Choose AI model")
+        .accessibilityLabel("Choose AI model")
+        .accessibilityValue(modelPickerTitle)
+        .accessibilityIdentifier("model-picker-button")
+    }
+
+    private var submitButton: some View {
+        Button {
+            if isSubmitting {
+                onCancel()
+            } else {
+                onSubmit()
+            }
+        } label: {
+            if isSubmitting {
+                Image(systemName: "stop.circle.fill")
+                    .font(.system(size: 24))
+            } else {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 24))
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(submitButtonForegroundStyle)
+        .disabled(!isSubmitEnabled && !isSubmitting)
+        .help(isSubmitting ? "Stop generation" : "Generate")
+        .accessibilityLabel(isSubmitting ? "Stop generation" : "Generate app")
+        .accessibilityHint(
+            isSubmitting
+                ? "Cancels the current app generation."
+                : "Starts generating an app from the prompt."
+        )
+        .accessibilityIdentifier(isSubmitting ? "stop-generation-button" : "submit-generation-button")
     }
 
     private var submitButtonForegroundStyle: some ShapeStyle {
@@ -226,9 +267,12 @@ private struct PromptComposerPreview: View {
                 ? "Describe changes for Clipboard Cleaner…"
                 : "Describe a new app to build…",
             showsSandboxControl: isEditing,
+            modelPickerTitle: "DeepSeek V4 Flash",
+            isModelPickerEnabled: true,
             isSubmitEnabled: isEditing,
             isSubmitting: false,
             isPromptFocused: $isPromptFocused,
+            onChooseModel: {},
             onSubmit: {},
             onCancel: {}
         )

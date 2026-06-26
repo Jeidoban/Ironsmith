@@ -22,6 +22,7 @@ struct ToolLibraryPopoverView: View {
     @State private var toolPendingDeletion: Tool?
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
+    @State private var isShowingModelPicker = false
     @State private var isSigningInToIronsmith = false
     @FocusState private var isPromptFocused: Bool
 
@@ -143,9 +144,14 @@ struct ToolLibraryPopoverView: View {
                 resourcePermissions: resourcePermissionsBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
                 showsSandboxControl: showSandboxOverride,
+                modelPickerTitle: composerModelPickerTitle,
+                isModelPickerEnabled: isComposerModelPickerEnabled,
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
                 isPromptFocused: $isPromptFocused,
+                onChooseModel: {
+                    isShowingModelPicker = true
+                },
                 onSubmit: {
                     guard inferenceStore.selectedModel != nil, !shouldForceNoModels else { return }
                     if !showSandboxOverride {
@@ -273,6 +279,9 @@ struct ToolLibraryPopoverView: View {
                 onComplete: completeWelcomeOnboarding
             )
         }
+        .sheet(isPresented: $isShowingModelPicker) {
+            ModelPickerSheetView(size: .popover)
+        }
     }
 
     private var restoreAvailabilityRefreshID: [String] {
@@ -283,20 +292,36 @@ struct ToolLibraryPopoverView: View {
         toolLibraryStore.canSubmitPrompt && inferenceStore.selectedModel != nil && !shouldForceNoModels
     }
 
+    private var composerModelPickerTitle: String {
+        if shouldForceNoModels {
+            return "No model"
+        }
+
+        guard inferenceStore.hasLoadedModels else {
+            return "Loading model..."
+        }
+
+        if let selectedModelDisplayName {
+            return selectedModelDisplayName
+        }
+
+        if inferenceStore.availableModels.isEmpty {
+            return "No model"
+        }
+
+        return "Choose model"
+    }
+
+    private var isComposerModelPickerEnabled: Bool {
+        inferenceStore.hasLoadedModels && !shouldForceNoModels
+    }
+
     private var selectedModelStatusText: String? {
         guard !shouldForceNoModels else {
             return nil
         }
 
-        guard let selectedModelDisplayName else {
-            return nil
-        }
-
-        if let selectedIronsmithCreditsText {
-            return "Using \(selectedModelDisplayName) - \(selectedIronsmithCreditsText)"
-        }
-
-        return "Using \(selectedModelDisplayName)"
+        return selectedIronsmithCreditsText
     }
 
     private var selectedModelDisplayName: String? {
