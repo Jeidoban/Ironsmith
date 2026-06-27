@@ -139,6 +139,14 @@ extension ToolLibraryTests {
         return userDefaults
     }
 
+    static func appleFoundationModelPreferenceStore(
+        isEnabled: Bool = true
+    ) throws -> AppleFoundationModelPreferenceStore {
+        let store = AppleFoundationModelPreferenceStore(userDefaults: try makeIsolatedUserDefaults())
+        store.isEnabled = isEnabled
+        return store
+    }
+
     static func remoteModel(
         provider: ProviderConfig,
         estimatedToolCredits: Int?
@@ -200,9 +208,15 @@ actor IronsmithAccountFetchCapture {
 
 actor ToolBuildCapture {
     private(set) var builtPackageRoot: URL?
+    private(set) var builtSettings: ToolGenerationSettings?
 
     func record(_ url: URL) {
         builtPackageRoot = url
+    }
+
+    func record(_ tool: Ironsmith.Tool) {
+        builtPackageRoot = tool.packageRootURL
+        builtSettings = tool.generationSettings(defaults: .default)
     }
 }
 

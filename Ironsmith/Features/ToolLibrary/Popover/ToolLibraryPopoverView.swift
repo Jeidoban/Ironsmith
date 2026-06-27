@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftData
 import SwiftUI
 
@@ -6,18 +7,26 @@ struct ToolLibraryPopoverView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     @Environment(IronsmithRouteStore.self) private var routeStore
     @Environment(MenuBarPopoverPresentationStore.self) private var menuBarPopoverPresentationStore
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
     #if DEBUG
     @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowWelcomeOnboarding)
     private var debugAlwaysShowWelcomeOnboarding = false
+    @AppStorage(IronsmithPreferenceKeys.debugPopoverEmptyStateMode)
+    private var debugPopoverEmptyStateModeRawValue = ToolLibraryDebugPopoverEmptyStateMode.off.rawValue
     #endif
     let appUpdateStore: AppUpdateStore
     private let welcomeOnboardingStore: WelcomeOnboardingStore
     @State private var toolLibraryStore = ToolLibraryStore()
     @State private var toolPendingDeletion: Tool?
+    @State private var toolPendingRename: Tool?
+    @State private var pendingRenameName = ""
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
+    @State private var isShowingModelPicker = false
+    @State private var isSigningInToIronsmith = false
+    @FocusState private var isPromptFocused: Bool
 
     @MainActor
     init() {
@@ -38,8 +47,7 @@ struct ToolLibraryPopoverView: View {
         VStack(spacing: 14) {
             ToolLibraryPopoverHeaderView(
                 appUpdateStore: appUpdateStore,
-                isLoadingModels: !inferenceStore.hasLoadedModels,
-                shouldShowNoModelMessage: shouldShowNoModelMessage,
+                isLoadingModels: !inferenceStore.hasLoadedModels && !shouldForceNoModels,
                 selectedModelStatusText: selectedModelStatusText,
                 selectedIronsmithCreditWarningText: selectedIronsmithCreditWarningText,
                 onOpenSettings: {
@@ -49,8 +57,12 @@ struct ToolLibraryPopoverView: View {
 
             ScrollView {
                 LazyVStack(spacing: 10) {
-                    if tools.isEmpty {
-                        ToolLibraryEmptyStateView()
+                    if shouldShowEmptyState {
+                        ToolLibraryEmptyStateView(
+                            showsNoModelActions: shouldShowNoModelsEmptyState,
+                            isSigningInToIronsmith: isSigningInToIronsmith,
+                            onSignInToIronsmith: signInToIronsmith
+                        )
                     } else {
                         ForEach(tools) { tool in
                             // Clicking the row selects edit mode; the context menu
@@ -60,6 +72,8 @@ struct ToolLibraryPopoverView: View {
                                 isSelected: toolLibraryStore.isSelected(tool),
                                 isRunning: toolLibraryStore.runningToolID == tool.id,
                                 isExporting: toolLibraryStore.exportingToolID == tool.id,
+                                isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
+                                isRestoring: toolLibraryStore.restoringToolID == tool.id,
                                 canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
                                 onSelect: {
                                     toolLibraryStore.toggleSelection(
@@ -67,9 +81,20 @@ struct ToolLibraryPopoverView: View {
                                         defaultSettings: defaultGenerationSettings
                                     )
                                 },
+                                onEdit: {
+                                    selectToolForEditing(tool)
+                                },
                                 onRun: {
                                     Task {
                                         await toolLibraryStore.run(tool)
+                                    }
+                                },
+                                onRename: {
+                                    beginRenaming(tool)
+                                },
+                                onRebuild: {
+                                    Task {
+                                        await toolLibraryStore.rebuild(tool, in: modelContext)
                                     }
                                 },
                                 onRevert: {
@@ -130,10 +155,16 @@ struct ToolLibraryPopoverView: View {
                 resourcePermissions: resourcePermissionsBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
                 showsSandboxControl: showSandboxOverride,
+                modelPickerTitle: composerModelPickerTitle,
+                isModelPickerEnabled: isComposerModelPickerEnabled,
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
+                isPromptFocused: $isPromptFocused,
+                onChooseModel: {
+                    isShowingModelPicker = true
+                },
                 onSubmit: {
-                    guard inferenceStore.selectedModel != nil else { return }
+                    guard inferenceStore.selectedModel != nil, !shouldForceNoModels else { return }
                     if !showSandboxOverride {
                         toolLibraryStore.sandboxEnabled = true
                     }
@@ -220,6 +251,21 @@ struct ToolLibraryPopoverView: View {
         } message: {
             Text(inferenceStore.selectedModelFallbackMessage ?? "")
         }
+        .alert(
+            "Sign In Failed",
+            isPresented: Binding(
+                get: { inferenceStore.presentedErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        inferenceStore.clearPresentedError()
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(inferenceStore.presentedErrorMessage ?? "")
+        }
         .confirmationDialog(
             "Delete App?",
             isPresented: deleteConfirmationBinding
@@ -236,6 +282,21 @@ struct ToolLibraryPopoverView: View {
         } message: {
             Text(toolPendingDeletion.map { "Delete \($0.name)? This can't be undone." } ?? "Delete this app? This can't be undone.")
         }
+        .alert(
+            "Rename App",
+            isPresented: renameAlertBinding
+        ) {
+            TextField("App Name", text: $pendingRenameName)
+            Button("Cancel", role: .cancel) {
+                clearPendingRename()
+            }
+            Button("Save") {
+                commitPendingRename()
+            }
+            .disabled(pendingRenameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Enter a new display name for this app.")
+        }
         .sheet(
             isPresented: $isShowingWelcomeOnboarding,
             onDismiss: dismissWelcomeOnboardingPresentation
@@ -244,6 +305,9 @@ struct ToolLibraryPopoverView: View {
                 onComplete: completeWelcomeOnboarding
             )
         }
+        .sheet(isPresented: $isShowingModelPicker) {
+            ModelPickerSheetView(size: .popover)
+        }
     }
 
     private var restoreAvailabilityRefreshID: [String] {
@@ -251,19 +315,39 @@ struct ToolLibraryPopoverView: View {
     }
 
     private var canSubmitPrompt: Bool {
-        toolLibraryStore.canSubmitPrompt && inferenceStore.selectedModel != nil
+        toolLibraryStore.canSubmitPrompt && inferenceStore.selectedModel != nil && !shouldForceNoModels
+    }
+
+    private var composerModelPickerTitle: String {
+        if shouldForceNoModels {
+            return "No model"
+        }
+
+        guard inferenceStore.hasLoadedModels else {
+            return "Loading model..."
+        }
+
+        if let selectedModelDisplayName {
+            return selectedModelDisplayName
+        }
+
+        if inferenceStore.availableModels.isEmpty {
+            return "No model"
+        }
+
+        return "Choose model"
+    }
+
+    private var isComposerModelPickerEnabled: Bool {
+        inferenceStore.hasLoadedModels && !shouldForceNoModels
     }
 
     private var selectedModelStatusText: String? {
-        guard let selectedModelDisplayName else {
+        guard !shouldForceNoModels else {
             return nil
         }
 
-        if let selectedIronsmithCreditsText {
-            return "Using \(selectedModelDisplayName) - \(selectedIronsmithCreditsText)"
-        }
-
-        return "Using \(selectedModelDisplayName)"
+        return selectedIronsmithCreditsText
     }
 
     private var selectedModelDisplayName: String? {
@@ -306,7 +390,11 @@ struct ToolLibraryPopoverView: View {
     }
 
     private var selectedIronsmithCreditWarningText: String? {
-        ToolLibraryCreditWarning.message(
+        guard !shouldForceNoModels else {
+            return nil
+        }
+
+        return ToolLibraryCreditWarning.message(
             model: inferenceStore.selectedModel,
             provider: selectedProvider,
             balanceCredits: inferenceStore.ironsmithAccountSummary?.credits.balanceCredits
@@ -370,9 +458,79 @@ struct ToolLibraryPopoverView: View {
         routeStore.open(.settings(.buyIronsmithCredits))
     }
 
-    private var shouldShowNoModelMessage: Bool {
-        inferenceStore.hasLoadedModels && inferenceStore.selectedModel == nil
+    private func signInToIronsmith() {
+        guard !isSigningInToIronsmith else { return }
+        isSigningInToIronsmith = true
+
+        Task {
+            let didSignIn = await inferenceStore.signInToIronsmithWithAppleOAuth { @MainActor url in
+                try await webAuthenticationSession.authenticate(
+                    using: url,
+                    callbackURLScheme: IronsmithOAuthRedirect.appCallbackScheme
+                )
+            }
+
+            await MainActor.run {
+                isSigningInToIronsmith = false
+                guard didSignIn else { return }
+                inferenceStore.selectIronsmithModel(
+                    identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier
+                )
+            }
+        }
     }
+
+    private func selectToolForEditing(_ tool: Tool) {
+        guard tool.isGenerationReady else { return }
+        toolLibraryStore.selectForEditing(tool, defaultSettings: defaultGenerationSettings)
+        isPromptFocused = true
+    }
+
+    private func beginRenaming(_ tool: Tool) {
+        toolPendingRename = tool
+        pendingRenameName = tool.name
+    }
+
+    private func commitPendingRename() {
+        guard let toolPendingRename else { return }
+        toolLibraryStore.rename(toolPendingRename, to: pendingRenameName, in: modelContext)
+        clearPendingRename()
+    }
+
+    private func clearPendingRename() {
+        toolPendingRename = nil
+        pendingRenameName = ""
+    }
+
+    private var shouldShowEmptyState: Bool {
+        shouldForceNoApps || tools.isEmpty
+    }
+
+    private var shouldShowNoModelsEmptyState: Bool {
+        shouldForceNoModels || (inferenceStore.hasLoadedModels && inferenceStore.availableModels.isEmpty)
+    }
+
+    private var shouldForceNoApps: Bool {
+        #if DEBUG
+        debugPopoverEmptyStateMode.forcesNoApps
+        #else
+        false
+        #endif
+    }
+
+    private var shouldForceNoModels: Bool {
+        #if DEBUG
+        debugPopoverEmptyStateMode.forcesNoModels
+        #else
+        false
+        #endif
+    }
+
+    #if DEBUG
+    private var debugPopoverEmptyStateMode: ToolLibraryDebugPopoverEmptyStateMode {
+        ToolLibraryDebugPopoverEmptyStateMode(rawValue: debugPopoverEmptyStateModeRawValue) ?? .off
+    }
+    #endif
 
     private func presentWelcomeOnboardingIfNeeded() {
         guard inferenceStore.hasLoadedModels else { return }
@@ -416,6 +574,17 @@ struct ToolLibraryPopoverView: View {
             set: { isPresented in
                 if !isPresented {
                     toolPendingDeletion = nil
+                }
+            }
+        )
+    }
+
+    private var renameAlertBinding: Binding<Bool> {
+        Binding(
+            get: { toolPendingRename != nil },
+            set: { isPresented in
+                if !isPresented {
+                    clearPendingRename()
                 }
             }
         )

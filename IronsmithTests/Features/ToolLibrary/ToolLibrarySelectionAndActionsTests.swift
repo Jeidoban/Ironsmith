@@ -48,6 +48,52 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func toolLibraryStoreRenamesSelectedToolAndMovesAppBundle() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("RenamePackage", isDirectory: true)
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let tool = Tool(
+            name: "Old Name",
+            executableName: "RenamePackage",
+            packageRootPath: packageRoot.path
+        )
+        context.insert(tool)
+        try FileManager.default.createDirectory(at: tool.appBundleURL, withIntermediateDirectories: true)
+        try context.save()
+
+        let oldBundleURL = tool.appBundleURL
+        let newBundleURL = packageRoot.appendingPathComponent("New Name.app", isDirectory: true)
+        let toolLibraryState = ToolLibraryStore()
+        toolLibraryState.selectForEditing(tool)
+
+        toolLibraryState.rename(tool, to: "  New Name  ", in: context)
+
+        #expect(tool.name == "New Name")
+        #expect(toolLibraryState.promptPlaceholder == "Describe changes for New Name…")
+        #expect(!(FileManager.default.fileExists(atPath: oldBundleURL.path)))
+        #expect(FileManager.default.fileExists(atPath: newBundleURL.path))
+        #expect(try context.fetch(FetchDescriptor<StoredTool>()).first?.name == "New Name")
+        #expect(toolLibraryState.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreExplicitEditSelectionKeepsSelectedToolSelected() {
+        let toolLibraryState = ToolLibraryStore()
+        let tool = Tool(name: "Calculator", packageRootPath: "/tmp/calculator")
+
+        toolLibraryState.selectForEditing(tool)
+        toolLibraryState.selectForEditing(tool)
+
+        #expect(toolLibraryState.isSelected(tool))
+        #expect(toolLibraryState.promptPlaceholder == "Describe changes for Calculator…")
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStoreKeepsNextGenerationSettingsInMemoryAcrossSelection() {
         let toolLibraryState = ToolLibraryStore()
         let tool = Tool(
@@ -460,6 +506,85 @@ extension ToolLibraryTests {
         #expect(!(restoredAppEntrySource.contains("MenuBarExtra")))
         #expect(await buildCapture.builtPackageRoot == packageRoot)
         #expect(tool.generationState == .ready)
+        #expect(store.restoringToolID == nil)
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreRebuildsSelectedToolWithCurrentComposerSettings() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let executableName = "RebuildableTool"
+        let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
+        let appEntryURL = packageRoot.appendingPathComponent(layout.appEntrySourcePath)
+        let initialSettings = ToolGenerationSettings(
+            appKind: .window,
+            sandboxEnabled: true,
+            sandboxPermissions: GeneratedAppSandboxPermissions([.userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions.none
+        )
+        let rebuiltSettings = ToolGenerationSettings(
+            appKind: .menuBar,
+            menuBarSystemImage: "timer",
+            sandboxEnabled: false,
+            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            resourcePermissions: GeneratedAppResourcePermissions([.microphone])
+        )
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let tool = Tool(
+            name: executableName,
+            sandboxEnabled: initialSettings.sandboxEnabled,
+            appKind: initialSettings.appKind,
+            menuBarSystemImage: initialSettings.menuBarSystemImage,
+            sandboxPermissions: initialSettings.sandboxPermissions,
+            resourcePermissions: initialSettings.resourcePermissions,
+            packageRootPath: packageRoot.path
+        )
+        context.insert(tool)
+        try context.save()
+
+        let buildCapture = ToolBuildCapture()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { request in
+                    ToolGenerationResult(
+                        toolName: executableName,
+                        executableName: executableName,
+                        settings: request.settings,
+                        packageRootURL: packageRoot
+                    )
+                },
+                runnerClient: ToolRunnerClient { _ in },
+                buildClient: ToolBuildClient { tool in
+                    await buildCapture.record(tool)
+                }
+            )
+        )
+        store.selectForEditing(tool)
+        store.appKind = rebuiltSettings.appKind
+        store.menuBarSystemImage = rebuiltSettings.menuBarSystemImage
+        store.sandboxEnabled = rebuiltSettings.sandboxEnabled
+        store.sandboxPermissions = rebuiltSettings.sandboxPermissions
+        store.resourcePermissions = rebuiltSettings.resourcePermissions
+
+        await store.rebuild(tool, in: context)
+
+        let rebuiltAppEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)
+        #expect(tool.appKind == .menuBar)
+        #expect(tool.validatedMenuBarSystemImage == "timer")
+        #expect(!(tool.sandboxEnabled))
+        #expect(tool.storedSandboxPermissions?.enabled == [.internet])
+        #expect(tool.storedResourcePermissions?.enabled == [.microphone])
+        #expect(rebuiltAppEntrySource.contains("MenuBarExtra"))
+        #expect(!(rebuiltAppEntrySource.contains("WindowGroup")))
+        #expect(await buildCapture.builtPackageRoot == packageRoot)
+        #expect(await buildCapture.builtSettings == rebuiltSettings)
+        #expect(store.rebuildingToolID == nil)
+        #expect(store.presentedErrorMessage == nil)
     }
 
     @MainActor

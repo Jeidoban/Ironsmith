@@ -7,6 +7,10 @@ struct SettingsDebugSectionView: View {
     private var alwaysShowWelcomeOnboarding = false
     @AppStorage(IronsmithPreferenceKeys.debugAlwaysOpenOllamaEditorAfterAdd)
     private var alwaysOpenOllamaEditorAfterAdd = false
+    @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowAppleFoundationModelWarning)
+    private var alwaysShowAppleFoundationModelWarning = false
+    @AppStorage(IronsmithPreferenceKeys.debugPopoverEmptyStateMode)
+    private var popoverEmptyStateModeRawValue = ToolLibraryDebugPopoverEmptyStateMode.off.rawValue
     @State private var imagePlaygroundPrompt = ""
     @State private var imagePlaygroundPreview: NSImage?
     @State private var imagePlaygroundErrorMessage: String?
@@ -19,6 +23,16 @@ struct SettingsDebugSectionView: View {
 
             Toggle("Always open Ollama editor after adding Ollama", isOn: $alwaysOpenOllamaEditorAfterAdd)
                 .toggleStyle(.switch)
+
+            Toggle("Always show Apple Foundation warning", isOn: $alwaysShowAppleFoundationModelWarning)
+                .toggleStyle(.switch)
+
+            Picker("Popover empty state", selection: $popoverEmptyStateModeRawValue) {
+                ForEach(ToolLibraryDebugPopoverEmptyStateMode.allCases) { mode in
+                    Text(mode.displayName)
+                        .tag(mode.rawValue)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Image Playground")

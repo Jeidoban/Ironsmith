@@ -74,16 +74,10 @@ struct SettingsModelPresentationTests {
     }
 
     @Test
-    func localProviderEmptyStateMentionsAppleIntelligenceOnAppleSilicon() throws {
+    func localProviderEmptyStateUsesGenericNoModelCopy() throws {
         let provider = try #require(ProviderCatalog.makeProvider(for: .local))
 
-        #expect(
-            SettingsProviderModelEmptyState.message(
-                for: provider,
-                isAppleSiliconMac: true
-            ) ==
-                "No AI models available. Enable Apple Intelligence in macOS settings to use the built in model."
-        )
+        #expect(SettingsProviderModelEmptyState.message(for: provider) == "No AI models available.")
     }
 
     @Test
@@ -91,18 +85,8 @@ struct SettingsModelPresentationTests {
         let localProvider = try #require(ProviderCatalog.makeProvider(for: .local))
         let openAIProvider = try #require(ProviderCatalog.makeProvider(for: .openAI))
 
-        #expect(
-            SettingsProviderModelEmptyState.message(
-                for: localProvider,
-                isAppleSiliconMac: false
-            ) == "No AI models available."
-        )
-        #expect(
-            SettingsProviderModelEmptyState.message(
-                for: openAIProvider,
-                isAppleSiliconMac: true
-            ) == "No AI models available."
-        )
+        #expect(SettingsProviderModelEmptyState.message(for: localProvider) == "No AI models available.")
+        #expect(SettingsProviderModelEmptyState.message(for: openAIProvider) == "No AI models available.")
     }
 
     @Test

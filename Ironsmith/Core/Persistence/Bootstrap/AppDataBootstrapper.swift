@@ -1,5 +1,5 @@
-import FoundationModels
 import Foundation
+import FoundationModels
 import SwiftData
 
 enum AppDataBootstrapper {

@@ -133,6 +133,8 @@ struct ToolRunnerClient {
 
     private static func needsQuitOnCloseRebuild(_ request: ToolAppBundleRequest) -> Bool {
         guard request.appKind == .window else { return false }
+        guard appEntrySourceSupportsQuitOnClose(request) else { return true }
+
         let plistURL = request.internalAppBundleURL
             .appendingPathComponent("Contents", isDirectory: true)
             .appendingPathComponent("Info.plist")
@@ -143,6 +145,16 @@ struct ToolRunnerClient {
             return true
         }
         return dictionary["IronsmithQuitOnLastWindowClose"] as? Bool != true
+    }
+
+    private static func appEntrySourceSupportsQuitOnClose(_ request: ToolAppBundleRequest) -> Bool {
+        guard let appEntryURL = try? request.layout.packageFileURL(for: request.layout.appEntrySourcePath),
+              let source = try? String(contentsOf: appEntryURL, encoding: .utf8)
+        else {
+            return false
+        }
+        return source.contains("applicationShouldTerminateAfterLastWindowClosed")
+            && source.contains("IronsmithQuitOnLastWindowClose")
     }
 }
 

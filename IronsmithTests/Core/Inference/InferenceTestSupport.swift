@@ -14,7 +14,8 @@ extension InferenceTests {
     ) -> InferenceStore {
         InferenceStore(
             dependencies: Self.dependencies(),
-            generationPreferences: generationPreferences
+            generationPreferences: generationPreferences,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
         )
     }
 
@@ -53,6 +54,17 @@ extension InferenceTests {
         let userDefaults = UserDefaults(suiteName: suiteName)!
         userDefaults.removePersistentDomain(forName: suiteName)
         return ModelSelectionStore(userDefaults: userDefaults)
+    }
+
+    static func appleFoundationModelPreferenceStore(
+        isEnabled: Bool = false
+    ) -> AppleFoundationModelPreferenceStore {
+        let suiteName = "IronsmithTests.AppleFoundation.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+        let store = AppleFoundationModelPreferenceStore(userDefaults: userDefaults)
+        store.isEnabled = isEnabled
+        return store
     }
 
     static func dependencies(

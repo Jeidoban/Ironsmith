@@ -11,9 +11,14 @@ struct ToolRowView: View {
     let isSelected: Bool
     let isRunning: Bool
     let isExporting: Bool
+    let isRebuilding: Bool
+    let isRestoring: Bool
     let canRevert: Bool
     let onSelect: () -> Void
+    let onEdit: () -> Void
     let onRun: () -> Void
+    let onRename: () -> Void
+    let onRebuild: () -> Void
     let onRevert: () -> Void
     let onExport: () -> Void
     let onShowInFinder: () -> Void
@@ -29,26 +34,22 @@ struct ToolRowView: View {
             HStack(spacing: 10) {
                 icon
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(tool.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    if let generationStatusText {
-                        Text(generationStatusText)
-                            .font(.caption)
-                            .foregroundStyle(statusStyle)
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(tool.name)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
+
+                        if let generationStatusText {
+                            Text(generationStatusText)
+                                .font(.caption)
+                                .foregroundStyle(statusStyle)
+                                .lineLimit(1)
+                        }
                     }
-                }
 
-                Spacer()
-
-                if isExporting {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("Exporting \(tool.name)")
+                    Spacer()
                 }
             }
             .padding(.horizontal, 12)
@@ -56,28 +57,16 @@ struct ToolRowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(backgroundStyle, in: RoundedRectangle(cornerRadius: 14))
             .contentShape(RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                ToolRowClickHandlingView(
-                    ignoredLeadingWidth: 64,
-                    onSelect: tool.isGenerationReady ? onSelect : {},
-                    onRun: tool.isGenerationReady ? onRun : {}
-                )
+            .onTapGesture {
+                guard tool.isGenerationReady else { return }
+                onSelect()
+            }
+            .contextMenu {
+                appActionsMenu
             }
 
             Menu {
-                Button("Go Back to Previous Version", action: onRevert)
-                    .disabled(!tool.isGenerationReady || !canRevert)
-                Button("Export App", action: onExport)
-                    .disabled(!tool.isGenerationReady)
-                Button("View Source", action: onViewSource)
-                    .disabled(!tool.isGenerationReady)
-                Button("Show in Finder", action: onShowInFinder)
-                Divider()
-                if shouldDiscardFromMenu {
-                    Button("Discard Edit", role: .destructive, action: onDiscard)
-                } else {
-                    Button("Delete App", role: .destructive, action: onDelete)
-                }
+                appActionsMenu
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 18, weight: .semibold))
@@ -114,6 +103,12 @@ struct ToolRowView: View {
                 iconProgressOverlay("Generating \(tool.name)")
             } else if isRunning {
                 iconProgressOverlay("Running \(tool.name)")
+            } else if isRestoring {
+                iconProgressOverlay("Restoring \(tool.name)")
+            } else if isRebuilding {
+                iconProgressOverlay("Rebuilding \(tool.name)")
+            } else if isExporting {
+                iconProgressOverlay("Exporting \(tool.name)")
             } else if isHoveringRow && canContinue {
                 Button(action: onContinue) {
                     Image(systemName: "play.fill")
@@ -136,6 +131,66 @@ struct ToolRowView: View {
                 .accessibilityIdentifier("run-tool-\(tool.id.uuidString)")
             }
         }
+    }
+
+    @ViewBuilder
+    private var appActionsMenu: some View {
+        Button(editActionTitle) {
+            if isSelected {
+                onSelect()
+            } else {
+                onEdit()
+            }
+        }
+        .disabled(!(isSelected || tool.isGenerationReady))
+
+        Button(launchActionTitle) {
+            if isGenerating {
+                onStop()
+            } else if canContinue {
+                onContinue()
+            } else {
+                onRun()
+            }
+        }
+        .disabled(isBusy || !(tool.isGenerationReady || canContinue || isGenerating))
+
+        Divider()
+        Button("Rename App...", action: onRename)
+            .disabled(isGenerating || isBusy)
+        Button("Rebuild App", action: onRebuild)
+            .disabled(!tool.isGenerationReady || isBusy)
+        Button("Go Back to Previous Version", action: onRevert)
+            .disabled(!tool.isGenerationReady || !canRevert || isBusy)
+        Button("Export App", action: onExport)
+            .disabled(!tool.isGenerationReady || isBusy)
+        Button("View Source", action: onViewSource)
+            .disabled(!tool.isGenerationReady)
+        Button("Show in Finder", action: onShowInFinder)
+        Divider()
+        if shouldDiscardFromMenu {
+            Button("Discard Edit", role: .destructive, action: onDiscard)
+                .disabled(isBusy)
+        } else {
+            Button("Delete App", role: .destructive, action: onDelete)
+                .disabled(isBusy)
+        }
+    }
+
+    private var editActionTitle: String {
+        isSelected ? "Exit Edit Mode" : "Edit App"
+    }
+
+    private var launchActionTitle: String {
+        if isGenerating {
+            return "Stop Generating"
+        }
+
+        if canContinue {
+            return "Continue Generating"
+        }
+
+        return "Launch App"
     }
 
     private func iconProgressOverlay(_ accessibilityLabel: String) -> some View {
@@ -190,6 +245,14 @@ struct ToolRowView: View {
         tool.generationState == .stopped || tool.generationState == .failed
     }
 
+    private var isGenerating: Bool {
+        tool.generationState == .generating
+    }
+
+    private var isBusy: Bool {
+        isRunning || isExporting || isRebuilding || isRestoring
+    }
+
     private var shouldDiscardFromMenu: Bool {
         canContinue && tool.generationMode == .edit
     }
@@ -216,7 +279,7 @@ struct ToolRowView: View {
             return AnyShapeStyle(.tint.opacity(0.14))
         }
 
-        if isExporting {
+        if isExporting || isRebuilding || isRestoring {
             return AnyShapeStyle(.tint.opacity(0.14))
         }
 
@@ -236,9 +299,14 @@ struct ToolRowView: View {
         isSelected: true,
         isRunning: false,
         isExporting: false,
+        isRebuilding: false,
+        isRestoring: false,
         canRevert: true,
         onSelect: {},
+        onEdit: {},
         onRun: {},
+        onRename: {},
+        onRebuild: {},
         onRevert: {},
         onExport: {},
         onShowInFinder: {},
@@ -382,49 +450,6 @@ private struct IconProgressBadge: View {
         }
         .onDisappear {
             isSpinning = false
-        }
-    }
-}
-
-private struct ToolRowClickHandlingView: NSViewRepresentable {
-    let ignoredLeadingWidth: CGFloat
-    let onSelect: () -> Void
-    let onRun: () -> Void
-
-    func makeNSView(context: Context) -> ClickHandlingNSView {
-        let view = ClickHandlingNSView()
-        view.ignoredLeadingWidth = ignoredLeadingWidth
-        view.onSelect = onSelect
-        view.onRun = onRun
-        return view
-    }
-
-    func updateNSView(_ nsView: ClickHandlingNSView, context: Context) {
-        nsView.ignoredLeadingWidth = ignoredLeadingWidth
-        nsView.onSelect = onSelect
-        nsView.onRun = onRun
-    }
-
-    final class ClickHandlingNSView: NSView {
-        var ignoredLeadingWidth: CGFloat = 0
-        var onSelect: (() -> Void)?
-        var onRun: (() -> Void)?
-
-        override var acceptsFirstResponder: Bool { true }
-
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            guard point.x >= ignoredLeadingWidth else {
-                return nil
-            }
-            return super.hitTest(point)
-        }
-
-        override func mouseDown(with event: NSEvent) {
-            if event.clickCount == 2 {
-                onRun?()
-            } else {
-                onSelect?()
-            }
         }
     }
 }

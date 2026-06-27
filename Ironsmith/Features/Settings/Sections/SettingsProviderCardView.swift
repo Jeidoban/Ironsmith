@@ -5,6 +5,8 @@ struct SettingsProviderCardView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     let provider: ProviderConfig
     let onEdit: () -> Void
+    @AppStorage(IronsmithPreferenceKeys.appleFoundationModelEnabled)
+    private var appleFoundationModelEnabled = false
     @State private var isShowingAllModels = false
 
     var body: some View {
@@ -82,7 +84,9 @@ struct SettingsProviderCardView: View {
         let models = inferenceStore.models(for: provider)
         switch provider.kind {
         case .local:
-            return localModelRows(models)
+            let localDisplayModels = inferenceStore.persistedModels
+                .filter { $0.providerIdentifier == provider.identifier }
+            return localModelRows(localDisplayModels)
         case .ollama:
             return ollamaModelRows(models)
         default:
@@ -103,7 +107,7 @@ struct SettingsProviderCardView: View {
                 ProviderModelRow(
                     identifier: $0.identifier,
                     displayName: $0.displayName,
-                    isInstalled: $0.installState == .installed || $0.installState == .builtIn
+                    isInstalled: isModelInstalledInProviderCard($0)
                 )
             }
         let storedIdentifiers = Set(storedRows.map(\.identifier))
@@ -124,6 +128,14 @@ struct SettingsProviderCardView: View {
                 }
                 return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
             }
+    }
+
+    private func isModelInstalledInProviderCard(_ model: ModelConfig) -> Bool {
+        if model.source == .appleFoundation {
+            return appleFoundationModelEnabled
+        }
+
+        return model.installState == .installed || model.installState == .builtIn
     }
 
     private func ollamaModelRows(_ models: [ModelConfig]) -> [ProviderModelRow] {

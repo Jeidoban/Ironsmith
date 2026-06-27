@@ -38,14 +38,19 @@ struct SettingsModelSelectionSectionView: View {
                 ModelLogoView(model: selectedModel, provider: selectedProvider, size: 28)
 
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(SettingsModelPresentation.displayName(for: selectedModel, provider: selectedProvider))
-                        .font(.body.weight(.medium))
-                        .lineLimit(1)
+                    Text(
+                        SettingsModelPresentation.displayName(
+                            for: selectedModel, provider: selectedProvider)
+                    )
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
 
-                    Text("\(selectedModel.providerLabel(provider: selectedProvider)) · \(selectedModel.sourceLabel(provider: selectedProvider))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    Text(
+                        "\(selectedModel.providerLabel(provider: selectedProvider)) · \(selectedModel.sourceLabel(provider: selectedProvider))"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 }
 
                 Button("Choose...") {
@@ -66,10 +71,15 @@ struct SettingsModelSelectionSectionView: View {
     }
 }
 
-private struct ModelPickerSheetView: View {
+struct ModelPickerSheetView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     @Environment(\.dismiss) private var dismiss
+    let size: ModelPickerSheetSize
     @State private var searchText = ""
+
+    init(size: ModelPickerSheetSize = .settings) {
+        self.size = size
+    }
 
     private var providersWithModels: [(provider: ProviderConfig, models: [ModelConfig])] {
         inferenceStore.providers.compactMap { provider in
@@ -78,7 +88,9 @@ private struct ModelPickerSheetView: View {
                 .filter(matchesSearch)
                 .sorted {
                     SettingsModelPresentation.displayName(for: $0, provider: provider)
-                        .localizedStandardCompare(SettingsModelPresentation.displayName(for: $1, provider: provider)) == .orderedAscending
+                        .localizedStandardCompare(
+                            SettingsModelPresentation.displayName(for: $1, provider: provider))
+                        == .orderedAscending
                 }
 
             guard !models.isEmpty else { return nil }
@@ -93,7 +105,9 @@ private struct ModelPickerSheetView: View {
                     ContentUnavailableView(
                         "No AI Models",
                         systemImage: "magnifyingglass",
-                        description: Text(searchText.isEmpty ? "No AI models are available." : "No AI models match your search.")
+                        description: Text(
+                            searchText.isEmpty
+                                ? "No AI models are available." : "No AI models match your search.")
                     )
                 } else {
                     List {
@@ -107,7 +121,8 @@ private struct ModelPickerSheetView: View {
                                         ModelPickerRowView(
                                             model: model,
                                             provider: item.provider,
-                                            isSelected: model.selectionIdentifier == inferenceStore.selectedModelID
+                                            isSelected: model.selectionIdentifier
+                                                == inferenceStore.selectedModelID
                                         )
                                     }
                                     .buttonStyle(.plain)
@@ -129,7 +144,14 @@ private struct ModelPickerSheetView: View {
                 }
             }
         }
-        .frame(minWidth: 560, minHeight: 520)
+        .frame(
+            width: size.width,
+            height: size.height
+        )
+        .frame(
+            minWidth: size.minWidth,
+            minHeight: size.minHeight
+        )
     }
 
     private func matchesSearch(_ model: ModelConfig) -> Bool {
@@ -139,6 +161,47 @@ private struct ModelPickerSheetView: View {
         return SettingsModelPresentation.displayName(for: model, provider: provider)
             .localizedCaseInsensitiveContains(trimmedSearch)
             || model.identifier.localizedCaseInsensitiveContains(trimmedSearch)
+    }
+}
+
+enum ModelPickerSheetSize {
+    case settings
+    case popover
+
+    var width: CGFloat? {
+        switch self {
+        case .settings:
+            return nil
+        case .popover:
+            return 380
+        }
+    }
+
+    var height: CGFloat? {
+        switch self {
+        case .settings:
+            return nil
+        case .popover:
+            return 480
+        }
+    }
+
+    var minWidth: CGFloat? {
+        switch self {
+        case .settings:
+            return 560
+        case .popover:
+            return nil
+        }
+    }
+
+    var minHeight: CGFloat? {
+        switch self {
+        case .settings:
+            return 520
+        case .popover:
+            return nil
+        }
     }
 }
 
@@ -193,7 +256,7 @@ private struct ModelPickerRowView: View {
 
     private var estimatedCreditsText: String? {
         guard provider.kind == .ironsmith,
-              let estimatedToolCredits = model.estimatedToolCredits
+            let estimatedToolCredits = model.estimatedToolCredits
         else {
             return nil
         }
@@ -204,12 +267,13 @@ private struct ModelPickerRowView: View {
     }
 }
 
-private extension ModelConfig {
-    func providerLabel(provider: ProviderConfig?) -> String {
-        source == .appleFoundation ? "Apple Foundation" : (provider?.displayName ?? "Unknown Provider")
+extension ModelConfig {
+    fileprivate func providerLabel(provider: ProviderConfig?) -> String {
+        source == .appleFoundation
+            ? "Apple Foundation" : (provider?.displayName ?? "Unknown Provider")
     }
 
-    func sourceLabel(provider: ProviderConfig?) -> String {
+    fileprivate func sourceLabel(provider: ProviderConfig?) -> String {
         switch source {
         case .appleFoundation: "Local"
         case .mlx: "MLX"
