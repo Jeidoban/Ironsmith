@@ -19,18 +19,10 @@ enum ModelInstallState: String, Codable, CaseIterable {
     case failed
 }
 
-typealias ModelConfig = IronsmithSchemaV1.ModelConfig
+typealias ModelConfig = IronsmithSchemaV2.ModelConfig
 
 extension ModelConfig {
     static let appleFoundationIdentifier = "apple.foundation"
-
-    var installState: ModelInstallState {
-        get {
-            if source == .appleFoundation { return .builtIn }
-            return ModelInstallState(rawValue: installStateRaw) ?? .downloadable
-        }
-        set { installStateRaw = newValue.rawValue }
-    }
 
     var selectionIdentifier: String {
         "\(providerIdentifier)::\(identifier)"

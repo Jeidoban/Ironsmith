@@ -58,6 +58,10 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
         }
     }
 
+    func show() {
+        showPopover()
+    }
+
     private func showPopover() {
         guard let button = statusItem.button else { return }
 

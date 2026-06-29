@@ -87,6 +87,7 @@ nonisolated struct IronsmithAccountUser: Decodable, Equatable, Sendable {
 nonisolated struct IronsmithAccountProfile: Decodable, Equatable, Sendable {
     let id: String
     let email: String?
+    let displayName: String?
 }
 
 nonisolated struct IronsmithCreditSummary: Decodable, Equatable, Sendable {

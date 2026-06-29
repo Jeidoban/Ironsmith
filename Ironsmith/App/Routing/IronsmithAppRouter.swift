@@ -4,12 +4,19 @@ import Observation
 
 enum IronsmithAppRoute: Equatable {
     case settings(IronsmithSettingsRoute)
+    case store(IronsmithStoreRoute)
+    case toolLibrary(IronsmithToolLibraryRoute)
 
     init?(url: URL) {
-        guard let settingsRoute = IronsmithSettingsRoute(url: url) else {
-            return nil
+        if let settingsRoute = IronsmithSettingsRoute(url: url) {
+            self = .settings(settingsRoute)
+            return
         }
-        self = .settings(settingsRoute)
+        if let storeRoute = IronsmithStoreRoute(url: url) {
+            self = .store(storeRoute)
+            return
+        }
+        return nil
     }
 }
 
@@ -63,16 +70,55 @@ enum IronsmithSettingsRoute: Equatable {
     }
 }
 
+enum IronsmithStoreRoute: Equatable {
+    case root
+    case published
+    case publishTool(UUID)
+
+    init?(url: URL) {
+        guard url.scheme == IronsmithOAuthRedirect.appCallbackScheme else {
+            return nil
+        }
+
+        let host = url.host()
+        let path = url.pathComponents.filter { $0 != "/" }
+        guard host == "store" else {
+            return nil
+        }
+
+        switch path {
+        case []:
+            self = .root
+        case ["published"]:
+            self = .published
+        default:
+            return nil
+        }
+    }
+}
+
+enum IronsmithToolLibraryRoute: Equatable {
+    case selectTool(id: UUID, focusPrompt: Bool)
+}
+
 @MainActor
 @Observable
 final class IronsmithRouteStore {
     private let openSettingsWindow: @MainActor @Sendable () -> Void
+    private let openStoreWindow: @MainActor @Sendable () -> Void
+    private let openToolLibraryPopover: @MainActor @Sendable () -> Void
     private(set) var pendingSettingsRoute: IronsmithSettingsRoute?
+    private(set) var pendingStoreRoute: IronsmithStoreRoute?
+    private(set) var pendingToolLibraryRoute: IronsmithToolLibraryRoute?
 
     init(
-        openSettingsWindow: @escaping @MainActor @Sendable () -> Void
+        openSettingsWindow: @escaping @MainActor @Sendable () -> Void,
+        openStoreWindow: @escaping @MainActor @Sendable () -> Void = {},
+        openToolLibraryPopover: @escaping @MainActor @Sendable () -> Void = {}
     ) {
         self.openSettingsWindow = openSettingsWindow
+        self.openStoreWindow = openStoreWindow
+        self.openToolLibraryPopover = openToolLibraryPopover
     }
 
     func open(_ route: IronsmithAppRoute) {
@@ -80,6 +126,12 @@ final class IronsmithRouteStore {
         case .settings(let settingsRoute):
             pendingSettingsRoute = settingsRoute
             openSettingsWindow()
+        case .store(let storeRoute):
+            pendingStoreRoute = storeRoute
+            openStoreWindow()
+        case .toolLibrary(let toolLibraryRoute):
+            pendingToolLibraryRoute = toolLibraryRoute
+            openToolLibraryPopover()
         }
     }
 
@@ -95,5 +147,15 @@ final class IronsmithRouteStore {
     func consumeSettingsRoute() -> IronsmithSettingsRoute? {
         defer { pendingSettingsRoute = nil }
         return pendingSettingsRoute
+    }
+
+    func consumeStoreRoute() -> IronsmithStoreRoute? {
+        defer { pendingStoreRoute = nil }
+        return pendingStoreRoute
+    }
+
+    func consumeToolLibraryRoute() -> IronsmithToolLibraryRoute? {
+        defer { pendingToolLibraryRoute = nil }
+        return pendingToolLibraryRoute
     }
 }

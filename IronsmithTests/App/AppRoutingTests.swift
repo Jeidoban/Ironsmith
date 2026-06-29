@@ -53,6 +53,15 @@ struct AppRoutingTests {
     }
 
     @Test
+    func appRouteParsesStoreURLs() throws {
+        let rootURL = try #require(URL(string: "com.jeidoban.ironsmith://store"))
+        let publishedURL = try #require(URL(string: "com.jeidoban.ironsmith://store/published"))
+
+        #expect(IronsmithAppRoute(url: rootURL) == .store(.root))
+        #expect(IronsmithAppRoute(url: publishedURL) == .store(.published))
+    }
+
+    @Test
     func appRouteIgnoresOAuthCallbackURL() throws {
         let url = try #require(URL(string: "com.jeidoban.ironsmith://auth/callback?code=test"))
 
@@ -84,6 +93,37 @@ struct AppRoutingTests {
         #expect(store.pendingSettingsRoute == .addProvider(initialKind: .openAI))
         #expect(store.consumeSettingsRoute() == .addProvider(initialKind: .openAI))
         #expect(store.pendingSettingsRoute == nil)
+    }
+
+    @MainActor
+    @Test
+    func routeStoreOpensStoreAndToolLibraryRoutes() throws {
+        let settingsCapture = SettingsWindowOpenCapture()
+        let storeCapture = SettingsWindowOpenCapture()
+        let popoverCapture = SettingsWindowOpenCapture()
+        let toolID = try #require(UUID(uuidString: "11111111-2222-4333-8444-555555555555"))
+        let store = IronsmithRouteStore(
+            openSettingsWindow: {
+                settingsCapture.open()
+            },
+            openStoreWindow: {
+                storeCapture.open()
+            },
+            openToolLibraryPopover: {
+                popoverCapture.open()
+            }
+        )
+
+        store.open(.store(.publishTool(toolID)))
+        store.open(.toolLibrary(.selectTool(id: toolID, focusPrompt: true)))
+
+        #expect(settingsCapture.openCount == 0)
+        #expect(storeCapture.openCount == 1)
+        #expect(popoverCapture.openCount == 1)
+        #expect(store.consumeStoreRoute() == .publishTool(toolID))
+        #expect(store.consumeToolLibraryRoute() == .selectTool(id: toolID, focusPrompt: true))
+        #expect(store.pendingStoreRoute == nil)
+        #expect(store.pendingToolLibraryRoute == nil)
     }
 
     @MainActor

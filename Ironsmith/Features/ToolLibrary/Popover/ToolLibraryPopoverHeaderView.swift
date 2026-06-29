@@ -8,6 +8,7 @@ struct ToolLibraryPopoverHeaderView: View {
     let isLoadingModels: Bool
     let selectedModelStatusText: String?
     let selectedIronsmithCreditWarningText: String?
+    let onOpenStore: () -> Void
     let onOpenSettings: () -> Void
     private static let issueReportURL = URL(
         string: "https://github.com/Jeidoban/Ironsmith/issues/new")!
@@ -29,6 +30,16 @@ struct ToolLibraryPopoverHeaderView: View {
                 .accessibilityIdentifier("app-update-button")
             }
 
+            Button(action: onOpenStore) {
+                Image(systemName: "shippingbox")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("App Store")
+            .accessibilityLabel("App Store")
+            .accessibilityIdentifier("app-store-button")
+
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 15, weight: .semibold))
@@ -40,6 +51,12 @@ struct ToolLibraryPopoverHeaderView: View {
             .accessibilityIdentifier("settings-button")
 
             Menu {
+                Button("Browse App Store...") {
+                    onOpenStore()
+                }
+
+                Divider()
+
                 Button("About Ironsmith") {
                     IronsmithAboutWindowController.shared.show()
                 }

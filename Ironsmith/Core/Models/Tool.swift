@@ -30,41 +30,9 @@ enum ToolGenerationMode: String, Codable, CaseIterable, Equatable, Sendable {
     case edit
 }
 
-typealias Tool = IronsmithSchemaV1.Tool
+typealias Tool = IronsmithSchemaV2.Tool
 
 extension Tool {
-    var generationState: ToolGenerationState {
-        get { ToolGenerationState(rawValue: generationStateRawValue) ?? .ready }
-        set { generationStateRawValue = newValue.rawValue }
-    }
-
-    var generationPhase: ToolGenerationPhase? {
-        get {
-            generationPhaseRawValue.flatMap(ToolGenerationPhase.init(rawValue:))
-        }
-        set {
-            generationPhaseRawValue = newValue?.rawValue
-        }
-    }
-
-    var generationMode: ToolGenerationMode? {
-        get {
-            generationModeRawValue.flatMap(ToolGenerationMode.init(rawValue:))
-        }
-        set {
-            generationModeRawValue = newValue?.rawValue
-        }
-    }
-
-    var appKind: ToolAppKind {
-        get {
-            ToolAppKind(rawValue: appKindRawValue) ?? .window
-        }
-        set {
-            appKindRawValue = newValue.rawValue
-        }
-    }
-
     var validatedMenuBarSystemImage: String {
         get {
             ToolMenuBarSymbol.validated(menuBarSystemImage)

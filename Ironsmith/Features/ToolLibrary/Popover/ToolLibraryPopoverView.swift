@@ -50,6 +50,9 @@ struct ToolLibraryPopoverView: View {
                 isLoadingModels: !inferenceStore.hasLoadedModels && !shouldForceNoModels,
                 selectedModelStatusText: selectedModelStatusText,
                 selectedIronsmithCreditWarningText: selectedIronsmithCreditWarningText,
+                onOpenStore: {
+                    routeStore.open(.store(.root))
+                },
                 onOpenSettings: {
                     routeStore.open(.settings(.root))
                 }
@@ -96,6 +99,9 @@ struct ToolLibraryPopoverView: View {
                                     Task {
                                         await toolLibraryStore.rebuild(tool, in: modelContext)
                                     }
+                                },
+                                onPublishToStore: {
+                                    routeStore.open(.store(.publishTool(tool.id)))
                                 },
                                 onRevert: {
                                     Task {
@@ -184,6 +190,7 @@ struct ToolLibraryPopoverView: View {
         .onAppear {
             toolLibraryStore.initializeNextGenerationSettingsIfNeeded(defaultGenerationSettings)
             presentWelcomeOnboardingIfNeeded()
+            applyPendingToolLibraryRoute()
         }
         .onDisappear {
             pauseWelcomeOnboardingPresentation()
@@ -193,6 +200,7 @@ struct ToolLibraryPopoverView: View {
                 hasCheckedWelcomeOnboarding = false
             }
             presentWelcomeOnboardingIfNeeded()
+            applyPendingToolLibraryRoute()
         }
         .onChange(of: menuBarPopoverPresentationStore.closeCount) { _, _ in
             pauseWelcomeOnboardingPresentation()
@@ -206,6 +214,7 @@ struct ToolLibraryPopoverView: View {
         }
         .onChange(of: tools.map(\.id)) { _, _ in
             toolLibraryStore.syncSelection(with: tools, defaultSettings: defaultGenerationSettings)
+            applyPendingToolLibraryRoute()
         }
         .onChange(of: defaultGenerationSettings) { _, settings in
             toolLibraryStore.initializeNextGenerationSettingsIfNeeded(settings)
@@ -484,6 +493,16 @@ struct ToolLibraryPopoverView: View {
         guard tool.isGenerationReady else { return }
         toolLibraryStore.selectForEditing(tool, defaultSettings: defaultGenerationSettings)
         isPromptFocused = true
+    }
+
+    private func applyPendingToolLibraryRoute() {
+        guard let route = routeStore.consumeToolLibraryRoute() else { return }
+        switch route {
+        case .selectTool(let id, let focusPrompt):
+            guard let tool = tools.first(where: { $0.id == id }) else { return }
+            toolLibraryStore.selectForEditing(tool, defaultSettings: defaultGenerationSettings)
+            isPromptFocused = focusPrompt
+        }
     }
 
     private func beginRenaming(_ tool: Tool) {

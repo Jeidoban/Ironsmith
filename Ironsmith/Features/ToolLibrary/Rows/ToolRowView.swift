@@ -19,6 +19,7 @@ struct ToolRowView: View {
     let onRun: () -> Void
     let onRename: () -> Void
     let onRebuild: () -> Void
+    let onPublishToStore: () -> Void
     let onRevert: () -> Void
     let onExport: () -> Void
     let onShowInFinder: () -> Void
@@ -160,6 +161,8 @@ struct ToolRowView: View {
             .disabled(isGenerating || isBusy)
         Button("Rebuild App", action: onRebuild)
             .disabled(!tool.isGenerationReady || isBusy)
+        Button(storePublishActionTitle, action: onPublishToStore)
+            .disabled(!tool.isGenerationReady || isBusy)
         Button("Go Back to Previous Version", action: onRevert)
             .disabled(!tool.isGenerationReady || !canRevert || isBusy)
         Button("Export App", action: onExport)
@@ -191,6 +194,10 @@ struct ToolRowView: View {
         }
 
         return "Launch App"
+    }
+
+    private var storePublishActionTitle: String {
+        tool.storeAppId == nil ? "Publish to App Store..." : "Update Store Version..."
     }
 
     private func iconProgressOverlay(_ accessibilityLabel: String) -> some View {
@@ -307,6 +314,7 @@ struct ToolRowView: View {
         onRun: {},
         onRename: {},
         onRebuild: {},
+        onPublishToStore: {},
         onRevert: {},
         onExport: {},
         onShowInFinder: {},
