@@ -1,6 +1,8 @@
 import AuthenticationServices
+import Foundation
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ToolLibraryPopoverView: View {
     @Environment(\.modelContext) private var modelContext
@@ -18,10 +20,22 @@ struct ToolLibraryPopoverView: View {
     #endif
     let appUpdateStore: AppUpdateStore
     private let welcomeOnboardingStore: WelcomeOnboardingStore
+    private let storeClient: IronsmithStoreClient
+    private let iconClient: ToolIconClient
     @State private var toolLibraryStore = ToolLibraryStore()
     @State private var toolPendingDeletion: Tool?
     @State private var toolPendingRename: Tool?
     @State private var pendingRenameName = ""
+    @State private var publishedStoreAppsByID: [String: StoreAppListing] = [:]
+    @State private var publishingToolID: UUID?
+    @State private var publishName = ""
+    @State private var publishDescription = ""
+    @State private var publishDisplayName = ""
+    @State private var publishScreenshotData: Data?
+    @State private var publishScreenshotName: String?
+    @State private var isShowingPublishSheet = false
+    @State private var isPublishingToStore = false
+    @State private var storeErrorMessage: String?
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
     @State private var isShowingModelPicker = false
@@ -32,14 +46,21 @@ struct ToolLibraryPopoverView: View {
     init() {
         appUpdateStore = AppUpdateStore()
         welcomeOnboardingStore = WelcomeOnboardingStore()
+        storeClient = .live
+        iconClient = .live()
     }
 
+    @MainActor
     init(
         appUpdateStore: AppUpdateStore,
-        welcomeOnboardingStore: WelcomeOnboardingStore = WelcomeOnboardingStore()
+        welcomeOnboardingStore: WelcomeOnboardingStore? = nil,
+        storeClient: IronsmithStoreClient? = nil,
+        iconClient: ToolIconClient = .noOp
     ) {
         self.appUpdateStore = appUpdateStore
-        self.welcomeOnboardingStore = welcomeOnboardingStore
+        self.welcomeOnboardingStore = welcomeOnboardingStore ?? WelcomeOnboardingStore()
+        self.storeClient = storeClient ?? .live
+        self.iconClient = iconClient
     }
 
     var body: some View {
@@ -78,6 +99,7 @@ struct ToolLibraryPopoverView: View {
                                 isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
                                 isRestoring: toolLibraryStore.restoringToolID == tool.id,
                                 canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
+                                canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
                                 onSelect: {
                                     toolLibraryStore.toggleSelection(
                                         for: tool,
@@ -101,7 +123,7 @@ struct ToolLibraryPopoverView: View {
                                     }
                                 },
                                 onPublishToStore: {
-                                    routeStore.open(.store(.publishTool(tool.id)))
+                                    routeStore.open(.toolLibrary(.publishTool(tool.id)))
                                 },
                                 onRevert: {
                                     Task {
@@ -152,6 +174,9 @@ struct ToolLibraryPopoverView: View {
             .task(id: restoreAvailabilityRefreshID) {
                 await toolLibraryStore.refreshRestoreAvailability(for: tools)
             }
+            .task(id: publishedStoreLinkRefreshID) {
+                await refreshPublishedStoreAppIDs()
+            }
 
             PromptComposerView(
                 prompt: $toolLibraryStore.prompt,
@@ -188,26 +213,19 @@ struct ToolLibraryPopoverView: View {
         .frame(width: 340, height: 520)
         .accessibilityIdentifier("tool-library-root")
         .onAppear {
-            toolLibraryStore.initializeNextGenerationSettingsIfNeeded(defaultGenerationSettings)
-            presentWelcomeOnboardingIfNeeded()
-            applyPendingToolLibraryRoute()
+            handlePopoverAppear()
         }
         .onDisappear {
             pauseWelcomeOnboardingPresentation()
         }
         .onChange(of: menuBarPopoverPresentationStore.showCount) { _, _ in
-            if shouldAlwaysShowWelcomeOnboarding {
-                hasCheckedWelcomeOnboarding = false
-            }
-            presentWelcomeOnboardingIfNeeded()
-            applyPendingToolLibraryRoute()
+            handlePopoverShow()
         }
         .onChange(of: menuBarPopoverPresentationStore.closeCount) { _, _ in
             pauseWelcomeOnboardingPresentation()
         }
         .task(id: selectedIronsmithRefreshID) {
-            guard selectedIronsmithRefreshID != nil else { return }
-            await inferenceStore.refreshIronsmithAccountSummary()
+            await refreshSelectedIronsmithAccountIfNeeded()
         }
         .task(id: inferenceStore.hasLoadedModels) {
             presentWelcomeOnboardingIfNeeded()
@@ -227,14 +245,7 @@ struct ToolLibraryPopoverView: View {
         }
         .alert(
             "Ironsmith couldn’t finish",
-            isPresented: Binding(
-                get: { toolLibraryStore.presentedErrorMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        toolLibraryStore.clearPresentedError()
-                    }
-                }
-            )
+            isPresented: toolLibraryErrorPresentedBinding
         ) {
             if toolLibraryStore.presentedErrorAction == .buyIronsmithCredits {
                 Button("Buy Credits") {
@@ -247,14 +258,7 @@ struct ToolLibraryPopoverView: View {
         }
         .alert(
             "AI Model Unavailable",
-            isPresented: Binding(
-                get: { inferenceStore.selectedModelFallbackMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        inferenceStore.clearSelectedModelFallbackMessage()
-                    }
-                }
-            )
+            isPresented: modelFallbackPresentedBinding
         ) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -262,18 +266,19 @@ struct ToolLibraryPopoverView: View {
         }
         .alert(
             "Sign In Failed",
-            isPresented: Binding(
-                get: { inferenceStore.presentedErrorMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        inferenceStore.clearPresentedError()
-                    }
-                }
-            )
+            isPresented: signInErrorPresentedBinding
         ) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(inferenceStore.presentedErrorMessage ?? "")
+        }
+        .alert(
+            "App Store",
+            isPresented: storeErrorPresentedBinding
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(storeErrorMessage ?? "")
         }
         .confirmationDialog(
             "Delete App?",
@@ -314,13 +319,246 @@ struct ToolLibraryPopoverView: View {
                 onComplete: completeWelcomeOnboarding
             )
         }
+        .sheet(isPresented: $isShowingPublishSheet) {
+            storePublishSheet
+        }
         .sheet(isPresented: $isShowingModelPicker) {
             ModelPickerSheetView(size: .popover)
         }
     }
 
+    @ViewBuilder
+    private var storePublishSheet: some View {
+        if let tool = tools.first(where: { $0.id == publishingToolID }) {
+            ToolLibraryStorePublishSheetView(
+                tool: tool,
+                isUpdatingPublishedListing: canUpdateStoreVersion(for: tool),
+                publishName: $publishName,
+                publishDescription: $publishDescription,
+                publishDisplayName: $publishDisplayName,
+                publishScreenshotName: publishScreenshotName,
+                needsDisplayName: needsStoreDisplayName,
+                isPublishing: isPublishingToStore,
+                onSaveDisplayName: {
+                    Task { await saveStoreDisplayName() }
+                },
+                onChooseScreenshot: { url in
+                    importStoreScreenshot(from: url)
+                },
+                onCancel: {
+                    isShowingPublishSheet = false
+                },
+                onPublish: {
+                    Task { await publishToolToStore(tool) }
+                }
+            )
+        }
+    }
+
+    private func refreshSelectedIronsmithAccountIfNeeded() async {
+        guard selectedIronsmithRefreshID != nil else { return }
+        await inferenceStore.refreshIronsmithAccountSummary()
+    }
+
+    private func handlePopoverAppear() {
+        toolLibraryStore.initializeNextGenerationSettingsIfNeeded(defaultGenerationSettings)
+        presentWelcomeOnboardingIfNeeded()
+        applyPendingToolLibraryRoute()
+    }
+
+    private func handlePopoverShow() {
+        if shouldAlwaysShowWelcomeOnboarding {
+            hasCheckedWelcomeOnboarding = false
+        }
+        presentWelcomeOnboardingIfNeeded()
+        applyPendingToolLibraryRoute()
+    }
+
     private var restoreAvailabilityRefreshID: [String] {
         tools.map { "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)" }
+    }
+
+    private var publishedStoreLinkRefreshID: String {
+        let session = inferenceStore.ironsmithSession == nil ? "signed-out" : "signed-in"
+        let links = tools
+            .compactMap { tool -> String? in
+                guard let storeId = tool.storeId,
+                      let storeAppId = tool.storeAppId
+                else { return nil }
+                return "\(storeId):\(storeAppId)"
+            }
+            .sorted()
+            .joined(separator: "|")
+        return "\(session)|\(links)"
+    }
+
+    private func canUpdateStoreVersion(for tool: Tool) -> Bool {
+        guard let storeAppId = tool.storeAppId else { return false }
+        return publishedStoreAppsByID[storeAppId] != nil
+    }
+
+    private func refreshPublishedStoreAppIDs() async {
+        guard inferenceStore.ironsmithSession != nil else {
+            publishedStoreAppsByID = [:]
+            return
+        }
+        let storeIDs = Set(
+            tools.compactMap { tool -> String? in
+                guard tool.storeAppId != nil else { return nil }
+                return tool.storeId
+            }
+        )
+        guard !storeIDs.isEmpty else {
+            publishedStoreAppsByID = [:]
+            return
+        }
+
+        do {
+            var ownedAppsByID: [String: StoreAppListing] = [:]
+            for storeID in storeIDs {
+                var cursor: String?
+                repeat {
+                    let page = try await storeClient.listApps(storeID, .mine, nil, cursor)
+                    for app in page.apps {
+                        ownedAppsByID[app.id] = app
+                    }
+                    cursor = page.nextCursor
+                } while cursor != nil
+            }
+            publishedStoreAppsByID = ownedAppsByID
+        } catch {
+            publishedStoreAppsByID = [:]
+        }
+    }
+
+    private var needsStoreDisplayName: Bool {
+        (inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
+    }
+
+    private func linkedPublishedApp(for tool: Tool) -> StoreAppListing? {
+        guard let storeAppId = tool.storeAppId else { return nil }
+        return publishedStoreAppsByID[storeAppId]
+    }
+
+    private func beginPublishingToStore(_ tool: Tool) async {
+        await inferenceStore.refreshIronsmithAccountSummary()
+        guard inferenceStore.ironsmithSession != nil else {
+            storeErrorMessage = "Sign in with Ironsmith before publishing to the App Store."
+            return
+        }
+        await refreshPublishedStoreAppIDs()
+        publishingToolID = tool.id
+        publishName = tool.name
+        publishDescription = linkedPublishedApp(for: tool)?.description ?? "Created with Ironsmith."
+        publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
+        publishScreenshotData = nil
+        publishScreenshotName = nil
+        isShowingPublishSheet = true
+    }
+
+    private func saveStoreDisplayName() async {
+        let trimmed = publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            _ = try await storeClient.updateProfileDisplayName(trimmed)
+            await inferenceStore.refreshIronsmithAccountSummary()
+            publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? trimmed
+        } catch {
+            storeErrorMessage = IronsmithErrorPresentation.message(for: error)
+                ?? error.localizedDescription
+        }
+    }
+
+    private func publishToolToStore(_ tool: Tool) async {
+        guard !isPublishingToStore else { return }
+        isPublishingToStore = true
+        defer { isPublishingToStore = false }
+
+        do {
+            if needsStoreDisplayName {
+                _ = try await storeClient.updateProfileDisplayName(
+                    publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+                await inferenceStore.refreshIronsmithAccountSummary()
+            }
+
+            let source = try String(
+                contentsOf: try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath),
+                encoding: .utf8
+            )
+            let settings = tool.generationSettings(defaults: defaultGenerationSettings)
+            let app: StoreAppListing
+            if let linkedApp = linkedPublishedApp(for: tool) {
+                app = try await storeClient.publishVersion(
+                    StoreVersionPublicationRequest(
+                        storeId: linkedApp.storeId,
+                        appId: linkedApp.id,
+                        sourceCode: source,
+                        generationSettings: settings,
+                        iconPNG: nil,
+                        screenshotPNGs: publishScreenshotData.map { [$0] } ?? [],
+                        replaceScreenshots: publishScreenshotData != nil,
+                        remixedFromVersionId: tool.storeRemixedFromVersionId
+                    )
+                )
+            } else {
+                _ = try await iconClient.ensureIconAssets(
+                    ToolIconRequest(displayName: tool.name, layout: tool.packageLayout)
+                )
+                let iconPNG = try Data(contentsOf: tool.packageLayout.cachedAppIconPNGURL)
+                app = try await storeClient.publishApp(
+                    StorePublicationRequest(
+                        storeId: tool.storeId ?? IronsmithStoreConstants.communityStoreId,
+                        name: publishName.trimmingCharacters(in: .whitespacesAndNewlines),
+                        description: publishDescription.trimmingCharacters(in: .whitespacesAndNewlines),
+                        sourceCode: source,
+                        generationSettings: settings,
+                        iconPNG: iconPNG,
+                        screenshotPNGs: publishScreenshotData.map { [$0] } ?? [],
+                        remixedFromVersionId: tool.storeRemixedFromVersionId
+                    )
+                )
+            }
+
+            applyPublishedStoreLinkage(app, to: tool)
+            try modelContext.save()
+            publishedStoreAppsByID[app.id] = app
+            isShowingPublishSheet = false
+            routeStore.open(.store(.publishedApp(app.id)))
+        } catch {
+            modelContext.rollback()
+            storeErrorMessage = IronsmithErrorPresentation.message(for: error)
+                ?? error.localizedDescription
+        }
+    }
+
+    private func importStoreScreenshot(from url: URL) {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        do {
+            publishScreenshotData = try Data(contentsOf: url)
+            publishScreenshotName = url.lastPathComponent
+        } catch {
+            storeErrorMessage = IronsmithErrorPresentation.message(for: error)
+                ?? error.localizedDescription
+        }
+    }
+
+    private func applyPublishedStoreLinkage(_ app: StoreAppListing, to tool: Tool) {
+        tool.storeId = app.storeId
+        tool.storeAppId = app.id
+        tool.storeVersionId = app.currentVersion.id
+        tool.storeVersionNumber = app.currentVersion.versionNumber
+        tool.storeSourceSha256 = app.currentVersion.sourceSha256
+        tool.storeImportedAt = Date()
+        tool.storeRemixedFromVersionId = app.currentVersion.remixedFromVersionId
+        tool.updatedAt = Date()
     }
 
     private var canSubmitPrompt: Bool {
@@ -502,6 +740,9 @@ struct ToolLibraryPopoverView: View {
             guard let tool = tools.first(where: { $0.id == id }) else { return }
             toolLibraryStore.selectForEditing(tool, defaultSettings: defaultGenerationSettings)
             isPromptFocused = focusPrompt
+        case .publishTool(let id):
+            guard let tool = tools.first(where: { $0.id == id }) else { return }
+            Task { await beginPublishingToStore(tool) }
         }
     }
 
@@ -598,6 +839,50 @@ struct ToolLibraryPopoverView: View {
         )
     }
 
+    private var toolLibraryErrorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { toolLibraryStore.presentedErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    toolLibraryStore.clearPresentedError()
+                }
+            }
+        )
+    }
+
+    private var modelFallbackPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { inferenceStore.selectedModelFallbackMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    inferenceStore.clearSelectedModelFallbackMessage()
+                }
+            }
+        )
+    }
+
+    private var signInErrorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { inferenceStore.presentedErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    inferenceStore.clearPresentedError()
+                }
+            }
+        )
+    }
+
+    private var storeErrorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { storeErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    storeErrorMessage = nil
+                }
+            }
+        )
+    }
+
     private var renameAlertBinding: Binding<Bool> {
         Binding(
             get: { toolPendingRename != nil },
@@ -607,6 +892,82 @@ struct ToolLibraryPopoverView: View {
                 }
             }
         )
+    }
+}
+
+private struct ToolLibraryStorePublishSheetView: View {
+    let tool: Tool
+    let isUpdatingPublishedListing: Bool
+    @Binding var publishName: String
+    @Binding var publishDescription: String
+    @Binding var publishDisplayName: String
+    let publishScreenshotName: String?
+    let needsDisplayName: Bool
+    let isPublishing: Bool
+    let onSaveDisplayName: () -> Void
+    let onChooseScreenshot: (URL) -> Void
+    let onCancel: () -> Void
+    let onPublish: () -> Void
+    @State private var isChoosingScreenshot = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(isUpdatingPublishedListing ? "Update Store Version" : "Publish to App Store")
+                .font(.headline)
+
+            if needsDisplayName {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Display Name", text: $publishDisplayName)
+                    Button("Save Display Name", action: onSaveDisplayName)
+                        .disabled(publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+
+            TextField("Name", text: $publishName)
+            TextField("Description", text: $publishDescription, axis: .vertical)
+                .lineLimit(3...5)
+
+            HStack {
+                Button {
+                    isChoosingScreenshot = true
+                } label: {
+                    Label("Screenshot", systemImage: "photo")
+                }
+                Text(publishScreenshotName ?? "No screenshot selected")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button(isUpdatingPublishedListing ? "Update" : "Publish", action: onPublish)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canPublish || isPublishing)
+                if isPublishing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+        }
+        .padding(18)
+        .frame(width: 340)
+        .fileImporter(
+            isPresented: $isChoosingScreenshot,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                onChooseScreenshot(url)
+            }
+        }
+    }
+
+    private var canPublish: Bool {
+        !publishName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !publishDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!needsDisplayName || !publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && !tool.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 

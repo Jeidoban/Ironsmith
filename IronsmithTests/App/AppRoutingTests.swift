@@ -114,14 +114,14 @@ struct AppRoutingTests {
             }
         )
 
-        store.open(.store(.publishTool(toolID)))
-        store.open(.toolLibrary(.selectTool(id: toolID, focusPrompt: true)))
+        store.open(.store(.publishedApp("app-1")))
+        store.open(.toolLibrary(.publishTool(toolID)))
 
         #expect(settingsCapture.openCount == 0)
         #expect(storeCapture.openCount == 1)
         #expect(popoverCapture.openCount == 1)
-        #expect(store.consumeStoreRoute() == .publishTool(toolID))
-        #expect(store.consumeToolLibraryRoute() == .selectTool(id: toolID, focusPrompt: true))
+        #expect(store.consumeStoreRoute() == .publishedApp("app-1"))
+        #expect(store.consumeToolLibraryRoute() == .publishTool(toolID))
         #expect(store.pendingStoreRoute == nil)
         #expect(store.pendingToolLibraryRoute == nil)
     }

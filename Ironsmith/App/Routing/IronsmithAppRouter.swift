@@ -73,7 +73,7 @@ enum IronsmithSettingsRoute: Equatable {
 enum IronsmithStoreRoute: Equatable {
     case root
     case published
-    case publishTool(UUID)
+    case publishedApp(String)
 
     init?(url: URL) {
         guard url.scheme == IronsmithOAuthRedirect.appCallbackScheme else {
@@ -99,6 +99,7 @@ enum IronsmithStoreRoute: Equatable {
 
 enum IronsmithToolLibraryRoute: Equatable {
     case selectTool(id: UUID, focusPrompt: Bool)
+    case publishTool(UUID)
 }
 
 @MainActor

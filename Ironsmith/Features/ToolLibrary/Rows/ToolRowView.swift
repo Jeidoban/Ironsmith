@@ -14,6 +14,7 @@ struct ToolRowView: View {
     let isRebuilding: Bool
     let isRestoring: Bool
     let canRevert: Bool
+    let canUpdateStoreVersion: Bool
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onRun: () -> Void
@@ -197,7 +198,7 @@ struct ToolRowView: View {
     }
 
     private var storePublishActionTitle: String {
-        tool.storeAppId == nil ? "Publish to App Store..." : "Update Store Version..."
+        canUpdateStoreVersion ? "Update Store Version..." : "Publish to App Store..."
     }
 
     private func iconProgressOverlay(_ accessibilityLabel: String) -> some View {
@@ -309,6 +310,7 @@ struct ToolRowView: View {
         isRebuilding: false,
         isRestoring: false,
         canRevert: true,
+        canUpdateStoreVersion: false,
         onSelect: {},
         onEdit: {},
         onRun: {},

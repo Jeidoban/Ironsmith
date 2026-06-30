@@ -10,6 +10,8 @@ struct StoreToolImportRequest: Sendable {
     let app: StoreAppListing
     let version: StoreVersionDownload
     let mode: StoreToolImportMode
+    var isOwnApp = false
+    var initialGenerationState: ToolGenerationState = .ready
 }
 
 struct StoreToolImportResult {
@@ -70,6 +72,9 @@ extension StoreToolImportClient {
             try await cacheIconIfAvailable(app: request.app, layout: layout)
 
             let now = Date()
+            let generationPhase: ToolGenerationPhase = request.initialGenerationState == .generating
+                ? .packaging
+                : .completed
             let tool = Tool(
                 name: displayName,
                 executableName: executableName,
@@ -79,17 +84,15 @@ extension StoreToolImportClient {
                 sandboxPermissions: settings.sandboxPermissions,
                 resourcePermissions: settings.resourcePermissions,
                 packageRootPath: packageRootURL.path,
-                generationState: .ready,
-                generationPhase: .completed,
+                generationState: request.initialGenerationState,
+                generationPhase: generationPhase,
                 storeId: request.app.storeId,
-                storeAppId: request.mode == .get ? request.app.id : nil,
-                storeVersionId: request.mode == .get ? request.version.id : nil,
-                storeVersionNumber: request.mode == .get ? request.version.versionNumber : nil,
+                storeAppId: request.app.id,
+                storeVersionId: request.version.id,
+                storeVersionNumber: request.version.versionNumber,
                 storeSourceSha256: request.version.sourceSha256,
                 storeImportedAt: now,
-                storeRemixedFromVersionId: request.mode == .remix
-                    ? request.version.id
-                    : request.version.remixedFromVersionId,
+                storeRemixedFromVersionId: request.isOwnApp ? nil : request.version.id,
                 createdAt: now,
                 updatedAt: now
             )

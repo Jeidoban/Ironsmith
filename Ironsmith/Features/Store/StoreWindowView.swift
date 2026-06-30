@@ -25,6 +25,28 @@ enum StoreSidebarTab: String, CaseIterable, Identifiable {
     }
 }
 
+enum StoreAppInstallDisposition {
+    case openExisting(Tool)
+    case updateExisting(Tool)
+    case createCopy
+
+    var buttonTitle: String {
+        switch self {
+        case .openExisting: "Open"
+        case .updateExisting: "Update"
+        case .createCopy: "Get"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .openExisting: "arrow.forward.circle"
+        case .updateExisting: "arrow.triangle.2.circlepath"
+        case .createCopy: "arrow.down.circle"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class StoreWindowStore {
@@ -147,42 +169,218 @@ final class StoreWindowStore {
         case .published:
             selectedTab = .published
             Task { await refreshPublished() }
-        case .publishTool(let id):
-            guard let tool = tools.first(where: { $0.id == id }) else { return }
-            Task { await beginPublishing(tool, inferenceStore: inferenceStore) }
+        case .publishedApp(let appId):
+            selectedTab = .published
+            Task {
+                await refreshPublished()
+                if let app = publishedApps.first(where: { $0.id == appId }) {
+                    select(app)
+                }
+            }
         }
+    }
+
+    func isOwnPublishedApp(_ app: StoreAppListing) -> Bool {
+        publishedApps.contains { $0.id == app.id }
+    }
+
+    func installDisposition(for app: StoreAppListing, tools: [Tool]) -> StoreAppInstallDisposition {
+        let linkedTools = tools.filter { $0.storeAppId == app.id }
+        if let currentTool = linkedTools.first(where: { localSourceHash(for: $0) == app.currentVersion.sourceSha256 }) {
+            return .openExisting(currentTool)
+        }
+        if let updatableTool = linkedTools.first(where: { tool in
+            guard let importedHash = tool.storeSourceSha256,
+                  importedHash != app.currentVersion.sourceSha256
+            else { return false }
+            return localSourceHash(for: tool) == importedHash
+        }) {
+            return .updateExisting(updatableTool)
+        }
+        return .createCopy
     }
 
     func install(
         _ app: StoreAppListing,
         mode: StoreToolImportMode,
+        tools: [Tool],
         modelContext: ModelContext,
-        routeStore: IronsmithRouteStore
+        routeStore: IronsmithRouteStore,
+        inferenceStore: InferenceStore
     ) async {
         guard workingAppID == nil else { return }
         workingAppID = app.id
         defer { workingAppID = nil }
         do {
+            if inferenceStore.ironsmithSession != nil {
+                await refreshPublished()
+            }
+            let isOwnApp = isOwnPublishedApp(app)
+            if mode == .get {
+                switch installDisposition(for: app, tools: tools) {
+                case .openExisting(let tool):
+                    routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+                    return
+                case .updateExisting(let tool):
+                    try await updateExistingTool(
+                        tool,
+                        from: app,
+                        isOwnApp: isOwnApp,
+                        modelContext: modelContext,
+                        routeStore: routeStore,
+                        inferenceStore: inferenceStore
+                    )
+                    return
+                case .createCopy:
+                    break
+                }
+            }
             let version = try await client.fetchVersion(
                 app.storeId,
                 app.id,
                 app.currentVersion.versionNumber
             )
             let result = try await importClient.importTool(
-                StoreToolImportRequest(app: app, version: version, mode: mode),
+                StoreToolImportRequest(
+                    app: app,
+                    version: version,
+                    mode: mode,
+                    isOwnApp: isOwnApp,
+                    initialGenerationState: mode == .get ? .generating : .ready
+                ),
                 modelContext
             )
-            if mode == .get {
-                try await buildClient.buildTool(result.tool)
-            }
             routeStore.open(
                 .toolLibrary(
                     .selectTool(id: result.tool.id, focusPrompt: mode == .remix)
                 )
             )
+            if mode == .get {
+                do {
+                    try await buildClient.buildTool(result.tool)
+                    result.tool.generationState = .ready
+                    result.tool.generationPhase = .completed
+                    result.tool.generationErrorSummary = nil
+                    result.tool.updatedAt = Date()
+                    try modelContext.save()
+                } catch {
+                    result.tool.generationState = .failed
+                    result.tool.generationErrorSummary = error.localizedDescription
+                    result.tool.updatedAt = Date()
+                    try? modelContext.save()
+                    throw error
+                }
+            }
         } catch {
             present(error)
         }
+    }
+
+    private func updateExistingTool(
+        _ tool: Tool,
+        from app: StoreAppListing,
+        isOwnApp: Bool,
+        modelContext: ModelContext,
+        routeStore: IronsmithRouteStore,
+        inferenceStore: InferenceStore
+    ) async throws {
+        let defaults = ToolLibraryStore.defaultGenerationSettings(from: inferenceStore.generationPreferences)
+        let previousSettings = tool.generationSettings(defaults: defaults)
+        let previousState = tool.generationState
+        let previousPhase = tool.generationPhase
+        let previousError = tool.generationErrorSummary
+        let previousLinkage = StoreToolLinkageSnapshot(tool: tool)
+        let layout = tool.packageLayout
+        let backup = try ToolVersionBackupClient.live.stageCurrentVersion(
+            layout.packageRootURL,
+            tool.contentViewSourcePath,
+            previousSettings
+        )
+
+        tool.generationState = .generating
+        tool.generationPhase = .packaging
+        tool.generationErrorSummary = nil
+        tool.updatedAt = Date()
+        try modelContext.save()
+        routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+
+        do {
+            let version = try await client.fetchVersion(
+                app.storeId,
+                app.id,
+                app.currentVersion.versionNumber
+            )
+            try IronsmithStoreClient.verifySourceHash(version)
+            try writeStoreVersion(version, app: app, isOwnApp: isOwnApp, to: tool)
+            try modelContext.save()
+            try await buildClient.buildTool(tool)
+            try ToolVersionBackupClient.live.promoteStagedVersion(backup)
+            tool.generationState = .ready
+            tool.generationPhase = .completed
+            tool.generationErrorSummary = nil
+            tool.updatedAt = Date()
+            try modelContext.save()
+        } catch {
+            try? restoreToolSource(
+                from: backup,
+                to: tool,
+                settings: previousSettings
+            )
+            try? ToolVersionBackupClient.live.discardStagedVersion(backup)
+            previousLinkage.apply(to: tool)
+            tool.applyGenerationSettings(previousSettings)
+            tool.generationState = previousState
+            tool.generationPhase = previousPhase
+            tool.generationErrorSummary = previousError
+            tool.updatedAt = Date()
+            try? modelContext.save()
+            throw error
+        }
+    }
+
+    private func writeStoreVersion(
+        _ version: StoreVersionDownload,
+        app: StoreAppListing,
+        isOwnApp: Bool,
+        to tool: Tool
+    ) throws {
+        let layout = tool.packageLayout
+        let settings = version.generationSettings.toolSettings
+        try FileManager.default.createDirectory(
+            at: layout.sourceDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try version.sourceCode.write(
+            to: try layout.packageFileURL(for: layout.contentViewSourcePath),
+            atomically: true,
+            encoding: .utf8
+        )
+        try layout.fixedAppEntrySource(displayName: tool.name, settings: settings).write(
+            to: try layout.packageFileURL(for: layout.appEntrySourcePath),
+            atomically: true,
+            encoding: .utf8
+        )
+        tool.applyGenerationSettings(settings)
+        applyStoreLinkage(app, version: version, isOwnApp: isOwnApp, to: tool)
+    }
+
+    private func restoreToolSource(
+        from backup: ToolContentVersionBackup,
+        to tool: Tool,
+        settings: ToolGenerationSettings
+    ) throws {
+        let layout = tool.packageLayout
+        let previousSource = try String(contentsOf: backup.pendingURL, encoding: .utf8)
+        try previousSource.write(
+            to: try layout.packageFileURL(for: layout.contentViewSourcePath),
+            atomically: true,
+            encoding: .utf8
+        )
+        try layout.fixedAppEntrySource(displayName: tool.name, settings: settings).write(
+            to: try layout.packageFileURL(for: layout.appEntrySourcePath),
+            atomically: true,
+            encoding: .utf8
+        )
     }
 
     func beginPublishing(_ tool: Tool, inferenceStore: InferenceStore) async {
@@ -193,6 +391,7 @@ final class StoreWindowStore {
         }
         publishingToolID = tool.id
         publishName = tool.name
+        await refreshPublished()
         publishDescription = linkedPublishedApp(for: tool)?.description ?? "Created with Ironsmith."
         publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
         publishScreenshotData = nil
@@ -233,12 +432,11 @@ final class StoreWindowStore {
                 defaults: ToolLibraryStore.defaultGenerationSettings(from: inferenceStore.generationPreferences)
             )
             let app: StoreAppListing
-            if let storeId = tool.storeId,
-               let appId = tool.storeAppId {
+            if let linkedApp = linkedPublishedApp(for: tool) {
                 app = try await client.publishVersion(
                     StoreVersionPublicationRequest(
-                        storeId: storeId,
-                        appId: appId,
+                        storeId: linkedApp.storeId,
+                        appId: linkedApp.id,
                         sourceCode: source,
                         generationSettings: settings,
                         iconPNG: nil,
@@ -254,7 +452,7 @@ final class StoreWindowStore {
                 let iconPNG = try Data(contentsOf: tool.packageLayout.cachedAppIconPNGURL)
                 app = try await client.publishApp(
                     StorePublicationRequest(
-                        storeId: tool.storeId ?? selectedStoreId,
+                        storeId: selectedStoreId,
                         name: publishName.trimmingCharacters(in: .whitespacesAndNewlines),
                         description: publishDescription.trimmingCharacters(in: .whitespacesAndNewlines),
                         sourceCode: source,
@@ -321,12 +519,20 @@ final class StoreWindowStore {
         }
     }
 
-    private func linkedPublishedApp(for tool: Tool) -> StoreAppListing? {
+    func canUpdatePublishedListing(for tool: Tool) -> Bool {
+        linkedPublishedApp(for: tool) != nil
+    }
+
+    func linkedPublishedApp(for tool: Tool) -> StoreAppListing? {
         guard let storeAppId = tool.storeAppId else { return nil }
         return publishedApps.first { $0.id == storeAppId }
     }
 
     private func applyStoreLinkage(_ app: StoreAppListing, to tool: Tool) {
+        applyPublishedStoreLinkage(app, to: tool)
+    }
+
+    private func applyPublishedStoreLinkage(_ app: StoreAppListing, to tool: Tool) {
         tool.storeId = app.storeId
         tool.storeAppId = app.id
         tool.storeVersionId = app.currentVersion.id
@@ -335,6 +541,34 @@ final class StoreWindowStore {
         tool.storeImportedAt = Date()
         tool.storeRemixedFromVersionId = app.currentVersion.remixedFromVersionId
         tool.updatedAt = Date()
+    }
+
+    private func applyStoreLinkage(
+        _ app: StoreAppListing,
+        version: StoreVersionDownload,
+        isOwnApp: Bool,
+        to tool: Tool
+    ) {
+        tool.storeId = app.storeId
+        tool.storeAppId = app.id
+        tool.storeVersionId = version.id
+        tool.storeVersionNumber = version.versionNumber
+        tool.storeSourceSha256 = version.sourceSha256
+        tool.storeImportedAt = Date()
+        tool.storeRemixedFromVersionId = isOwnApp ? nil : version.id
+        tool.updatedAt = Date()
+    }
+
+    private func localSourceHash(for tool: Tool) -> String? {
+        guard
+            let source = try? String(
+                contentsOf: try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath),
+                encoding: .utf8
+            )
+        else {
+            return nil
+        }
+        return IronsmithStoreClient.sha256Hex(for: source)
     }
 
     private func replacePublishedApp(_ app: StoreAppListing) {
@@ -366,6 +600,36 @@ final class StoreWindowStore {
     }
 }
 
+private struct StoreToolLinkageSnapshot {
+    let storeId: String?
+    let storeAppId: String?
+    let storeVersionId: String?
+    let storeVersionNumber: Int?
+    let storeSourceSha256: String?
+    let storeImportedAt: Date?
+    let storeRemixedFromVersionId: String?
+
+    init(tool: Tool) {
+        storeId = tool.storeId
+        storeAppId = tool.storeAppId
+        storeVersionId = tool.storeVersionId
+        storeVersionNumber = tool.storeVersionNumber
+        storeSourceSha256 = tool.storeSourceSha256
+        storeImportedAt = tool.storeImportedAt
+        storeRemixedFromVersionId = tool.storeRemixedFromVersionId
+    }
+
+    func apply(to tool: Tool) {
+        tool.storeId = storeId
+        tool.storeAppId = storeAppId
+        tool.storeVersionId = storeVersionId
+        tool.storeVersionNumber = storeVersionNumber
+        tool.storeSourceSha256 = storeSourceSha256
+        tool.storeImportedAt = storeImportedAt
+        tool.storeRemixedFromVersionId = storeRemixedFromVersionId
+    }
+}
+
 struct StoreWindowView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(InferenceStore.self) private var inferenceStore
@@ -390,20 +654,29 @@ struct StoreWindowView: View {
                 StorePublishedListView(
                     store: store,
                     tools: tools,
-                    inferenceStore: inferenceStore
+                    inferenceStore: inferenceStore,
+                    onUpdateVersion: { tool in
+                        routeStore.open(.toolLibrary(.publishTool(tool.id)))
+                    }
                 )
             }
         } detail: {
             StoreAppDetailView(
                 app: store.selectedApp,
                 isWorking: store.workingAppID == store.selectedApp?.id,
+                installDisposition: store.selectedApp.map {
+                    store.installDisposition(for: $0, tools: tools)
+                } ?? .createCopy,
+                canRemix: store.selectedApp.map { !store.isOwnPublishedApp($0) } ?? false,
                 onGet: { app in
                     Task {
                         await store.install(
                             app,
                             mode: .get,
+                            tools: tools,
                             modelContext: modelContext,
-                            routeStore: routeStore
+                            routeStore: routeStore,
+                            inferenceStore: inferenceStore
                         )
                     }
                 },
@@ -412,8 +685,10 @@ struct StoreWindowView: View {
                         await store.install(
                             app,
                             mode: .remix,
+                            tools: tools,
                             modelContext: modelContext,
-                            routeStore: routeStore
+                            routeStore: routeStore,
+                            inferenceStore: inferenceStore
                         )
                     }
                 }
@@ -449,24 +724,6 @@ struct StoreWindowView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(store.errorMessage ?? "")
-        }
-        .sheet(isPresented: $store.isShowingPublishSheet) {
-            if let tool = tools.first(where: { $0.id == store.publishingToolID }) {
-                StorePublishSheetView(
-                    store: store,
-                    tool: tool,
-                    inferenceStore: inferenceStore,
-                    onPublish: {
-                        Task {
-                            await store.publish(
-                                tool,
-                                modelContext: modelContext,
-                                inferenceStore: inferenceStore
-                            )
-                        }
-                    }
-                )
-            }
         }
     }
 
@@ -539,6 +796,7 @@ private struct StorePublishedListView: View {
     @Bindable var store: StoreWindowStore
     let tools: [Tool]
     let inferenceStore: InferenceStore
+    let onUpdateVersion: (Tool) -> Void
 
     var body: some View {
         List(selection: $store.selectedAppID) {
@@ -562,9 +820,7 @@ private struct StorePublishedListView: View {
                             store.select(app)
                         },
                         onUpdateVersion: { tool in
-                            Task {
-                                await store.beginPublishing(tool, inferenceStore: inferenceStore)
-                            }
+                            onUpdateVersion(tool)
                         },
                         onToggleStatus: {
                             Task {
@@ -668,6 +924,8 @@ private struct StorePublishedRowView: View {
 private struct StoreAppDetailView: View {
     let app: StoreAppListing?
     let isWorking: Bool
+    let installDisposition: StoreAppInstallDisposition
+    let canRemix: Bool
     let onGet: (StoreAppListing) -> Void
     let onRemix: (StoreAppListing) -> Void
 
@@ -725,17 +983,19 @@ private struct StoreAppDetailView: View {
                             Button {
                                 onGet(app)
                             } label: {
-                                Label("Get", systemImage: "arrow.down.circle")
+                                Label(installDisposition.buttonTitle, systemImage: installDisposition.systemImage)
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(isWorking)
 
-                            Button {
-                                onRemix(app)
-                            } label: {
-                                Label("Remix", systemImage: "wand.and.sparkles")
+                            if canRemix {
+                                Button {
+                                    onRemix(app)
+                                } label: {
+                                    Label("Remix", systemImage: "wand.and.sparkles")
+                                }
+                                .disabled(isWorking)
                             }
-                            .disabled(isWorking)
 
                             if isWorking {
                                 ProgressView()
@@ -799,7 +1059,7 @@ private struct StorePublishSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(tool.storeAppId == nil ? "Publish to App Store" : "Update Store Version")
+            Text(isUpdatingPublishedListing ? "Update Store Version" : "Publish to App Store")
                 .font(.title3.weight(.semibold))
 
             if needsDisplayName {
@@ -834,7 +1094,7 @@ private struct StorePublishSheetView: View {
                 Button("Cancel") {
                     store.isShowingPublishSheet = false
                 }
-                Button(tool.storeAppId == nil ? "Publish" : "Update") {
+                Button(isUpdatingPublishedListing ? "Update" : "Publish") {
                     onPublish()
                 }
                 .buttonStyle(.borderedProminent)
@@ -862,6 +1122,10 @@ private struct StorePublishSheetView: View {
         (inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .isEmpty
+    }
+
+    private var isUpdatingPublishedListing: Bool {
+        store.canUpdatePublishedListing(for: tool)
     }
 
     private var canPublish: Bool {
