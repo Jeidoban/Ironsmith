@@ -31,14 +31,17 @@ extension StoreToolImportClient {
         live(toolsDirectoryURL: IronsmithPaths.toolsDirectory)
     }
 
-    static func live(toolsDirectoryURL: URL) -> Self {
+    static func live(
+        toolsDirectoryURL: URL,
+        packageMaterializer: ToolPackageMaterializer = .live
+    ) -> Self {
         StoreToolImportClient { request, modelContext in
             try IronsmithStoreClient.verifySourceHash(request.version)
 
             let displayName = request.mode == .remix
                 ? "\(request.app.name) Remix"
                 : request.app.name
-            let packageRootURL = try makeUniquePackageRoot(
+            let packageRootURL = try packageMaterializer.makeUniquePackageRoot(
                 displayName: displayName,
                 toolsDirectoryURL: toolsDirectoryURL
             )
@@ -46,28 +49,11 @@ extension StoreToolImportClient {
             let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
             let settings = request.version.generationSettings.toolSettings
 
-            try FileManager.default.createDirectory(
-                at: layout.sourceDirectoryURL,
-                withIntermediateDirectories: true
-            )
-            try FileManager.default.createDirectory(
-                at: layout.packageMetadataDirectoryURL,
-                withIntermediateDirectories: true
-            )
-            try layout.packageManifestContent().write(
-                to: layout.packageManifestURL,
-                atomically: true,
-                encoding: .utf8
-            )
-            try layout.fixedAppEntrySource(displayName: displayName, settings: settings).write(
-                to: try layout.packageFileURL(for: layout.appEntrySourcePath),
-                atomically: true,
-                encoding: .utf8
-            )
-            try request.version.sourceCode.write(
-                to: try layout.packageFileURL(for: layout.contentViewSourcePath),
-                atomically: true,
-                encoding: .utf8
+            try packageMaterializer.materializePackage(
+                layout: layout,
+                displayName: displayName,
+                settings: settings,
+                contentViewSource: request.version.sourceCode
             )
             try await cacheIconIfAvailable(app: request.app, layout: layout)
 
@@ -107,24 +93,6 @@ extension StoreToolImportClient {
 
             return StoreToolImportResult(tool: tool, mode: request.mode)
         }
-    }
-
-    private static func makeUniquePackageRoot(
-        displayName: String,
-        toolsDirectoryURL: URL
-    ) throws -> URL {
-        try FileManager.default.createDirectory(
-            at: toolsDirectoryURL,
-            withIntermediateDirectories: true
-        )
-        let slug = ToolNameSanitizer.slug(from: displayName)
-        var candidate = toolsDirectoryURL.appendingPathComponent(slug, isDirectory: true)
-        var suffix = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = toolsDirectoryURL.appendingPathComponent("\(slug)-\(suffix)", isDirectory: true)
-            suffix += 1
-        }
-        return candidate
     }
 
     private static func cacheIconIfAvailable(app: StoreAppListing, layout: ToolPackageLayout) async throws {

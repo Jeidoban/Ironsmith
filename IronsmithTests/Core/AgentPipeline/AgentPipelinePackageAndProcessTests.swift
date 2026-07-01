@@ -28,6 +28,60 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func packageMaterializerWritesPackageScaffoldAndContent() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let toolsDirectory = root.appendingPathComponent("Tools", isDirectory: true)
+        let displayName = "Demo App"
+        let executableName = ToolNameSanitizer.executableName(from: displayName)
+        let materializer = ToolPackageMaterializer.live
+        let packageRoot = try materializer.makeUniquePackageRoot(
+            displayName: displayName,
+            toolsDirectoryURL: toolsDirectory
+        )
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                Text("materialized")
+            }
+        }
+        """
+        let settings = ToolGenerationSettings(appKind: .menuBar, menuBarSystemImage: "hammer")
+
+        try materializer.materializePackage(
+            layout: layout,
+            displayName: displayName,
+            settings: settings,
+            contentViewSource: source
+        )
+        let nextPackageRoot = try materializer.makeUniquePackageRoot(
+            displayName: displayName,
+            toolsDirectoryURL: toolsDirectory
+        )
+
+        let manifest = try String(contentsOf: layout.packageManifestURL, encoding: .utf8)
+        let appEntry = try String(
+            contentsOf: try layout.packageFileURL(for: layout.appEntrySourcePath),
+            encoding: .utf8
+        )
+        let contentView = try String(
+            contentsOf: try layout.packageFileURL(for: layout.contentViewSourcePath),
+            encoding: .utf8
+        )
+
+        #expect(FileManager.default.fileExists(atPath: layout.packageMetadataDirectoryURL.path))
+        #expect(manifest.contains("name: \"\(executableName)\""))
+        #expect(appEntry.contains("MenuBarExtra(\"Demo App\", systemImage: \"hammer\")"))
+        #expect(contentView == source)
+        #expect(nextPackageRoot.lastPathComponent == "demo-app-2")
+    }
+
+    @MainActor
+    @Test
     func toolBuildSettingsRoundTripThroughStoredTool() {
         let tool = StoredTool(
             name: "Timer",

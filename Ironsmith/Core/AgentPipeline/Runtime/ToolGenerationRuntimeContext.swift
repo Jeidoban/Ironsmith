@@ -10,6 +10,7 @@ struct ToolGenerationRuntimeDependencies {
     let metadataClient: ToolMetadataClient
     let promptRefinementClient: ToolPromptRefinementClient
     let versionBackupClient: ToolVersionBackupClient
+    let packageMaterializer: ToolPackageMaterializer
 
     init(
         toolsDirectoryURL: URL,
@@ -19,7 +20,8 @@ struct ToolGenerationRuntimeDependencies {
         iconClient: ToolIconClient = .noOp,
         metadataClient: ToolMetadataClient = .fallback(),
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
-        versionBackupClient: ToolVersionBackupClient
+        versionBackupClient: ToolVersionBackupClient,
+        packageMaterializer: ToolPackageMaterializer? = nil
     ) {
         self.toolsDirectoryURL = toolsDirectoryURL
         self.fileClient = fileClient
@@ -29,6 +31,7 @@ struct ToolGenerationRuntimeDependencies {
         self.metadataClient = metadataClient
         self.promptRefinementClient = promptRefinementClient
         self.versionBackupClient = versionBackupClient
+        self.packageMaterializer = packageMaterializer ?? ToolPackageMaterializer(fileClient: fileClient)
     }
 
     static func live(
@@ -39,7 +42,8 @@ struct ToolGenerationRuntimeDependencies {
         iconClient: ToolIconClient = .live(),
         metadataClient: ToolMetadataClient = .live(),
         promptRefinementClient: ToolPromptRefinementClient = .live(),
-        versionBackupClient: ToolVersionBackupClient = .live
+        versionBackupClient: ToolVersionBackupClient = .live,
+        packageMaterializer: ToolPackageMaterializer? = nil
     ) -> Self {
         Self(
             toolsDirectoryURL: toolsDirectoryURL,
@@ -49,7 +53,8 @@ struct ToolGenerationRuntimeDependencies {
             iconClient: iconClient,
             metadataClient: metadataClient,
             promptRefinementClient: promptRefinementClient,
-            versionBackupClient: versionBackupClient
+            versionBackupClient: versionBackupClient,
+            packageMaterializer: packageMaterializer
         )
     }
 }
@@ -68,6 +73,7 @@ struct ToolGenerationRuntimeContext {
     let promptRefinementClient: ToolPromptRefinementClient
     let promptRefinementEnabled: Bool
     let versionBackupClient: ToolVersionBackupClient
+    let packageMaterializer: ToolPackageMaterializer
     let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
 
     init(
@@ -87,6 +93,7 @@ struct ToolGenerationRuntimeContext {
         self.promptRefinementClient = dependencies.promptRefinementClient
         self.promptRefinementEnabled = languageModelContext.promptRefinementEnabled
         self.versionBackupClient = dependencies.versionBackupClient
+        self.packageMaterializer = dependencies.packageMaterializer
         self.afterLanguageModelInvocation = languageModelContext.afterLanguageModelInvocation
     }
 
@@ -137,16 +144,10 @@ struct ToolGenerationRuntimeContext {
     }
 
     func makeUniquePackageRoot(displayName: String) throws -> URL {
-        try fileClient.createDirectory(toolsDirectoryURL)
-
-        let slug = ToolNameSanitizer.slug(from: displayName)
-        var candidate = toolsDirectoryURL.appendingPathComponent(slug, isDirectory: true)
-        var suffix = 2
-        while fileClient.fileExists(candidate) {
-            candidate = toolsDirectoryURL.appendingPathComponent("\(slug)-\(suffix)", isDirectory: true)
-            suffix += 1
-        }
-        return candidate
+        try packageMaterializer.makeUniquePackageRoot(
+            displayName: displayName,
+            toolsDirectoryURL: toolsDirectoryURL
+        )
     }
 
     func write(

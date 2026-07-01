@@ -65,21 +65,25 @@ final class StoreWindowStore {
     @ObservationIgnored private let client: IronsmithStoreClient
     @ObservationIgnored private let importClient: StoreToolImportClient
     @ObservationIgnored private let buildClient: ToolBuildClient
+    @ObservationIgnored private let packageMaterializer: ToolPackageMaterializer
 
     init() {
         self.client = .live
         self.importClient = .live
         self.buildClient = .live()
+        self.packageMaterializer = .live
     }
 
     init(
         client: IronsmithStoreClient,
         importClient: StoreToolImportClient,
-        buildClient: ToolBuildClient
+        buildClient: ToolBuildClient,
+        packageMaterializer: ToolPackageMaterializer = .live
     ) {
         self.client = client
         self.importClient = importClient
         self.buildClient = buildClient
+        self.packageMaterializer = packageMaterializer
     }
 
     var selectedApp: StoreAppListing? {
@@ -351,19 +355,12 @@ final class StoreWindowStore {
     ) throws {
         let layout = tool.packageLayout
         let settings = version.generationSettings.toolSettings
-        try FileManager.default.createDirectory(
-            at: layout.sourceDirectoryURL,
-            withIntermediateDirectories: true
-        )
-        try version.sourceCode.write(
-            to: try layout.packageFileURL(for: layout.contentViewSourcePath),
-            atomically: true,
-            encoding: .utf8
-        )
-        try layout.fixedAppEntrySource(displayName: tool.name, settings: settings).write(
-            to: try layout.packageFileURL(for: layout.appEntrySourcePath),
-            atomically: true,
-            encoding: .utf8
+        try packageMaterializer.preparePackageDirectories(layout)
+        try packageMaterializer.writeContentView(version.sourceCode, layout: layout)
+        try packageMaterializer.writeAppEntry(
+            layout: layout,
+            displayName: tool.name,
+            settings: settings
         )
         tool.applyGenerationSettings(settings)
         applyStoreLinkage(app, version: version, isOwnApp: isOwnApp, to: tool)
@@ -376,15 +373,12 @@ final class StoreWindowStore {
     ) throws {
         let layout = tool.packageLayout
         let previousSource = try String(contentsOf: backup.pendingURL, encoding: .utf8)
-        try previousSource.write(
-            to: try layout.packageFileURL(for: layout.contentViewSourcePath),
-            atomically: true,
-            encoding: .utf8
-        )
-        try layout.fixedAppEntrySource(displayName: tool.name, settings: settings).write(
-            to: try layout.packageFileURL(for: layout.appEntrySourcePath),
-            atomically: true,
-            encoding: .utf8
+        try packageMaterializer.preparePackageDirectories(layout)
+        try packageMaterializer.writeContentView(previousSource, layout: layout)
+        try packageMaterializer.writeAppEntry(
+            layout: layout,
+            displayName: tool.name,
+            settings: settings
         )
     }
 

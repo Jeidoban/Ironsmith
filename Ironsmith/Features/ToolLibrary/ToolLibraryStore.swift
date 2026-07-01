@@ -318,7 +318,7 @@ final class ToolLibraryStore {
                 tool.generationSettings(defaults: .default)
             )
             tool.applyGenerationSettings(restoredSettings)
-            try Self.writeAppEntry(
+            try dependencies.packageMaterializer.writeAppEntry(
                 layout: layout,
                 displayName: tool.name,
                 settings: restoredSettings
@@ -349,7 +349,7 @@ final class ToolLibraryStore {
 
         do {
             tool.applyGenerationSettings(settings)
-            try Self.writeAppEntry(
+            try dependencies.packageMaterializer.writeAppEntry(
                 layout: tool.packageLayout,
                 displayName: tool.name,
                 settings: settings
@@ -890,20 +890,6 @@ final class ToolLibraryStore {
         try ToolPackageLayout.packageFileURL(for: tool.contentViewSourcePath, packageRootURL: tool.packageRootURL)
     }
 
-    private static func writeAppEntry(
-        layout: ToolPackageLayout,
-        displayName: String,
-        settings: ToolGenerationSettings
-    ) throws {
-        let appEntryURL = try layout.packageFileURL(for: layout.appEntrySourcePath)
-        try FileManager.default.createDirectory(
-            at: appEntryURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try layout.fixedAppEntrySource(displayName: displayName, settings: settings)
-            .write(to: appEntryURL, atomically: true, encoding: .utf8)
-    }
-
     private static var defaultPrompt: String {
 #if DEBUG
         "Make a mortgage calculator"
@@ -920,6 +906,7 @@ struct ToolLibraryDependencies {
     var finderClient: ToolFinderClient = .live
     var versionBackupClient: ToolVersionBackupClient = .live
     var buildClient: ToolBuildClient = .live()
+    var packageMaterializer: ToolPackageMaterializer = .live
 
     static let live = ToolLibraryDependencies(
         generationClient: .live(),
@@ -927,6 +914,7 @@ struct ToolLibraryDependencies {
         exportClient: .live(),
         finderClient: .live,
         versionBackupClient: .live,
-        buildClient: .live()
+        buildClient: .live(),
+        packageMaterializer: .live
     )
 }

@@ -100,12 +100,10 @@ struct SingleFileToolGenerationRuntime {
         let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
         let contentViewPath = layout.contentViewSourcePath
 
-        try context.fileClient.createDirectory(layout.sourceDirectoryURL)
-        try context.write(layout.packageManifestContent(), to: "Package.swift", packageRootURL: layout.packageRootURL)
-        try context.write(
-            layout.fixedAppEntrySource(displayName: displayName, settings: resolvedSettings),
-            to: layout.appEntrySourcePath,
-            packageRootURL: layout.packageRootURL
+        try context.packageMaterializer.materializePackage(
+            layout: layout,
+            displayName: displayName,
+            settings: resolvedSettings
         )
         try await lifecycle.prepareCreatedTool(
             ToolGenerationPreparedTool(
