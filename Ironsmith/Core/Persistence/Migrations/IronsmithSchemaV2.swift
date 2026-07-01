@@ -22,17 +22,13 @@ enum IronsmithSchemaV2: VersionedSchema {
         var bundleIdentifier: String
         var sandboxEnabled: Bool
         var appKind: ToolAppKind = ToolAppKind.window
-        @Attribute(originalName: "appKindRawValue") var legacyAppKindRawValue: String = ToolAppKind.window.rawValue
         var menuBarSystemImage: String = ToolMenuBarSymbol.fallback
         var sandboxPermissionRawValues: String?
         var resourcePermissionRawValues: String?
         var packageRootPath: String
         var generationState: ToolGenerationState = ToolGenerationState.ready
-        @Attribute(originalName: "generationStateRawValue") var legacyGenerationStateRawValue: String = ToolGenerationState.ready.rawValue
         var generationPhase: ToolGenerationPhase? = ToolGenerationPhase.completed
-        @Attribute(originalName: "generationPhaseRawValue") var legacyGenerationPhaseRawValue: String?
         var generationMode: ToolGenerationMode?
-        @Attribute(originalName: "generationModeRawValue") var legacyGenerationModeRawValue: String?
         var pendingPrompt: String?
         var generationErrorSummary: String?
         var generationRepairErrorCount: Int? = nil
@@ -80,17 +76,13 @@ enum IronsmithSchemaV2: VersionedSchema {
             self.bundleIdentifier = bundleIdentifier ?? ToolBundleIdentifier.make(executableName: resolvedExecutableName)
             self.sandboxEnabled = sandboxEnabled
             self.appKind = appKind
-            self.legacyAppKindRawValue = appKind.rawValue
             self.menuBarSystemImage = ToolMenuBarSymbol.validated(menuBarSystemImage)
             self.sandboxPermissionRawValues = sandboxPermissions?.rawValueList
             self.resourcePermissionRawValues = resourcePermissions?.rawValueList
             self.packageRootPath = packageRootPath
             self.generationState = generationState
-            self.legacyGenerationStateRawValue = generationState.rawValue
             self.generationPhase = generationPhase
-            self.legacyGenerationPhaseRawValue = generationPhase?.rawValue
             self.generationMode = generationMode
-            self.legacyGenerationModeRawValue = generationMode?.rawValue
             self.pendingPrompt = pendingPrompt
             self.generationErrorSummary = generationErrorSummary
             self.generationRepairErrorCount = generationRepairErrorCount
@@ -116,7 +108,6 @@ enum IronsmithSchemaV2: VersionedSchema {
         var localDirectoryPath: String?
         var downloadProgress: Double?
         var installState: ModelInstallState
-        @Attribute(originalName: "installStateRaw") var legacyInstallStateRawValue: String
         var estimatedToolCredits: Int?
 
         init(
@@ -137,7 +128,6 @@ enum IronsmithSchemaV2: VersionedSchema {
             self.source = source
             let resolvedInstallState: ModelInstallState = source == .appleFoundation ? .builtIn : installState
             self.installState = resolvedInstallState
-            self.legacyInstallStateRawValue = resolvedInstallState.rawValue
             self.localDirectoryPath = localDirectoryPath
             self.downloadProgress = downloadProgress
             self.estimatedToolCredits = estimatedToolCredits
