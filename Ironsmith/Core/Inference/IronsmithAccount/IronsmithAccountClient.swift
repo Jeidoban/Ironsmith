@@ -90,6 +90,14 @@ nonisolated struct IronsmithAccountProfile: Decodable, Equatable, Sendable {
     let displayName: String?
 }
 
+nonisolated struct IronsmithAccountProfileUpdate: Encodable, Equatable, Sendable {
+    var displayName: String?
+
+    init(displayName: String? = nil) {
+        self.displayName = displayName
+    }
+}
+
 nonisolated struct IronsmithCreditSummary: Decodable, Equatable, Sendable {
     let userId: String
     let balanceCredits: Int
@@ -129,6 +137,7 @@ nonisolated struct IronsmithCheckoutSession: Decodable, Equatable, Sendable {
 
 nonisolated enum IronsmithAPIRequestMethod: String, Sendable {
     case get = "GET"
+    case patch = "PATCH"
     case post = "POST"
 }
 
@@ -174,6 +183,7 @@ nonisolated struct IronsmithAccountClient {
         @Sendable (_ launchFlow: @escaping IronsmithOAuthLaunchFlow) async throws -> Session
     var signOut: @Sendable () async throws -> Void
     var fetchAccountSummary: @Sendable () async throws -> IronsmithAccountSummary
+    var updateProfile: @Sendable (_ update: IronsmithAccountProfileUpdate) async throws -> IronsmithAccountProfile
     var fetchCreditPacks: @Sendable () async throws -> [IronsmithCreditPack]
     var createCheckoutSession:
         @Sendable (_ creditPackID: String) async throws -> IronsmithCheckoutSession
@@ -230,6 +240,16 @@ extension IronsmithAccountClient {
                     method: .get
                 )
             },
+            updateProfile: { update in
+                let response: IronsmithAccountDataEnvelope<IronsmithAccountProfile> = try await Self.invokeAPI(
+                    configuration,
+                    accessTokenProvider: validAccessToken,
+                    path: "api/v1/account/profile",
+                    method: .patch,
+                    body: update
+                )
+                return response.data
+            },
             fetchCreditPacks: {
                 let response: IronsmithCreditPacksResponse = try await Self.invokeAPI(
                     configuration,
@@ -276,6 +296,7 @@ extension IronsmithAccountClient {
             signInWithAppleOAuth: { _ in throw IronsmithAccountClientError.notConfigured },
             signOut: {},
             fetchAccountSummary: { throw IronsmithAccountClientError.notConfigured },
+            updateProfile: { _ in throw IronsmithAccountClientError.notConfigured },
             fetchCreditPacks: { throw IronsmithAccountClientError.notConfigured },
             createCheckoutSession: { _ in throw IronsmithAccountClientError.notConfigured },
             deleteAccount: { throw IronsmithAccountClientError.notConfigured },
@@ -416,6 +437,10 @@ extension IronsmithAccountClient {
 
 nonisolated private struct IronsmithAccountDeleteResponse: Decodable {
     let deleted: Bool
+}
+
+nonisolated private struct IronsmithAccountDataEnvelope<Data: Decodable>: Decodable {
+    let data: Data
 }
 
 nonisolated private struct IronsmithCreditPacksResponse: Decodable {

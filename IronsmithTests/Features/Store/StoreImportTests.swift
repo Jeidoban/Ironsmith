@@ -146,42 +146,56 @@ struct StoreImportTests {
 
     @MainActor
     @Test
-    func storeWindowOnlyUpdatesToolsLinkedToPublishedApps() {
+    func storeWindowInstallDispositionUsesLocalSourceHashes() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
         let store = StoreWindowStore(
             client: .unconfigured,
             importClient: StoreToolImportClient(importTool: { _, _ in
                 throw IronsmithStoreClientError.notConfigured
             }),
-            buildClient: ToolBuildClient(buildTool: { _ in }),
-            iconClient: ToolIconClient(ensureIconAssets: { _ in
-                URL(fileURLWithPath: "/tmp/icon.png")
-            })
+            buildClient: ToolBuildClient(buildTool: { _ in })
         )
-        let source = Self.sourceCode("published")
-        let publishedApp = Self.appListing(sourceCode: source)
-        let ownedTool = Tool(
-            name: "Owned",
-            packageRootPath: "/tmp/owned",
-            storeId: publishedApp.storeId,
-            storeAppId: publishedApp.id
-        )
-        let staleTool = Tool(
-            name: "Stale",
-            packageRootPath: "/tmp/stale",
-            storeId: publishedApp.storeId,
-            storeAppId: "00000000-0000-4000-8000-000000000999"
-        )
-        let importedTool = Tool(
-            name: "Imported",
-            packageRootPath: "/tmp/imported",
-            storeRemixedFromVersionId: publishedApp.currentVersion.id
+        let oldSource = Self.sourceCode("old")
+        let currentSource = Self.sourceCode("current")
+        let app = Self.appListing(sourceCode: currentSource)
+        let oldVersion = Self.versionDownload(
+            appId: app.id,
+            sourceCode: oldSource,
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: oldSource)
         )
 
-        store.publishedApps = [publishedApp]
+        let imported = try await StoreToolImportClient.live(toolsDirectoryURL: root)
+            .importTool(StoreToolImportRequest(app: app, version: oldVersion, mode: .get), context)
 
-        #expect(store.canUpdatePublishedListing(for: ownedTool))
-        #expect(!store.canUpdatePublishedListing(for: staleTool))
-        #expect(!store.canUpdatePublishedListing(for: importedTool))
+        guard case .updateExisting(let updatableTool) = store.installDisposition(for: app, tools: [imported.tool]) else {
+            Issue.record("Expected an unchanged older import to be updatable.")
+            return
+        }
+        #expect(updatableTool.id == imported.tool.id)
+
+        try currentSource.write(
+            to: try imported.tool.packageLayout.packageFileURL(for: imported.tool.contentViewSourcePath),
+            atomically: true,
+            encoding: .utf8
+        )
+        guard case .openExisting(let currentTool) = store.installDisposition(for: app, tools: [imported.tool]) else {
+            Issue.record("Expected a local copy matching the current hash to open.")
+            return
+        }
+        #expect(currentTool.id == imported.tool.id)
+
+        try Self.sourceCode("edited").write(
+            to: try imported.tool.packageLayout.packageFileURL(for: imported.tool.contentViewSourcePath),
+            atomically: true,
+            encoding: .utf8
+        )
+        guard case .createCopy = store.installDisposition(for: app, tools: [imported.tool]) else {
+            Issue.record("Expected an edited local copy to avoid destructive replacement.")
+            return
+        }
     }
 
     private static func sourceCode(_ text: String) -> String {

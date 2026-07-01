@@ -238,7 +238,6 @@ nonisolated struct IronsmithStoreClient {
     var patchListing:
         @Sendable (_ storeId: String, _ appId: String, _ update: StoreListingUpdateRequest) async throws
             -> StoreAppListing
-    var updateProfileDisplayName: @Sendable (_ displayName: String) async throws -> IronsmithAccountProfile
 }
 
 extension IronsmithStoreClient {
@@ -359,16 +358,6 @@ extension IronsmithStoreClient {
                     authentication: .required
                 )
                 return response.data
-            },
-            updateProfileDisplayName: { displayName in
-                let response: StoreDataEnvelope<IronsmithAccountProfile> = try await api.request(
-                    "api/v1/account/profile",
-                    method: "PATCH",
-                    body: try StoreJSON.encoder.encode(StoreProfileUpdatePayload(displayName: displayName)),
-                    contentType: "application/json",
-                    authentication: .required
-                )
-                return response.data
             }
         )
     }
@@ -381,8 +370,7 @@ extension IronsmithStoreClient {
             fetchVersion: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
             publishApp: { _ in throw IronsmithStoreClientError.notConfigured },
             publishVersion: { _ in throw IronsmithStoreClientError.notConfigured },
-            patchListing: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
-            updateProfileDisplayName: { _ in throw IronsmithStoreClientError.notConfigured }
+            patchListing: { _, _, _ in throw IronsmithStoreClientError.notConfigured }
         )
     }
 
@@ -536,10 +524,6 @@ nonisolated private struct StoreVersionMetadataPayload: Encodable {
     let generationSettings: StoreGenerationSettingsDTO
     let remixedFromVersionId: String?
     let replaceScreenshots: Bool
-}
-
-nonisolated private struct StoreProfileUpdatePayload: Encodable {
-    let displayName: String
 }
 
 nonisolated private struct StoreMultipartBody {
