@@ -51,14 +51,15 @@ final class StoreWindowStore {
     var selectedTab: StoreSidebarTab = .discover
     var stores: [AppStoreDescriptor] = []
     var selectedStoreId = IronsmithStoreConstants.communityStoreId
-    var discoverApps: [StoreAppListing] = []
-    var publishedApps: [StoreAppListing] = []
+    var discoverApps: [StoreAppSummary] = []
+    var publishedApps: [StoreAppSummary] = []
     var selectedAppID: String?
-    var selectedAppDetail: StoreAppListing?
+    var selectedAppDetail: StoreAppDetail?
     var searchText = ""
     var isLoadingStores = false
     var isLoadingDiscover = false
     var isLoadingPublished = false
+    var isLoadingDetail = false
     var workingAppID: String?
     var errorMessage: String?
 
@@ -86,9 +87,8 @@ final class StoreWindowStore {
         self.packageMaterializer = packageMaterializer
     }
 
-    var selectedApp: StoreAppListing? {
-        selectedAppDetail
-            ?? discoverApps.first { $0.id == selectedAppID }
+    var selectedAppSummary: StoreAppSummary? {
+        discoverApps.first { $0.id == selectedAppID }
             ?? publishedApps.first { $0.id == selectedAppID }
     }
 
@@ -144,9 +144,9 @@ final class StoreWindowStore {
         }
     }
 
-    func select(_ app: StoreAppListing) {
+    func select(_ app: StoreAppSummary) {
         selectedAppID = app.id
-        selectedAppDetail = app
+        selectedAppDetail = nil
         Task {
             await loadDetail(for: app)
         }
@@ -170,11 +170,11 @@ final class StoreWindowStore {
         }
     }
 
-    func isOwnPublishedApp(_ app: StoreAppListing) -> Bool {
+    func isOwnPublishedApp(_ app: StoreAppDetail) -> Bool {
         publishedApps.contains { $0.id == app.id }
     }
 
-    func installDisposition(for app: StoreAppListing, tools: [Tool]) -> StoreAppInstallDisposition {
+    func installDisposition(for app: StoreAppDetail, tools: [Tool]) -> StoreAppInstallDisposition {
         let linkedTools = tools.filter { $0.storeAppId == app.id }
         if let currentTool = linkedTools.first(where: { localSourceHash(for: $0) == app.currentVersion.sourceSha256 }) {
             return .openExisting(currentTool)
@@ -191,7 +191,7 @@ final class StoreWindowStore {
     }
 
     func install(
-        _ app: StoreAppListing,
+        _ app: StoreAppDetail,
         mode: StoreToolImportMode,
         tools: [Tool],
         modelContext: ModelContext,
@@ -266,7 +266,7 @@ final class StoreWindowStore {
         }
     }
 
-    func setStatus(_ app: StoreAppListing, status: StoreAppStatus) async {
+    func setStatus(_ app: StoreAppSummary, status: StoreAppStatus) async {
         guard workingAppID == nil else { return }
         workingAppID = app.id
         defer { workingAppID = nil }
@@ -287,7 +287,7 @@ final class StoreWindowStore {
 
     private func updateExistingTool(
         _ tool: Tool,
-        from app: StoreAppListing,
+        from app: StoreAppDetail,
         isOwnApp: Bool,
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore,
@@ -349,7 +349,7 @@ final class StoreWindowStore {
 
     private func writeStoreVersion(
         _ version: StoreVersionDownload,
-        app: StoreAppListing,
+        app: StoreAppDetail,
         isOwnApp: Bool,
         to tool: Tool
     ) throws {
@@ -382,16 +382,25 @@ final class StoreWindowStore {
         )
     }
 
-    private func loadDetail(for app: StoreAppListing) async {
+    private func loadDetail(for app: StoreAppSummary) async {
+        isLoadingDetail = true
+        defer {
+            if selectedAppID == app.id {
+                isLoadingDetail = false
+            }
+        }
         do {
-            selectedAppDetail = try await client.fetchApp(app.storeId, app.id)
+            let detail = try await client.fetchApp(app.storeId, app.id)
+            guard selectedAppID == app.id else { return }
+            selectedAppDetail = detail
         } catch {
-            selectedAppDetail = app
+            guard selectedAppID == app.id else { return }
+            present(error)
         }
     }
 
     private func applyStoreLinkage(
-        _ app: StoreAppListing,
+        _ app: StoreAppDetail,
         version: StoreVersionDownload,
         isOwnApp: Bool,
         to tool: Tool
@@ -418,11 +427,18 @@ final class StoreWindowStore {
         return IronsmithStoreClient.sha256Hex(for: source)
     }
 
-    private func replacePublishedApp(_ app: StoreAppListing) {
+    private func replacePublishedApp(_ app: StoreAppDetail) {
+        let summary = StoreAppSummary(detail: app)
         if let index = publishedApps.firstIndex(where: { $0.id == app.id }) {
-            publishedApps[index] = app
+            publishedApps[index] = summary
         } else {
-            publishedApps.insert(app, at: 0)
+            publishedApps.insert(summary, at: 0)
+        }
+        if let index = discoverApps.firstIndex(where: { $0.id == app.id }) {
+            discoverApps[index] = summary
+        }
+        if selectedAppID == app.id {
+            selectedAppDetail = app
         }
     }
 

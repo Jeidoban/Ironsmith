@@ -5,6 +5,7 @@ struct ToolLibraryStorePublishSheetView: View {
     let tool: Tool
     let isUpdatingPublishedListing: Bool
     @Binding var publishName: String
+    @Binding var publishShortDescription: String
     @Binding var publishDescription: String
     @Binding var publishDisplayName: String
     let publishScreenshotName: String?
@@ -29,9 +30,17 @@ struct ToolLibraryStorePublishSheetView: View {
                 }
             }
 
-            TextField("Name", text: $publishName)
-            TextField("Description", text: $publishDescription, axis: .vertical)
-                .lineLimit(3...5)
+            if !isUpdatingPublishedListing {
+                TextField("Name", text: $publishName)
+                TextField("Short Description", text: $publishShortDescription)
+                    .onChange(of: publishShortDescription) { _, value in
+                        if value.count > 40 {
+                            publishShortDescription = String(value.prefix(40))
+                        }
+                    }
+                TextField("Description", text: $publishDescription, axis: .vertical)
+                    .lineLimit(3...5)
+            }
 
             HStack {
                 Button {
@@ -70,9 +79,14 @@ struct ToolLibraryStorePublishSheetView: View {
     }
 
     private var canPublish: Bool {
-        !publishName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !publishDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (isUpdatingPublishedListing || listingFieldsAreValid)
             && (!needsDisplayName || !publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             && !tool.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var listingFieldsAreValid: Bool {
+        !publishName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !publishShortDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !publishDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }

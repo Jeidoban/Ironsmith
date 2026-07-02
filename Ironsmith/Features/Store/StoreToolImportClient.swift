@@ -7,7 +7,7 @@ enum StoreToolImportMode: Equatable, Sendable {
 }
 
 struct StoreToolImportRequest: Sendable {
-    let app: StoreAppListing
+    let app: StoreAppDetail
     let version: StoreVersionDownload
     let mode: StoreToolImportMode
     var isOwnApp = false
@@ -95,7 +95,7 @@ extension StoreToolImportClient {
         }
     }
 
-    private static func cacheIconIfAvailable(app: StoreAppListing, layout: ToolPackageLayout) async throws {
+    private static func cacheIconIfAvailable(app: StoreAppDetail, layout: ToolPackageLayout) async throws {
         guard let url = app.iconAsset?.url else { return }
         do {
             let (data, response) = try await URLSession.shared.data(from: url)

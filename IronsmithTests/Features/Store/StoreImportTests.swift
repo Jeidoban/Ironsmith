@@ -210,35 +210,37 @@ struct StoreImportTests {
         """
     }
 
-    private static func appListing(sourceCode: String) -> StoreAppListing {
+    private static func appListing(sourceCode: String) -> StoreAppDetail {
         let storeId = "00000000-0000-4000-8000-000000000011"
         let appId = "00000000-0000-4000-8000-000000000101"
-        return StoreAppListing(
+        let version = StoreVersionMetadata(
+            id: "00000000-0000-4000-8000-000000000201",
+            appId: appId,
+            versionNumber: 1,
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: sourceCode),
+            generationSettings: StoreGenerationSettingsDTO(settings: .default),
+            runtimeVersion: "ironsmith-macos-v1",
+            license: "MIT",
+            scannerVersion: "swift-execution-blocklist-v1",
+            remixedFromVersionId: nil,
+            publishedAt: "2026-06-27T00:00:00.000Z"
+        )
+        return StoreAppDetail(
             id: appId,
             storeId: storeId,
             storeVisibility: "public",
             authorDisplayName: "Jade",
             name: "Clipboard Cleaner",
+            shortDescription: "Clipboard cleanup",
             description: "Cleans clipboard text.",
             status: .published,
             publishedAt: "2026-06-27T00:00:00.000Z",
             createdAt: "2026-06-27T00:00:00.000Z",
             updatedAt: "2026-06-27T00:00:00.000Z",
-            assets: [],
-            currentVersion: StoreVersionMetadata(
-                id: "00000000-0000-4000-8000-000000000201",
-                storeId: storeId,
-                storeVisibility: "public",
-                appId: appId,
-                versionNumber: 1,
-                sourceSha256: IronsmithStoreClient.sha256Hex(for: sourceCode),
-                generationSettings: StoreGenerationSettingsDTO(settings: .default),
-                runtimeVersion: "ironsmith-macos-v1",
-                license: "MIT",
-                scannerVersion: "swift-execution-blocklist-v1",
-                remixedFromVersionId: nil,
-                publishedAt: "2026-06-27T00:00:00.000Z"
-            ),
+            icon: nil,
+            screenshots: [],
+            currentVersion: version,
+            recentVersions: [version],
             remix: nil
         )
     }

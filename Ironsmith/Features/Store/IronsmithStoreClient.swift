@@ -95,8 +95,6 @@ nonisolated struct StoreAsset: Decodable, Identifiable, Equatable, Sendable {
 
 nonisolated struct StoreVersionMetadata: Decodable, Identifiable, Equatable, Sendable {
     let id: String
-    let storeId: String
-    let storeVisibility: String
     let appId: String
     let versionNumber: Int
     let sourceSha256: String
@@ -132,49 +130,92 @@ nonisolated struct StoreRemixMetadata: Decodable, Equatable, Sendable {
     let versionNumber: Int
 }
 
-nonisolated struct StoreAppListing: Decodable, Identifiable, Equatable, Sendable {
+nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable {
+    let id: String
+    let storeId: String
+    let authorDisplayName: String
+    let name: String
+    let shortDescription: String
+    let status: StoreAppStatus
+    let latestVersionNumber: Int
+    let publishedAt: String
+    let updatedAt: String
+    let icon: StoreAsset?
+
+    init(
+        id: String,
+        storeId: String,
+        authorDisplayName: String,
+        name: String,
+        shortDescription: String,
+        status: StoreAppStatus,
+        latestVersionNumber: Int,
+        publishedAt: String,
+        updatedAt: String,
+        icon: StoreAsset?
+    ) {
+        self.id = id
+        self.storeId = storeId
+        self.authorDisplayName = authorDisplayName
+        self.name = name
+        self.shortDescription = shortDescription
+        self.status = status
+        self.latestVersionNumber = latestVersionNumber
+        self.publishedAt = publishedAt
+        self.updatedAt = updatedAt
+        self.icon = icon
+    }
+
+    init(detail: StoreAppDetail) {
+        self.init(
+            id: detail.id,
+            storeId: detail.storeId,
+            authorDisplayName: detail.authorDisplayName,
+            name: detail.name,
+            shortDescription: detail.shortDescription,
+            status: detail.status,
+            latestVersionNumber: detail.currentVersion.versionNumber,
+            publishedAt: detail.publishedAt,
+            updatedAt: detail.updatedAt,
+            icon: detail.icon
+        )
+    }
+
+}
+
+nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let storeId: String
     let storeVisibility: String
     let authorDisplayName: String
     let name: String
+    let shortDescription: String
     let description: String
     let status: StoreAppStatus
     let publishedAt: String
     let createdAt: String
     let updatedAt: String
-    let assets: [StoreAsset]
+    let icon: StoreAsset?
+    let screenshots: [StoreAsset]
     let currentVersion: StoreVersionMetadata
+    let recentVersions: [StoreVersionMetadata]
     let remix: StoreRemixMetadata?
 
     var iconAsset: StoreAsset? {
-        assets
-            .filter { $0.kind == .icon }
-            .sorted { $0.sortOrder < $1.sortOrder }
-            .first
+        icon
     }
 
-    var screenshots: [StoreAsset] {
-        assets
-            .filter { $0.kind == .screenshot }
-            .sorted { $0.sortOrder < $1.sortOrder }
-    }
-
-    var shortDescription: String {
-        let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count > 140 else { return trimmed }
-        return String(trimmed.prefix(137)) + "..."
-    }
 }
 
 nonisolated struct StoreAppPage: Equatable, Sendable {
-    let apps: [StoreAppListing]
+    let apps: [StoreAppSummary]
     let nextCursor: String?
 }
 
 nonisolated struct StorePublicationRequest: Sendable {
     let storeId: String
     let name: String
+    let shortDescription: String
     let description: String
     let sourceCode: String
     let generationSettings: ToolGenerationSettings
@@ -196,6 +237,7 @@ nonisolated struct StoreVersionPublicationRequest: Sendable {
 
 nonisolated struct StoreListingUpdateRequest: Encodable, Sendable {
     var name: String?
+    var shortDescription: String?
     var description: String?
     var status: StoreAppStatus?
 }
@@ -228,16 +270,16 @@ nonisolated struct IronsmithStoreClient {
     var listApps:
         @Sendable (_ storeId: String, _ scope: StoreAppListScope, _ search: String?, _ cursor: String?) async throws
             -> StoreAppPage
-    var fetchApp: @Sendable (_ storeId: String, _ appId: String) async throws -> StoreAppListing
+    var fetchApp: @Sendable (_ storeId: String, _ appId: String) async throws -> StoreAppDetail
     var fetchVersion:
         @Sendable (_ storeId: String, _ appId: String, _ versionNumber: Int) async throws
             -> StoreVersionDownload
-    var publishApp: @Sendable (_ request: StorePublicationRequest) async throws -> StoreAppListing
+    var publishApp: @Sendable (_ request: StorePublicationRequest) async throws -> StoreAppDetail
     var publishVersion:
-        @Sendable (_ request: StoreVersionPublicationRequest) async throws -> StoreAppListing
+        @Sendable (_ request: StoreVersionPublicationRequest) async throws -> StoreAppDetail
     var patchListing:
         @Sendable (_ storeId: String, _ appId: String, _ update: StoreListingUpdateRequest) async throws
-            -> StoreAppListing
+            -> StoreAppDetail
 }
 
 extension IronsmithStoreClient {
@@ -270,7 +312,7 @@ extension IronsmithStoreClient {
                 if let cursor {
                     queryItems.append(URLQueryItem(name: "cursor", value: cursor))
                 }
-                let response: StorePageEnvelope<StoreAppListing> = try await api.request(
+                let response: StorePageEnvelope<StoreAppSummary> = try await api.request(
                     "api/v1/stores/\(storeId)/apps",
                     method: "GET",
                     queryItems: queryItems,
@@ -279,7 +321,7 @@ extension IronsmithStoreClient {
                 return StoreAppPage(apps: response.data, nextCursor: response.nextCursor)
             },
             fetchApp: { storeId, appId in
-                let response: StoreDataEnvelope<StoreAppListing> = try await api.request(
+                let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(storeId)/apps/\(appId)",
                     method: "GET",
                     authentication: .optional
@@ -297,6 +339,7 @@ extension IronsmithStoreClient {
             publishApp: { request in
                 let metadata = StorePublicationMetadataPayload(
                     name: request.name,
+                    shortDescription: request.shortDescription,
                     description: request.description,
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
                     generationSettings: StoreGenerationSettingsDTO(settings: request.generationSettings),
@@ -312,7 +355,7 @@ extension IronsmithStoreClient {
                     )
                     .addingFile(name: "icon", filename: "icon.png", contentType: "image/png", data: request.iconPNG)
                     .addingScreenshotFiles(request.screenshotPNGs)
-                let response: StoreDataEnvelope<StoreAppListing> = try await api.request(
+                let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(request.storeId)/apps",
                     method: "POST",
                     body: body.data,
@@ -340,7 +383,7 @@ extension IronsmithStoreClient {
                     body = body.addingFile(name: "icon", filename: "icon.png", contentType: "image/png", data: iconPNG)
                 }
                 body = body.addingScreenshotFiles(request.screenshotPNGs)
-                let response: StoreDataEnvelope<StoreAppListing> = try await api.request(
+                let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(request.storeId)/apps/\(request.appId)/versions",
                     method: "POST",
                     body: body.data,
@@ -350,7 +393,7 @@ extension IronsmithStoreClient {
                 return response.data
             },
             patchListing: { storeId, appId, update in
-                let response: StoreDataEnvelope<StoreAppListing> = try await api.request(
+                let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(storeId)/apps/\(appId)",
                     method: "PATCH",
                     body: try StoreJSON.encoder.encode(update),
@@ -513,6 +556,7 @@ nonisolated private struct StoreBackendError: Decodable {
 
 nonisolated private struct StorePublicationMetadataPayload: Encodable {
     let name: String
+    let shortDescription: String
     let description: String
     let runtimeVersion: String
     let generationSettings: StoreGenerationSettingsDTO

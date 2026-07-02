@@ -5,9 +5,10 @@ import SwiftData
 @MainActor
 @Observable
 final class ToolLibraryStorePublisher {
-    var publishedStoreAppsByID: [String: StoreAppListing] = [:]
+    var publishedStoreAppsByID: [String: StoreAppSummary] = [:]
     var publishingToolID: UUID?
     var publishName = ""
+    var publishShortDescription = ""
     var publishDescription = ""
     var publishDisplayName = ""
     var publishScreenshotData: Data?
@@ -57,12 +58,14 @@ final class ToolLibraryStorePublisher {
         }
 
         do {
-            var ownedAppsByID: [String: StoreAppListing] = [:]
+            let linkedAppIDs = Set(tools.compactMap(\.storeAppId))
+            var ownedAppsByID: [String: StoreAppSummary] = [:]
             for storeID in storeIDs {
                 var cursor: String?
                 repeat {
                     let page = try await storeClient.listApps(storeID, .mine, nil, cursor)
                     for app in page.apps {
+                        guard linkedAppIDs.contains(app.id) else { continue }
                         ownedAppsByID[app.id] = app
                     }
                     cursor = page.nextCursor
@@ -96,7 +99,9 @@ final class ToolLibraryStorePublisher {
         )
         publishingToolID = tool.id
         publishName = tool.name
-        publishDescription = linkedPublishedApp(for: tool)?.description ?? "Created with Ironsmith."
+        publishShortDescription = linkedPublishedApp(for: tool)?.shortDescription
+            ?? Self.defaultShortDescription(for: tool)
+        publishDescription = "Created with Ironsmith."
         publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
         publishScreenshotData = nil
         publishScreenshotName = nil
@@ -141,7 +146,7 @@ final class ToolLibraryStorePublisher {
                 encoding: .utf8
             )
             let settings = tool.generationSettings(defaults: defaultSettings)
-            let app: StoreAppListing
+            let app: StoreAppDetail
             if let linkedApp = linkedPublishedApp(for: tool) {
                 app = try await storeClient.publishVersion(
                     StoreVersionPublicationRequest(
@@ -164,6 +169,7 @@ final class ToolLibraryStorePublisher {
                     StorePublicationRequest(
                         storeId: tool.storeId ?? IronsmithStoreConstants.communityStoreId,
                         name: publishName.trimmingCharacters(in: .whitespacesAndNewlines),
+                        shortDescription: publishShortDescription.trimmingCharacters(in: .whitespacesAndNewlines),
                         description: publishDescription.trimmingCharacters(in: .whitespacesAndNewlines),
                         sourceCode: source,
                         generationSettings: settings,
@@ -176,7 +182,7 @@ final class ToolLibraryStorePublisher {
 
             applyPublishedStoreLinkage(app, to: tool)
             try modelContext.save()
-            publishedStoreAppsByID[app.id] = app
+            publishedStoreAppsByID[app.id] = StoreAppSummary(detail: app)
             isShowingPublishSheet = false
             routeStore.open(.store(.publishedApp(app.id)))
         } catch {
@@ -200,12 +206,20 @@ final class ToolLibraryStorePublisher {
         }
     }
 
-    private func linkedPublishedApp(for tool: Tool) -> StoreAppListing? {
+    private func linkedPublishedApp(for tool: Tool) -> StoreAppSummary? {
         guard let storeAppId = tool.storeAppId else { return nil }
         return publishedStoreAppsByID[storeAppId]
     }
 
-    private func applyPublishedStoreLinkage(_ app: StoreAppListing, to tool: Tool) {
+    private static func defaultShortDescription(for tool: Tool) -> String {
+        let trimmedName = tool.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            return String(trimmedName.prefix(40))
+        }
+        return "Created with Ironsmith."
+    }
+
+    private func applyPublishedStoreLinkage(_ app: StoreAppDetail, to tool: Tool) {
         tool.storeId = app.storeId
         tool.storeAppId = app.id
         tool.storeVersionId = app.currentVersion.id

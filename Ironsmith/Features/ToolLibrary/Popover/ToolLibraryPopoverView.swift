@@ -332,6 +332,7 @@ struct ToolLibraryPopoverView: View {
                 tool: tool,
                 isUpdatingPublishedListing: canUpdateStoreVersion(for: tool),
                 publishName: $storePublisher.publishName,
+                publishShortDescription: $storePublisher.publishShortDescription,
                 publishDescription: $storePublisher.publishDescription,
                 publishDisplayName: $storePublisher.publishDisplayName,
                 publishScreenshotName: storePublisher.publishScreenshotName,

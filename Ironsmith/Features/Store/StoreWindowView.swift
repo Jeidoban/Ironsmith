@@ -33,12 +33,13 @@ struct StoreWindowView: View {
             }
         } detail: {
             StoreAppDetailView(
-                app: store.selectedApp,
-                isWorking: store.workingAppID == store.selectedApp?.id,
-                installDisposition: store.selectedApp.map {
+                app: store.selectedAppDetail,
+                isLoading: store.isLoadingDetail,
+                isWorking: store.workingAppID == store.selectedAppDetail?.id,
+                installDisposition: store.selectedAppDetail.map {
                     store.installDisposition(for: $0, tools: tools)
                 } ?? .createCopy,
-                canRemix: store.selectedApp.map { !store.isOwnPublishedApp($0) } ?? false,
+                canRemix: store.selectedAppDetail.map { !store.isOwnPublishedApp($0) } ?? false,
                 onGet: { app in
                     Task {
                         await store.install(
@@ -218,18 +219,18 @@ private struct StorePublishedListView: View {
 }
 
 private struct StoreAppCardView: View {
-    let app: StoreAppListing
+    let app: StoreAppSummary
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            StoreIconView(url: app.iconAsset?.url, size: 48)
+            StoreIconView(url: app.icon?.url, size: 48)
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
                     Text(app.name)
                         .font(.headline)
                         .lineLimit(1)
-                    Text("v\(app.currentVersion.versionNumber)")
+                    Text("v\(app.latestVersionNumber)")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
@@ -241,7 +242,6 @@ private struct StoreAppCardView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-                StorePermissionChipsView(permissions: app.currentVersion.generationSettings.permissionChips)
             }
         }
         .padding(.vertical, 6)
@@ -249,7 +249,7 @@ private struct StoreAppCardView: View {
 }
 
 private struct StorePublishedRowView: View {
-    let app: StoreAppListing
+    let app: StoreAppSummary
     let linkedTool: Tool?
     let isWorking: Bool
     let onSelect: () -> Void
@@ -258,12 +258,12 @@ private struct StorePublishedRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            StoreIconView(url: app.iconAsset?.url, size: 42)
+            StoreIconView(url: app.icon?.url, size: 42)
             VStack(alignment: .leading, spacing: 4) {
                 Text(app.name)
                     .font(.headline)
                     .lineLimit(1)
-                Text("\(app.status.rawValue.capitalized) · v\(app.currentVersion.versionNumber)")
+                Text("\(app.status.rawValue.capitalized) · v\(app.latestVersionNumber)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -293,12 +293,13 @@ private struct StorePublishedRowView: View {
 }
 
 private struct StoreAppDetailView: View {
-    let app: StoreAppListing?
+    let app: StoreAppDetail?
+    let isLoading: Bool
     let isWorking: Bool
     let installDisposition: StoreAppInstallDisposition
     let canRemix: Bool
-    let onGet: (StoreAppListing) -> Void
-    let onRemix: (StoreAppListing) -> Void
+    let onGet: (StoreAppDetail) -> Void
+    let onRemix: (StoreAppDetail) -> Void
 
     var body: some View {
         Group {
@@ -349,6 +350,7 @@ private struct StoreAppDetailView: View {
                         }
 
                         StoreDetailMetadataView(app: app)
+                        StoreVersionHistoryView(versions: app.recentVersions)
 
                         HStack {
                             Button {
@@ -377,6 +379,9 @@ private struct StoreAppDetailView: View {
                     .padding(24)
                     .frame(maxWidth: 760, alignment: .leading)
                 }
+            } else if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 StoreEmptyStateView(title: "Select an app", systemImage: "square.grid.2x2")
             }
@@ -385,7 +390,7 @@ private struct StoreAppDetailView: View {
 }
 
 private struct StoreDetailMetadataView: View {
-    let app: StoreAppListing
+    let app: StoreAppDetail
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -418,6 +423,45 @@ private struct StoreDetailMetadataView: View {
     private func shortHash(_ hash: String) -> String {
         guard hash.count > 16 else { return hash }
         return "\(hash.prefix(12))...\(hash.suffix(6))"
+    }
+}
+
+private struct StoreVersionHistoryView: View {
+    let versions: [StoreVersionMetadata]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Versions")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(versions) { version in
+                    HStack {
+                        Text("v\(version.versionNumber)")
+                            .font(.subheadline.weight(.semibold))
+                        Text(shortHash(version.sourceSha256))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(formattedDate(version.publishedAt))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func shortHash(_ hash: String) -> String {
+        guard hash.count > 12 else { return hash }
+        return String(hash.prefix(12))
+    }
+
+    private func formattedDate(_ value: String) -> String {
+        guard let date = ISO8601DateFormatter().date(from: value) else {
+            return value
+        }
+        return date.formatted(date: .abbreviated, time: .omitted)
     }
 }
 private struct StoreIconView: View {
