@@ -28,6 +28,60 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func packageMaterializerWritesPackageScaffoldAndContent() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let toolsDirectory = root.appendingPathComponent("Tools", isDirectory: true)
+        let displayName = "Demo App"
+        let executableName = ToolNameSanitizer.executableName(from: displayName)
+        let materializer = ToolPackageMaterializer.live
+        let packageRoot = try materializer.makeUniquePackageRoot(
+            displayName: displayName,
+            toolsDirectoryURL: toolsDirectory
+        )
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                Text("materialized")
+            }
+        }
+        """
+        let settings = ToolGenerationSettings(appKind: .menuBar, menuBarSystemImage: "hammer")
+
+        try materializer.materializePackage(
+            layout: layout,
+            displayName: displayName,
+            settings: settings,
+            contentViewSource: source
+        )
+        let nextPackageRoot = try materializer.makeUniquePackageRoot(
+            displayName: displayName,
+            toolsDirectoryURL: toolsDirectory
+        )
+
+        let manifest = try String(contentsOf: layout.packageManifestURL, encoding: .utf8)
+        let appEntry = try String(
+            contentsOf: try layout.packageFileURL(for: layout.appEntrySourcePath),
+            encoding: .utf8
+        )
+        let contentView = try String(
+            contentsOf: try layout.packageFileURL(for: layout.contentViewSourcePath),
+            encoding: .utf8
+        )
+
+        #expect(FileManager.default.fileExists(atPath: layout.packageMetadataDirectoryURL.path))
+        #expect(manifest.contains("name: \"\(executableName)\""))
+        #expect(appEntry.contains("MenuBarExtra(\"Demo App\", systemImage: \"hammer\")"))
+        #expect(contentView == source)
+        #expect(nextPackageRoot.lastPathComponent == "demo-app-2")
+    }
+
+    @MainActor
+    @Test
     func toolBuildSettingsRoundTripThroughStoredTool() {
         let tool = StoredTool(
             name: "Timer",
@@ -72,6 +126,79 @@ extension AgentPipelineTests {
         #expect(settings.menuBarSystemImage == ToolMenuBarSymbol.fallback)
         #expect(settings.sandboxPermissions.enabled == [.userSelectedFiles])
         #expect(settings.resourcePermissions.enabled == [.location])
+    }
+
+    @MainActor
+    @Test
+    func versionBackupWritesCurrentBuildSettingsJSONKeys() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("VersionedTool", isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "VersionedTool")
+        let contentViewURL = try layout.packageFileURL(for: layout.contentViewSourcePath)
+        try FileManager.default.createDirectory(at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"Text("current")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
+
+        let settings = ToolGenerationSettings(
+            appKind: .menuBar,
+            menuBarSystemImage: "timer",
+            sandboxEnabled: true,
+            sandboxPermissions: GeneratedAppSandboxPermissions([.internet, .userSelectedFiles]),
+            resourcePermissions: GeneratedAppResourcePermissions([.camera])
+        )
+        let backup = try ToolVersionBackupClient.live.stageCurrentVersion(
+            packageRoot,
+            layout.contentViewSourcePath,
+            settings
+        )
+        let data = try Data(contentsOf: backup.pendingBuildSettingsURL)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(json["appKind"] as? String == "menu_bar")
+        #expect(json["menuBarSystemImage"] as? String == "timer")
+        #expect(json["sandboxEnabled"] as? Bool == true)
+        #expect(json["sandboxPermissions"] as? String == "internet,userSelectedFiles")
+        #expect(json["resourcePermissions"] as? String == "camera")
+        #expect(json["appKindRawValue"] == nil)
+        #expect(json["sandboxPermissionRawValues"] == nil)
+        #expect(json["resourcePermissionRawValues"] == nil)
+    }
+
+    @MainActor
+    @Test
+    func versionBackupRestoresLegacyRawValueBuildSettingsJSON() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let packageRoot = root.appendingPathComponent("LegacyVersionedTool", isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "LegacyVersionedTool")
+        let contentViewURL = try layout.packageFileURL(for: layout.contentViewSourcePath)
+        try FileManager.default.createDirectory(at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: layout.previousContentViewVersionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"Text("current")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
+        try #"Text("previous")"#.write(to: layout.previousContentViewVersionURL, atomically: true, encoding: .utf8)
+        try """
+        {
+          "appKindRawValue": "menu_bar",
+          "menuBarSystemImage": "timer",
+          "sandboxEnabled": true,
+          "sandboxPermissionRawValues": "internet",
+          "resourcePermissionRawValues": "microphone,camera"
+        }
+        """.data(using: .utf8)!.write(to: layout.previousBuildSettingsVersionURL)
+
+        let restored = try ToolVersionBackupClient.live.restorePreviousVersion(
+            packageRoot,
+            layout.contentViewSourcePath,
+            .default
+        )
+
+        #expect(restored.appKind == .menuBar)
+        #expect(restored.menuBarSystemImage == "timer")
+        #expect(restored.sandboxEnabled)
+        #expect(restored.sandboxPermissions.enabled == [.internet])
+        #expect(restored.resourcePermissions.enabled == [.microphone, .camera])
     }
 
     @MainActor

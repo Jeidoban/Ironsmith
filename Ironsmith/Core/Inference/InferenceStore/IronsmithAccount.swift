@@ -23,6 +23,16 @@ extension InferenceStore {
         }
     }
 
+    func updateIronsmithAccountProfile(_ update: IronsmithAccountProfileUpdate) async throws -> IronsmithAccountProfile {
+        refreshIronsmithSession()
+        guard ironsmithSession != nil else {
+            throw IronsmithAccountClientError.missingSession
+        }
+        let profile = try await dependencies.accountClient.updateProfile(update)
+        await refreshIronsmithAccountSummary()
+        return profile
+    }
+
     func refreshIronsmithCreditPacks() async {
         refreshIronsmithSession()
         guard ironsmithSession != nil else {

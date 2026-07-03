@@ -184,6 +184,13 @@ extension InferenceTests {
                 }
                 return Self.ironsmithAccountSummary(balanceCredits: balanceCredits)
             },
+            updateProfile: { _ in
+                IronsmithAccountProfile(
+                    id: "00000000-0000-4000-8000-000000000001",
+                    email: "jade@example.com",
+                    displayName: nil
+                )
+            },
             fetchCreditPacks: {
                 [
                     IronsmithCreditPack(

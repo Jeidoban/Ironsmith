@@ -152,27 +152,64 @@ private func resolvedContentViewURL(
 }
 
 nonisolated private struct ToolVersionBuildSettingsSnapshot: Codable, Equatable {
-    var appKindRawValue: String
+    var appKind: String
     var menuBarSystemImage: String
     var sandboxEnabled: Bool
-    var sandboxPermissionRawValues: String
-    var resourcePermissionRawValues: String
+    var sandboxPermissions: String
+    var resourcePermissions: String
+
+    private enum CodingKeys: String, CodingKey {
+        case appKind
+        case menuBarSystemImage
+        case sandboxEnabled
+        case sandboxPermissions
+        case resourcePermissions
+        case appKindRawValue
+        case sandboxPermissionRawValues
+        case resourcePermissionRawValues
+    }
 
     init(settings: ToolGenerationSettings) {
-        appKindRawValue = settings.appKind.rawValue
+        appKind = settings.appKind.rawValue
         menuBarSystemImage = settings.menuBarSystemImage
         sandboxEnabled = settings.sandboxEnabled
-        sandboxPermissionRawValues = settings.sandboxPermissions.rawValueList
-        resourcePermissionRawValues = settings.resourcePermissions.rawValueList
+        sandboxPermissions = settings.sandboxPermissions.rawValueList
+        resourcePermissions = settings.resourcePermissions.rawValueList
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        appKind = try container.decodeIfPresent(String.self, forKey: .appKind)
+            ?? container.decodeIfPresent(String.self, forKey: .appKindRawValue)
+            ?? ToolAppKind.window.rawValue
+        menuBarSystemImage = try container.decodeIfPresent(String.self, forKey: .menuBarSystemImage)
+            ?? ToolMenuBarSymbol.fallback
+        sandboxEnabled = try container.decodeIfPresent(Bool.self, forKey: .sandboxEnabled)
+            ?? true
+        sandboxPermissions = try container.decodeIfPresent(String.self, forKey: .sandboxPermissions)
+            ?? container.decodeIfPresent(String.self, forKey: .sandboxPermissionRawValues)
+            ?? GeneratedAppSandboxPermissions.default.rawValueList
+        resourcePermissions = try container.decodeIfPresent(String.self, forKey: .resourcePermissions)
+            ?? container.decodeIfPresent(String.self, forKey: .resourcePermissionRawValues)
+            ?? GeneratedAppResourcePermissions.none.rawValueList
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(appKind, forKey: .appKind)
+        try container.encode(menuBarSystemImage, forKey: .menuBarSystemImage)
+        try container.encode(sandboxEnabled, forKey: .sandboxEnabled)
+        try container.encode(sandboxPermissions, forKey: .sandboxPermissions)
+        try container.encode(resourcePermissions, forKey: .resourcePermissions)
     }
 
     var settings: ToolGenerationSettings {
         ToolGenerationSettings(
-            appKind: ToolAppKind(rawValue: appKindRawValue) ?? .window,
+            appKind: ToolAppKind(rawValue: appKind) ?? .window,
             menuBarSystemImage: menuBarSystemImage,
             sandboxEnabled: sandboxEnabled,
-            sandboxPermissions: GeneratedAppSandboxPermissions(rawValueList: sandboxPermissionRawValues),
-            resourcePermissions: GeneratedAppResourcePermissions(rawValueList: resourcePermissionRawValues)
+            sandboxPermissions: GeneratedAppSandboxPermissions(rawValueList: sandboxPermissions),
+            resourcePermissions: GeneratedAppResourcePermissions(rawValueList: resourcePermissions)
         )
     }
 }

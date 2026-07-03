@@ -79,9 +79,85 @@ struct PersistenceTests {
             #expect(tool.generationPhase == ToolGenerationPhase.generatingSource)
             #expect(tool.generationMode == ToolGenerationMode.create)
             #expect(tool.pendingPrompt == "Build a resumable app")
-            #expect(container.schema.version == IronsmithSchemaV1.versionIdentifier)
+            #expect(container.schema.version == IronsmithSchemaV2.versionIdentifier)
             #expect(container.migrationPlan != nil)
         }
+    }
+
+    @MainActor
+    @Test
+    func v1StoreMigratesToV2EnumFieldsAndStoreLinkageDefaults() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appendingPathComponent("ironsmith.sqlite")
+        let config = ModelConfiguration(url: storeURL)
+        let toolID = UUID()
+        let modelID = UUID()
+
+        do {
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: IronsmithSchemaV1.self),
+                configurations: config
+            )
+            let context = ModelContext(container)
+            let provider = IronsmithSchemaV1.ProviderConfig(
+                identifier: "local",
+                displayName: "Local",
+                baseURLString: "",
+                authMode: .none,
+                origin: .builtIn
+            )
+            let tool = IronsmithSchemaV1.Tool(
+                id: toolID,
+                name: "Menu Timer",
+                sandboxEnabled: false,
+                appKind: .menuBar,
+                menuBarSystemImage: "timer",
+                sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+                resourcePermissions: GeneratedAppResourcePermissions([.camera, .microphone]),
+                packageRootPath: "/tmp/menu-timer",
+                generationState: .stopped,
+                generationPhase: .generatingSource,
+                generationMode: .edit,
+                pendingPrompt: "Make it better"
+            )
+            let model = IronsmithSchemaV1.ModelConfig(
+                id: modelID,
+                identifier: "mlx.example",
+                displayName: "Example MLX",
+                providerIdentifier: provider.identifier,
+                source: .mlx,
+                installState: .installed
+            )
+            context.insert(provider)
+            context.insert(tool)
+            context.insert(model)
+            try context.save()
+        }
+
+        let container = try IronsmithModelContainerFactory.make(configuration: config)
+        let context = ModelContext(container)
+        let tool = try #require(try context.fetch(FetchDescriptor<Tool>()).first)
+        let model = try #require(try context.fetch(FetchDescriptor<ModelConfig>()).first)
+
+        #expect(container.schema.version == IronsmithSchemaV2.versionIdentifier)
+        #expect(tool.id == toolID)
+        #expect(tool.appKind == .menuBar)
+        #expect(tool.generationState == .stopped)
+        #expect(tool.generationPhase == .generatingSource)
+        #expect(tool.generationMode == .edit)
+        #expect(tool.pendingPrompt == "Make it better")
+        #expect(tool.storedSandboxPermissions?.enabled == [.internet])
+        #expect(tool.storedResourcePermissions?.enabled == [.camera, .microphone])
+        #expect(tool.storeId == nil)
+        #expect(tool.storeAppId == nil)
+        #expect(tool.storeVersionId == nil)
+        #expect(tool.storeVersionNumber == nil)
+        #expect(tool.storeSourceSha256 == nil)
+        #expect(tool.storeImportedAt == nil)
+        #expect(tool.storeRemixedFromVersionId == nil)
+        #expect(model.id == modelID)
+        #expect(model.installState == .installed)
     }
 
     @MainActor

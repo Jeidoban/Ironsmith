@@ -14,11 +14,14 @@ struct ToolRowView: View {
     let isRebuilding: Bool
     let isRestoring: Bool
     let canRevert: Bool
+    let showsStoreActions: Bool
+    let canUpdateStoreVersion: Bool
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onRun: () -> Void
     let onRename: () -> Void
     let onRebuild: () -> Void
+    let onPublishToStore: () -> Void
     let onRevert: () -> Void
     let onExport: () -> Void
     let onShowInFinder: () -> Void
@@ -160,6 +163,10 @@ struct ToolRowView: View {
             .disabled(isGenerating || isBusy)
         Button("Rebuild App", action: onRebuild)
             .disabled(!tool.isGenerationReady || isBusy)
+        if showsStoreActions {
+            Button(storePublishActionTitle, action: onPublishToStore)
+                .disabled(!tool.isGenerationReady || isBusy)
+        }
         Button("Go Back to Previous Version", action: onRevert)
             .disabled(!tool.isGenerationReady || !canRevert || isBusy)
         Button("Export App", action: onExport)
@@ -191,6 +198,10 @@ struct ToolRowView: View {
         }
 
         return "Launch App"
+    }
+
+    private var storePublishActionTitle: String {
+        canUpdateStoreVersion ? "Update Store Version..." : "Publish to App Store..."
     }
 
     private func iconProgressOverlay(_ accessibilityLabel: String) -> some View {
@@ -302,11 +313,14 @@ struct ToolRowView: View {
         isRebuilding: false,
         isRestoring: false,
         canRevert: true,
+        showsStoreActions: true,
+        canUpdateStoreVersion: false,
         onSelect: {},
         onEdit: {},
         onRun: {},
         onRename: {},
         onRebuild: {},
+        onPublishToStore: {},
         onRevert: {},
         onExport: {},
         onShowInFinder: {},

@@ -76,14 +76,28 @@ final class IronsmithApplicationController {
     private let menuBarPopoverPresentationStore: MenuBarPopoverPresentationStore
     private let menuBarController: IronsmithMenuBarController?
     private let settingsWindowController: IronsmithSettingsWindowController?
+    private let storeWindowController: IronsmithStoreWindowController?
 
     init() {
         let isRunningTests = IronsmithRuntimeEnvironment.isRunningTests
         let inferenceStore = InferenceStore()
         var appKitSettingsWindowController: IronsmithSettingsWindowController?
-        let routeStore = IronsmithRouteStore {
-            appKitSettingsWindowController?.show()
-        }
+        var appKitStoreWindowController: IronsmithStoreWindowController?
+        var appKitMenuBarController: IronsmithMenuBarController?
+        let routeStore = IronsmithRouteStore(
+            openSettingsWindow: {
+                appKitSettingsWindowController?.show()
+            },
+            openStoreWindow: {
+                appKitStoreWindowController?.show()
+            },
+            openToolLibraryPopover: {
+                appKitMenuBarController?.show()
+            },
+            isStoreFeatureEnabled: {
+                IronsmithFeatureFlags.isStoreEnabled()
+            }
+        )
         let commandLineToolsGate = CommandLineToolsGate()
         let menuBarPopoverPresentationStore = MenuBarPopoverPresentationStore()
 
@@ -101,6 +115,7 @@ final class IronsmithApplicationController {
         self.menuBarPopoverPresentationStore = menuBarPopoverPresentationStore
         if isRunningTests {
             settingsWindowController = nil
+            storeWindowController = nil
             menuBarController = nil
         } else {
             let settingsWindowController = IronsmithSettingsWindowController(
@@ -110,7 +125,14 @@ final class IronsmithApplicationController {
             )
             appKitSettingsWindowController = settingsWindowController
             self.settingsWindowController = settingsWindowController
-            menuBarController = IronsmithMenuBarController(
+            let storeWindowController = IronsmithStoreWindowController(
+                modelContainer: modelContainer,
+                inferenceStore: inferenceStore,
+                routeStore: routeStore
+            )
+            appKitStoreWindowController = storeWindowController
+            self.storeWindowController = storeWindowController
+            let menuBarController = IronsmithMenuBarController(
                 rootView: AnyView(
                     LaunchRouterView(gate: commandLineToolsGate)
                         .modelContainer(modelContainer)
@@ -120,6 +142,8 @@ final class IronsmithApplicationController {
                 ),
                 presentationStore: menuBarPopoverPresentationStore
             )
+            appKitMenuBarController = menuBarController
+            self.menuBarController = menuBarController
         }
     }
 

@@ -5,6 +5,7 @@ enum IronsmithPreferenceKeys {
     nonisolated static let appleFoundationModelEnabled = "appleFoundationModel.enabled"
     nonisolated static let hasPresentedAppleFoundationModelWarning = "appleFoundationModel.hasPresentedWarning"
     nonisolated static let diagnosticsLoggingEnabled = "diagnosticsLoggingEnabled"
+    nonisolated static let featureStoreEnabled = "feature.store.enabled"
 
     #if DEBUG
     nonisolated static let debugAlwaysShowWelcomeOnboarding = "debug.alwaysShowWelcomeOnboarding"

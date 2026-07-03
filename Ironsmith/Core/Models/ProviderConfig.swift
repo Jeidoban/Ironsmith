@@ -28,7 +28,7 @@ enum ProviderAuthMode: String, Codable, CaseIterable {
     case platformCredits = "platform_credits"
 }
 
-typealias ProviderConfig = IronsmithSchemaV1.ProviderConfig
+typealias ProviderConfig = IronsmithSchemaV2.ProviderConfig
 
 extension ProviderConfig {
     static let localProviderIdentifier = "local"

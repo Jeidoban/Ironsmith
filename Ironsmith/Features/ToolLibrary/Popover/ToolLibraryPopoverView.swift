@@ -1,4 +1,5 @@
 import AuthenticationServices
+import Foundation
 import SwiftData
 import SwiftUI
 
@@ -10,6 +11,7 @@ struct ToolLibraryPopoverView: View {
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
+    @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled) private var isStoreFeatureEnabled = false
     #if DEBUG
     @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowWelcomeOnboarding)
     private var debugAlwaysShowWelcomeOnboarding = false
@@ -19,6 +21,7 @@ struct ToolLibraryPopoverView: View {
     let appUpdateStore: AppUpdateStore
     private let welcomeOnboardingStore: WelcomeOnboardingStore
     @State private var toolLibraryStore = ToolLibraryStore()
+    @State private var storePublisher: ToolLibraryStorePublisher
     @State private var toolPendingDeletion: Tool?
     @State private var toolPendingRename: Tool?
     @State private var pendingRenameName = ""
@@ -32,17 +35,29 @@ struct ToolLibraryPopoverView: View {
     init() {
         appUpdateStore = AppUpdateStore()
         welcomeOnboardingStore = WelcomeOnboardingStore()
+        _storePublisher = State(initialValue: ToolLibraryStorePublisher())
     }
 
+    @MainActor
     init(
         appUpdateStore: AppUpdateStore,
-        welcomeOnboardingStore: WelcomeOnboardingStore = WelcomeOnboardingStore()
+        welcomeOnboardingStore: WelcomeOnboardingStore? = nil,
+        storeClient: IronsmithStoreClient? = nil,
+        iconClient: ToolIconClient = .noOp
     ) {
         self.appUpdateStore = appUpdateStore
-        self.welcomeOnboardingStore = welcomeOnboardingStore
+        self.welcomeOnboardingStore = welcomeOnboardingStore ?? WelcomeOnboardingStore()
+        _storePublisher = State(
+            initialValue: ToolLibraryStorePublisher(
+                storeClient: storeClient ?? .live,
+                iconClient: iconClient
+            )
+        )
     }
 
     var body: some View {
+        @Bindable var storePublisher = storePublisher
+
         // The menu bar popover stays intentionally small: tool list first, prompt last.
         VStack(spacing: 14) {
             ToolLibraryPopoverHeaderView(
@@ -50,6 +65,10 @@ struct ToolLibraryPopoverView: View {
                 isLoadingModels: !inferenceStore.hasLoadedModels && !shouldForceNoModels,
                 selectedModelStatusText: selectedModelStatusText,
                 selectedIronsmithCreditWarningText: selectedIronsmithCreditWarningText,
+                isStoreEnabled: isStoreFeatureEnabled,
+                onOpenStore: {
+                    routeStore.open(.store(.root))
+                },
                 onOpenSettings: {
                     routeStore.open(.settings(.root))
                 }
@@ -75,6 +94,8 @@ struct ToolLibraryPopoverView: View {
                                 isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
                                 isRestoring: toolLibraryStore.restoringToolID == tool.id,
                                 canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
+                                showsStoreActions: isStoreFeatureEnabled,
+                                canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
                                 onSelect: {
                                     toolLibraryStore.toggleSelection(
                                         for: tool,
@@ -96,6 +117,9 @@ struct ToolLibraryPopoverView: View {
                                     Task {
                                         await toolLibraryStore.rebuild(tool, in: modelContext)
                                     }
+                                },
+                                onPublishToStore: {
+                                    routeStore.open(.toolLibrary(.publishTool(tool.id)))
                                 },
                                 onRevert: {
                                     Task {
@@ -146,6 +170,19 @@ struct ToolLibraryPopoverView: View {
             .task(id: restoreAvailabilityRefreshID) {
                 await toolLibraryStore.refreshRestoreAvailability(for: tools)
             }
+            .task(id: publishedStoreLinkRefreshID) {
+                guard isStoreFeatureEnabled else {
+                    await storePublisher.refreshPublishedStoreApps(
+                        isSignedIn: false,
+                        tools: tools
+                    )
+                    return
+                }
+                await storePublisher.refreshPublishedStoreApps(
+                    isSignedIn: inferenceStore.ironsmithSession != nil,
+                    tools: tools
+                )
+            }
 
             PromptComposerView(
                 prompt: $toolLibraryStore.prompt,
@@ -182,30 +219,26 @@ struct ToolLibraryPopoverView: View {
         .frame(width: 340, height: 520)
         .accessibilityIdentifier("tool-library-root")
         .onAppear {
-            toolLibraryStore.initializeNextGenerationSettingsIfNeeded(defaultGenerationSettings)
-            presentWelcomeOnboardingIfNeeded()
+            handlePopoverAppear()
         }
         .onDisappear {
             pauseWelcomeOnboardingPresentation()
         }
         .onChange(of: menuBarPopoverPresentationStore.showCount) { _, _ in
-            if shouldAlwaysShowWelcomeOnboarding {
-                hasCheckedWelcomeOnboarding = false
-            }
-            presentWelcomeOnboardingIfNeeded()
+            handlePopoverShow()
         }
         .onChange(of: menuBarPopoverPresentationStore.closeCount) { _, _ in
             pauseWelcomeOnboardingPresentation()
         }
         .task(id: selectedIronsmithRefreshID) {
-            guard selectedIronsmithRefreshID != nil else { return }
-            await inferenceStore.refreshIronsmithAccountSummary()
+            await refreshSelectedIronsmithAccountIfNeeded()
         }
         .task(id: inferenceStore.hasLoadedModels) {
             presentWelcomeOnboardingIfNeeded()
         }
         .onChange(of: tools.map(\.id)) { _, _ in
             toolLibraryStore.syncSelection(with: tools, defaultSettings: defaultGenerationSettings)
+            applyPendingToolLibraryRoute()
         }
         .onChange(of: defaultGenerationSettings) { _, settings in
             toolLibraryStore.initializeNextGenerationSettingsIfNeeded(settings)
@@ -218,14 +251,7 @@ struct ToolLibraryPopoverView: View {
         }
         .alert(
             "Ironsmith couldn’t finish",
-            isPresented: Binding(
-                get: { toolLibraryStore.presentedErrorMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        toolLibraryStore.clearPresentedError()
-                    }
-                }
-            )
+            isPresented: toolLibraryErrorPresentedBinding
         ) {
             if toolLibraryStore.presentedErrorAction == .buyIronsmithCredits {
                 Button("Buy Credits") {
@@ -238,14 +264,7 @@ struct ToolLibraryPopoverView: View {
         }
         .alert(
             "AI Model Unavailable",
-            isPresented: Binding(
-                get: { inferenceStore.selectedModelFallbackMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        inferenceStore.clearSelectedModelFallbackMessage()
-                    }
-                }
-            )
+            isPresented: modelFallbackPresentedBinding
         ) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -253,18 +272,19 @@ struct ToolLibraryPopoverView: View {
         }
         .alert(
             "Sign In Failed",
-            isPresented: Binding(
-                get: { inferenceStore.presentedErrorMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        inferenceStore.clearPresentedError()
-                    }
-                }
-            )
+            isPresented: signInErrorPresentedBinding
         ) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(inferenceStore.presentedErrorMessage ?? "")
+        }
+        .alert(
+            "App Store",
+            isPresented: storeErrorPresentedBinding
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(storePublisher.errorMessage ?? "")
         }
         .confirmationDialog(
             "Delete App?",
@@ -305,13 +325,94 @@ struct ToolLibraryPopoverView: View {
                 onComplete: completeWelcomeOnboarding
             )
         }
+        .sheet(isPresented: $storePublisher.isShowingPublishSheet) {
+            storePublishSheet
+        }
         .sheet(isPresented: $isShowingModelPicker) {
             ModelPickerSheetView(size: .popover)
         }
     }
 
+    @ViewBuilder
+    private var storePublishSheet: some View {
+        @Bindable var storePublisher = storePublisher
+
+        if let tool = tools.first(where: { $0.id == storePublisher.publishingToolID }) {
+            ToolLibraryStorePublishSheetView(
+                tool: tool,
+                isUpdatingPublishedListing: canUpdateStoreVersion(for: tool),
+                publishName: $storePublisher.publishName,
+                publishShortDescription: $storePublisher.publishShortDescription,
+                publishDescription: $storePublisher.publishDescription,
+                publishCategory: $storePublisher.publishCategory,
+                publishDisplayName: $storePublisher.publishDisplayName,
+                publishScreenshotName: storePublisher.publishScreenshotName,
+                needsDisplayName: storePublisher.needsDisplayName(inferenceStore: inferenceStore),
+                isPublishing: storePublisher.isPublishing,
+                onSaveDisplayName: {
+                    Task { await storePublisher.saveDisplayName(inferenceStore: inferenceStore) }
+                },
+                onChooseScreenshot: { url in
+                    storePublisher.importScreenshot(from: url)
+                },
+                onCancel: {
+                    storePublisher.isShowingPublishSheet = false
+                },
+                onPublish: {
+                    Task {
+                        await storePublisher.publish(
+                            tool,
+                            modelContext: modelContext,
+                            inferenceStore: inferenceStore,
+                            defaultSettings: defaultGenerationSettings,
+                            routeStore: routeStore
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    private func refreshSelectedIronsmithAccountIfNeeded() async {
+        guard selectedIronsmithRefreshID != nil else { return }
+        await inferenceStore.refreshIronsmithAccountSummary()
+    }
+
+    private func handlePopoverAppear() {
+        toolLibraryStore.initializeNextGenerationSettingsIfNeeded(defaultGenerationSettings)
+        presentWelcomeOnboardingIfNeeded()
+        applyPendingToolLibraryRoute()
+    }
+
+    private func handlePopoverShow() {
+        if shouldAlwaysShowWelcomeOnboarding {
+            hasCheckedWelcomeOnboarding = false
+        }
+        presentWelcomeOnboardingIfNeeded()
+        applyPendingToolLibraryRoute()
+    }
+
     private var restoreAvailabilityRefreshID: [String] {
         tools.map { "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)" }
+    }
+
+    private var publishedStoreLinkRefreshID: String {
+        let session = inferenceStore.ironsmithSession == nil ? "signed-out" : "signed-in"
+        let storeFeature = isStoreFeatureEnabled ? "store-on" : "store-off"
+        let links = tools
+            .compactMap { tool -> String? in
+                guard let storeId = tool.storeId,
+                      let storeAppId = tool.storeAppId
+                else { return nil }
+                return "\(storeId):\(storeAppId)"
+            }
+            .sorted()
+            .joined(separator: "|")
+        return "\(storeFeature)|\(session)|\(links)"
+    }
+
+    private func canUpdateStoreVersion(for tool: Tool) -> Bool {
+        storePublisher.canUpdateStoreVersion(for: tool)
     }
 
     private var canSubmitPrompt: Bool {
@@ -486,6 +587,26 @@ struct ToolLibraryPopoverView: View {
         isPromptFocused = true
     }
 
+    private func applyPendingToolLibraryRoute() {
+        guard let route = routeStore.consumeToolLibraryRoute() else { return }
+        switch route {
+        case .selectTool(let id, let focusPrompt):
+            guard let tool = tools.first(where: { $0.id == id }) else { return }
+            toolLibraryStore.selectForEditing(tool, defaultSettings: defaultGenerationSettings)
+            isPromptFocused = focusPrompt
+        case .publishTool(let id):
+            guard isStoreFeatureEnabled else { return }
+            guard let tool = tools.first(where: { $0.id == id }) else { return }
+            Task {
+                await storePublisher.beginPublishing(
+                    tool,
+                    inferenceStore: inferenceStore,
+                    tools: tools
+                )
+            }
+        }
+    }
+
     private func beginRenaming(_ tool: Tool) {
         toolPendingRename = tool
         pendingRenameName = tool.name
@@ -579,6 +700,50 @@ struct ToolLibraryPopoverView: View {
         )
     }
 
+    private var toolLibraryErrorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { toolLibraryStore.presentedErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    toolLibraryStore.clearPresentedError()
+                }
+            }
+        )
+    }
+
+    private var modelFallbackPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { inferenceStore.selectedModelFallbackMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    inferenceStore.clearSelectedModelFallbackMessage()
+                }
+            }
+        )
+    }
+
+    private var signInErrorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { inferenceStore.presentedErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    inferenceStore.clearPresentedError()
+                }
+            }
+        )
+    }
+
+    private var storeErrorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { storePublisher.errorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    storePublisher.errorMessage = nil
+                }
+            }
+        )
+    }
+
     private var renameAlertBinding: Binding<Bool> {
         Binding(
             get: { toolPendingRename != nil },
@@ -590,7 +755,6 @@ struct ToolLibraryPopoverView: View {
         )
     }
 }
-
 #Preview("Tool Library") {
     let container = try! IronsmithModelContainerFactory.make(isRunningTests: true)
     let menuBarPopoverPresentationStore = MenuBarPopoverPresentationStore()

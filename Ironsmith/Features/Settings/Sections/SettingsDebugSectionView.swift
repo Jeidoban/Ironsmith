@@ -11,6 +11,8 @@ struct SettingsDebugSectionView: View {
     private var alwaysShowAppleFoundationModelWarning = false
     @AppStorage(IronsmithPreferenceKeys.debugPopoverEmptyStateMode)
     private var popoverEmptyStateModeRawValue = ToolLibraryDebugPopoverEmptyStateMode.off.rawValue
+    @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled)
+    private var storeFeatureEnabled = false
     @State private var imagePlaygroundPrompt = ""
     @State private var imagePlaygroundPreview: NSImage?
     @State private var imagePlaygroundErrorMessage: String?
@@ -32,6 +34,14 @@ struct SettingsDebugSectionView: View {
                     Text(mode.displayName)
                         .tag(mode.rawValue)
                 }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Feature Flags")
+                    .font(.headline)
+
+                Toggle("App Store", isOn: $storeFeatureEnabled)
+                    .toggleStyle(.switch)
             }
 
             VStack(alignment: .leading, spacing: 10) {
