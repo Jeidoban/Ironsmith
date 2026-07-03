@@ -5,22 +5,26 @@ nonisolated struct AgentLanguageModelContext {
     let languageModel: any LanguageModel
     let metadataLanguageModel: any LanguageModel
     let options: GenerationOptions
-    let repairStrategy: ToolRepairStrategy
+    let pipelineConfiguration: ToolGenerationPipelineConfiguration
     let promptRefinementEnabled: Bool
     let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
+
+    var repairStrategy: ToolRepairStrategy {
+        pipelineConfiguration.repairStrategy
+    }
 
     init(
         languageModel: any LanguageModel,
         metadataLanguageModel: (any LanguageModel)?,
         options: GenerationOptions,
-        repairStrategy: ToolRepairStrategy,
+        pipelineConfiguration: ToolGenerationPipelineConfiguration,
         promptRefinementEnabled: Bool = true,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
         self.languageModel = languageModel
         self.metadataLanguageModel = metadataLanguageModel ?? AnyLanguageModel.SystemLanguageModel.default
         self.options = options
-        self.repairStrategy = repairStrategy
+        self.pipelineConfiguration = pipelineConfiguration
         self.promptRefinementEnabled = promptRefinementEnabled
         self.afterLanguageModelInvocation = afterLanguageModelInvocation
     }
@@ -28,7 +32,7 @@ nonisolated struct AgentLanguageModelContext {
     init(
         languageModel: any LanguageModel,
         options: GenerationOptions,
-        repairStrategy: ToolRepairStrategy,
+        pipelineConfiguration: ToolGenerationPipelineConfiguration,
         promptRefinementEnabled: Bool = true,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
@@ -36,7 +40,7 @@ nonisolated struct AgentLanguageModelContext {
             languageModel: languageModel,
             metadataLanguageModel: nil,
             options: options,
-            repairStrategy: repairStrategy,
+            pipelineConfiguration: pipelineConfiguration,
             promptRefinementEnabled: promptRefinementEnabled,
             afterLanguageModelInvocation: afterLanguageModelInvocation
         )

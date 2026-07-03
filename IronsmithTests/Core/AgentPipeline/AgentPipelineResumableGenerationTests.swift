@@ -173,7 +173,7 @@ extension AgentPipelineTests {
                 await promptCapture.record(prompt)
                 return continuation
             },
-            repairStrategy: .deterministicOnly,
+            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
@@ -197,7 +197,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func resumePartialEditDiffContinuesDraftAndAppliesCombinedDiff() async throws {
+    func resumePartialEditPatchContinuesDraftAndAppliesCombinedPatch() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -209,22 +209,18 @@ extension AgentPipelineTests {
         )
         let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: executableName)
         let contentViewURL = layout.sourceDirectoryURL.appendingPathComponent(layout.defaultContentViewFileName)
-        let partialDiff = """
-        --- ContentView.swift
-        +++ ContentView.swift
-        @@
-         struct ContentView: View {
-             var body: some View {
-        -        Text("old")
-        +        Text("
+        let partialPatch = """
+        <<<<<<< SEARCH
+                Text("old")
+        =======
+                Text("
         """
         let continuation = """
         new")
-             }
-         }
+        >>>>>>> REPLACE
         """
         try FileManager.default.createDirectory(at: layout.packageMetadataDirectoryURL, withIntermediateDirectories: true)
-        try partialDiff.write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
+        try partialPatch.write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
         tool.generationState = .stopped
         tool.generationPhase = .generatingEditDiff
         tool.generationMode = .edit
@@ -239,7 +235,7 @@ extension AgentPipelineTests {
                 await promptCapture.record(prompt)
                 return continuation
             },
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
@@ -263,8 +259,8 @@ extension AgentPipelineTests {
         #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
         let prompts = await promptCapture.prompts
         #expect(prompts.count == 1)
-        #expect(prompts.first?.contains("Continue the exact unified diff response") == true)
-        #expect(prompts.first?.contains(partialDiff) == true)
+        #expect(prompts.first?.contains("Continue the exact search/replace patch response") == true)
+        #expect(prompts.first?.contains(partialPatch) == true)
     }
 
     @MainActor

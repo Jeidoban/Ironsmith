@@ -253,7 +253,7 @@ extension AgentPipelineTests {
         let languageModelContext = AgentLanguageModelContext(
             languageModel: EmptyLanguageModel(),
             options: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1)
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1))
         )
         let dependencies = ToolGenerationRuntimeDependencies(
             toolsDirectoryURL: root,

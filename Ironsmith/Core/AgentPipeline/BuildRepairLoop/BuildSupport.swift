@@ -8,6 +8,23 @@ extension ContentViewBuildRepairLoop {
         let previousContentViewErrorCount: Int
         let phase: String
         let rollbackSubject: String
+        let allowsIncreasedContentViewErrors: Bool
+
+        init(
+            source: String,
+            originalSource: String,
+            previousContentViewErrorCount: Int,
+            phase: String,
+            rollbackSubject: String,
+            allowsIncreasedContentViewErrors: Bool = false
+        ) {
+            self.source = source
+            self.originalSource = originalSource
+            self.previousContentViewErrorCount = previousContentViewErrorCount
+            self.phase = phase
+            self.rollbackSubject = rollbackSubject
+            self.allowsIncreasedContentViewErrors = allowsIncreasedContentViewErrors
+        }
     }
 
     func betterCandidate(
@@ -75,6 +92,13 @@ extension ContentViewBuildRepairLoop {
                     """
                 )
             }
+        case .preserveCurrentSource:
+            AgentDiagnosticsLog.append(
+                """
+                Preserved current ContentView.swift after failed generation.
+                packageRoot: \(layout.packageRootURL.path)
+                """
+            )
         case .restoreOriginalSource(let originalSource):
             try context.write(originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
             AgentDiagnosticsLog.append(
@@ -115,6 +139,13 @@ extension ContentViewBuildRepairLoop {
                     """
                 )
             }
+        case .preserveCurrentSource:
+            AgentDiagnosticsLog.append(
+                """
+                Preserved current ContentView.swift after interruption.
+                packageRoot: \(layout.packageRootURL.path)
+                """
+            )
         case .restoreOriginalSource(let originalSource):
             try context.write(originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
             AgentDiagnosticsLog.append(
@@ -153,7 +184,9 @@ extension ContentViewBuildRepairLoop {
             return .finished
         }
 
-        guard state.contentViewErrors.count <= request.previousContentViewErrorCount else {
+        guard request.allowsIncreasedContentViewErrors
+            || state.contentViewErrors.count <= request.previousContentViewErrorCount
+        else {
             AgentDiagnosticsLog.append(
                 """
                 \(request.rollbackSubject) rolled back.

@@ -11,6 +11,7 @@ struct PromptComposerView: View {
     @Binding var appKind: ToolAppKind
     @Binding var sandboxPermissions: GeneratedAppSandboxPermissions
     @Binding var resourcePermissions: GeneratedAppResourcePermissions
+    @Binding var agentPipelineProfile: AgentPipelineProfilePreference
     let placeholder: String
     let showsSandboxControl: Bool
     let modelPickerTitle: String
@@ -84,6 +85,15 @@ struct PromptComposerView: View {
                     Label(kind.displayName, systemImage: kind == .menuBar ? "menubar.rectangle" : "macwindow")
                         .tag(kind)
                 }
+            }
+
+            Picker("Coding Agent", selection: $agentPipelineProfile) {
+                Text(AgentPipelineProfilePreference.automatic.displayName)
+                    .tag(AgentPipelineProfilePreference.automatic)
+                Text(AgentPipelineProfilePreference.largeModel.displayName)
+                    .tag(AgentPipelineProfilePreference.largeModel)
+                Text(AgentPipelineProfilePreference.smallModel.displayName)
+                    .tag(AgentPipelineProfilePreference.smallModel)
             }
 
             if showsSandboxControl {
@@ -263,6 +273,7 @@ private struct PromptComposerPreview: View {
             resourcePermissions: .constant(
                 isEditing ? GeneratedAppResourcePermissions([.camera]) : .none
             ),
+            agentPipelineProfile: .constant(.automatic),
             placeholder: isEditing
                 ? "Describe changes for Clipboard Cleaner…"
                 : "Describe a new app to build…",

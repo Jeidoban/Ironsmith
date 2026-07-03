@@ -13,7 +13,7 @@ extension AgentPipelineTests {
     static func makeRuntime(
         languageModel: any LanguageModel,
         generationOptions: GenerationOptions = GenerationOptions(),
-        repairStrategy: ToolRepairStrategy,
+        pipelineConfiguration: ToolGenerationPipelineConfiguration = .small(repairStrategy: .deterministicOnly),
         toolsDirectoryURL: URL,
         fileClient: AgentFileClient = .live,
         processClient: SwiftPackageProcessClient = .live,
@@ -28,7 +28,7 @@ extension AgentPipelineTests {
         let languageModelContext = AgentLanguageModelContext(
             languageModel: languageModel,
             options: generationOptions,
-            repairStrategy: repairStrategy,
+            pipelineConfiguration: pipelineConfiguration,
             promptRefinementEnabled: promptRefinementEnabled,
             afterLanguageModelInvocation: afterLanguageModelInvocation
         )
@@ -57,6 +57,18 @@ extension AgentPipelineTests {
         struct ContentView: View {
             var body: some View {
                 Text("\(text)")
+            }
+        }
+        """
+    }
+
+    static func sourceWithMissingMember(_ member: String) -> String {
+        """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                Text("Broken").\(member)()
             }
         }
         """
@@ -204,6 +216,22 @@ extension AgentPipelineTests {
         result.packageRootURL.appendingPathComponent("Sources/\(result.executableName)/ContentView.swift")
     }
 
+    nonisolated static func generatedContentViewURL(in packageRoot: URL) -> URL? {
+        let sourcesURL = packageRoot.appendingPathComponent("Sources", isDirectory: true)
+        guard let sourceDirectories = try? FileManager.default.contentsOfDirectory(
+            at: sourcesURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        return sourceDirectories
+            .first { url in
+                (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            }?
+            .appendingPathComponent("ContentView.swift")
+    }
+
     static let originalEditableSource = """
     import SwiftUI
 
@@ -214,28 +242,20 @@ extension AgentPipelineTests {
     }
     """
 
-    static let renameOldToNewDiff = """
-    --- ContentView.swift
-    +++ ContentView.swift
-    @@
-     struct ContentView: View {
-         var body: some View {
-    -        Text("old")
-    +        Text("new")
-         }
-     }
+    static let renameOldToNewPatch = """
+    <<<<<<< SEARCH
+            Text("old")
+    =======
+            Text("new")
+    >>>>>>> REPLACE
     """
 
-    static let breakOldTextDiff = """
-    --- ContentView.swift
-    +++ ContentView.swift
-    @@
-     struct ContentView: View {
-         var body: some View {
-    -        Text("old")
-    +        Text("broken").definitelyNotReal()
-         }
-     }
+    static let breakOldTextPatch = """
+    <<<<<<< SEARCH
+            Text("old")
+    =======
+            Text("broken").definitelyNotReal()
+    >>>>>>> REPLACE
     """
 }
 
@@ -458,11 +478,11 @@ actor BudgetExhaustionResponses {
         if prompt.description.contains("Build failed for ContentView.swift.") {
             repairCount += 1
             return """
-            --- ContentView.swift
-            +++ ContentView.swift
-            @@
-            -            Text("Broken \(repairCount)").missing\(repairCount)()
-            +            Text("Fixed \(repairCount)")
+            <<<<<<< SEARCH
+                        Text("Broken \(repairCount)").missing\(repairCount)()
+            =======
+                        Text("Fixed \(repairCount)")
+            >>>>>>> REPLACE
             """
         }
 

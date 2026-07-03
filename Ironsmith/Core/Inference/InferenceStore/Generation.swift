@@ -17,7 +17,7 @@ extension InferenceStore {
             languageModel: languageModel,
             metadataLanguageModel: AnyLanguageModel.SystemLanguageModel.default,
             options: options,
-            repairStrategy: repairStrategy(for: selectedModel, provider: provider),
+            pipelineConfiguration: pipelineConfiguration(for: selectedModel, provider: provider),
             promptRefinementEnabled: generationPreferences.generatedPromptRefinementEnabled,
             afterLanguageModelInvocation: { [weak self] in
                 guard shouldRefreshIronsmithCredits else { return }
@@ -67,10 +67,54 @@ extension InferenceStore {
         }
     }
 
-    private func repairStrategy(
+    private func pipelineConfiguration(
         for model: ModelConfig,
         provider: ProviderConfig?
-    ) -> ToolRepairStrategy {
+    ) -> ToolGenerationPipelineConfiguration {
+        let profile = resolvedAgentPipelineProfile(for: model, provider: provider)
+        switch profile {
+        case .smallModel:
+            return .small(repairStrategy: smallModelRepairStrategy(for: model))
+        case .largeModel:
+            return .large(
+                repairStrategy: .modelSearchReplace(
+                    maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
+                )
+            )
+        }
+    }
+
+    private func resolvedAgentPipelineProfile(
+        for model: ModelConfig,
+        provider: ProviderConfig?
+    ) -> AgentPipelineProfile {
+        switch generationPreferences.agentPipelineProfile {
+        case .smallModel:
+            return .smallModel
+        case .largeModel:
+            return .largeModel
+        case .automatic:
+            return defaultAgentPipelineProfile(for: model, provider: provider)
+        }
+    }
+
+    private func defaultAgentPipelineProfile(
+        for model: ModelConfig,
+        provider: ProviderConfig?
+    ) -> AgentPipelineProfile {
+        guard model.source == .remote else {
+            return .smallModel
+        }
+
+        switch provider?.kind {
+        case .ironsmith, .openAI, .anthropic, .gemini:
+            return .largeModel
+        case .local, .ollama, .customOpenAICompatible, nil:
+            return .smallModel
+        }
+    }
+
+    private func smallModelRepairStrategy(for model: ModelConfig) -> ToolRepairStrategy {
         switch model.source {
         case .appleFoundation:
             return .deterministicOnly
@@ -78,9 +122,13 @@ extension InferenceStore {
             guard !usesDeterministicOnlyMLXRepair(model) else {
                 return .deterministicOnly
             }
-            return .modelDiff(maxHunksPerTurn: 1)
+            return .modelSearchReplace(
+                maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn
+            )
         case .remote:
-            return .modelDiff(maxHunksPerTurn: nil)
+            return .modelSearchReplace(
+                maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn
+            )
         }
     }
 

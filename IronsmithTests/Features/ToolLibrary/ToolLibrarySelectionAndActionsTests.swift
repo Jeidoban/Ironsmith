@@ -749,7 +749,7 @@ extension ToolLibraryTests {
         try FileManager.default.createDirectory(at: layout.sourceDirectoryURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: layout.packageMetadataDirectoryURL, withIntermediateDirectories: true)
         try #"Text("last ready")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
-        try "partial diff".write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
+        try "partial patch".write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
 
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)

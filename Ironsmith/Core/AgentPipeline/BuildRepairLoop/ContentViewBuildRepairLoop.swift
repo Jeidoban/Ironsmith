@@ -53,7 +53,7 @@ struct ContentViewBuildRepairLoop {
     }
 
     struct RepairPromptPlan {
-        let maximumDiffHunks: Int?
+        let maximumPatchBlocks: Int
         let targetDiagnostics: [SwiftCompilerDiagnostic]
         let snippets: [ContentViewRepairSnippet]
     }
@@ -72,6 +72,7 @@ struct ContentViewBuildRepairLoop {
 
     enum FailureRecovery {
         case restoreBestCandidate
+        case preserveCurrentSource
         case restoreOriginalSource(String)
     }
 
@@ -141,7 +142,7 @@ struct ContentViewBuildRepairLoop {
                        generationAttempt < maximumGenerationAttempts {
                         AgentDiagnosticsLog.append(
                             """
-                            Edit diff fallback selected.
+                            Edit patch fallback selected.
                             packageRoot: \(layout.packageRootURL.path)
                             generationAttempt: \(generationAttempt)
                             invalidFailureCount: \(consecutiveRetryableCandidateFailures)
@@ -150,7 +151,7 @@ struct ContentViewBuildRepairLoop {
                         )
                         activeGenerator = fallback.makeGenerator()
                         consecutiveRetryableCandidateFailures = 0
-                        pendingRegenerationReason = "switched to whole-file edit after repeated invalid edit diffs"
+                        pendingRegenerationReason = "switched to whole-file edit after repeated invalid edit patches"
                     }
                     guard generationAttempt < maximumGenerationAttempts else {
                         break candidateLoop
@@ -203,8 +204,19 @@ struct ContentViewBuildRepairLoop {
                     minimumThreshold: regenerationThreshold
                 )
                 if state.contentViewErrors.count > sourceAwareRegenerationThreshold {
-                    pendingRegenerationReason = "ContentView error count \(state.contentViewErrors.count) exceeded regeneration threshold \(sourceAwareRegenerationThreshold)"
-                    continue
+                    if context.pipelineConfiguration.maximumGenerationAttempts > 1 {
+                        pendingRegenerationReason = "ContentView error count \(state.contentViewErrors.count) exceeded regeneration threshold \(sourceAwareRegenerationThreshold)"
+                        continue
+                    }
+                    AgentDiagnosticsLog.append(
+                        """
+                        Continuing repair despite high ContentView error count.
+                        packageRoot: \(layout.packageRootURL.path)
+                        contentViewErrorCount: \(state.contentViewErrors.count)
+                        regenerationThreshold: \(sourceAwareRegenerationThreshold)
+                        profile: \(context.pipelineConfiguration.profile.rawValue)
+                        """
+                    )
                 }
 
                 guard context.repairStrategy.usesModelRepair else {

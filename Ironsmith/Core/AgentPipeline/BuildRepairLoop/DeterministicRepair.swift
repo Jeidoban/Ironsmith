@@ -184,6 +184,9 @@ extension ContentViewBuildRepairLoop {
     }
 
     func repairBudget(for contentViewErrors: [SwiftCompilerDiagnostic]) -> Int {
+        if let maximumModelRepairAttempts = context.pipelineConfiguration.maximumModelRepairAttempts {
+            return maximumModelRepairAttempts
+        }
         let estimatedPassesForCurrentErrors = max(
             1,
             ContentViewRepairSupport.estimatedRepairGroupCount(

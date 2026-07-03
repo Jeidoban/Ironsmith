@@ -63,6 +63,7 @@ struct ToolGenerationRuntimeContext {
     let languageModel: any LanguageModel
     let metadataLanguageModel: any LanguageModel
     let generationOptions: GenerationOptions
+    let pipelineConfiguration: ToolGenerationPipelineConfiguration
     let repairStrategy: ToolRepairStrategy
     let toolsDirectoryURL: URL
     let fileClient: AgentFileClient
@@ -83,6 +84,7 @@ struct ToolGenerationRuntimeContext {
         self.languageModel = languageModelContext.languageModel
         self.metadataLanguageModel = languageModelContext.metadataLanguageModel
         self.generationOptions = languageModelContext.options
+        self.pipelineConfiguration = languageModelContext.pipelineConfiguration
         self.repairStrategy = languageModelContext.repairStrategy
         self.toolsDirectoryURL = dependencies.toolsDirectoryURL
         self.fileClient = dependencies.fileClient

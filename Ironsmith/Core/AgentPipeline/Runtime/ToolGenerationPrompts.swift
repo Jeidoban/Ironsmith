@@ -36,21 +36,21 @@ enum ToolGenerationPrompts {
         // MARK: - Helpers
         """
 
-    static let diffRepairInstructions = """
+    static let searchReplaceRepairInstructions = """
         You are Ironsmith's Swift compiler repair agent.
         You repair exactly one file: ContentView.swift.
-        \(diffOutputContract)
-        \(validUnifiedDiffShapeExample)
+        \(searchReplaceOutputContract)
+        \(validSearchReplaceShapeExample)
         Keep each repair turn focused on the listed compiler diagnostics.
         """
 
-    static let diffEditInstructions = """
+    static let searchReplaceEditInstructions = """
         You are Ironsmith's Swift edit agent.
         You edit exactly one file: ContentView.swift.
-        \(diffOutputContract)
-        \(validUnifiedDiffShapeExample)
+        \(searchReplaceOutputContract)
+        \(validSearchReplaceShapeExample)
         Keep the edit focused on the user's requested change.
-        Prefer several small, focused hunks over one large hunk when multiple areas need changes.
+        Prefer the fewest unique search/replace blocks needed.
         """
 
     static func singleFileCreatePrompt(
@@ -117,17 +117,17 @@ enum ToolGenerationPrompts {
         """
     }
 
-    static func singleFileEditDiffPrompt(
+    static func singleFileEditPatchPrompt(
         userPrompt: String,
         executableName: String,
         existingSource: String,
-        maximumDiffHunks: Int?
+        maximumPatchBlocks: Int
     ) -> String {
         """
         User request: \(userPrompt)
         Fixed package and target name: \(executableName).
-        Edit ContentView.swift by returning a unified diff only.
-        \(diffTurnReminder(maximumDiffHunks))
+        Edit ContentView.swift by returning search/replace patch blocks only.
+        \(patchTurnReminder(maximumPatchBlocks))
         Current authoritative ContentView.swift:
         ```swift
         \(existingSource)
@@ -155,22 +155,22 @@ enum ToolGenerationPrompts {
         """
     }
 
-    static func diffContinuationPrompt(
+    static func patchContinuationPrompt(
         originalPrompt: String,
-        partialDiff: String
+        partialPatch: String
     ) -> String {
         """
-        Continue the exact unified diff response that was interrupted.
-        Return only the next characters of the diff.
-        Do not repeat any text from the partial diff.
+        Continue the exact search/replace patch response that was interrupted.
+        Return only the next characters of the patch.
+        Do not repeat any text from the partial patch.
         Do not include markdown fences, explanations, or labels.
 
         Original request context:
         \(originalPrompt)
 
-        Partial unified diff already generated that needs to be completed:
-        ```diff
-        \(partialDiff)
+        Partial search/replace patch already generated that needs to be completed:
+        ```text
+        \(partialPatch)
         ```
         """
     }
@@ -181,7 +181,7 @@ enum ToolGenerationPrompts {
         editableSnippets: [ContentViewRepairSnippet] = [],
         previousOutcome: String?,
         compactionSummary: String?,
-        maximumDiffHunks: Int?
+        maximumPatchBlocks: Int
     ) -> String {
         var sections = [
             "Build failed for ContentView.swift.",
@@ -225,15 +225,15 @@ enum ToolGenerationPrompts {
                 Relevant current excerpts from authoritative ContentView.swift:
                 \(repairExcerptsText(editableSnippets))
                 These excerpts are context hints, not edit boundaries.
-                Your diff may edit any part of ContentView.swift needed to repair the listed diagnostics.
+                Your search/replace patch may edit any part of ContentView.swift needed to repair the listed diagnostics.
                 """
             )
         }
 
         sections.append(
             """
-            Return only a unified diff.
-            \(diffTurnReminder(maximumDiffHunks))
+            Return only search/replace patch blocks.
+            \(patchTurnReminder(maximumPatchBlocks))
             Do not reuse removed source from previous repair outcomes.
             Make one coherent repair step, then stop.
             """
@@ -242,37 +242,37 @@ enum ToolGenerationPrompts {
         return sections.joined(separator: "\n\n")
     }
 
-    private static let diffOutputContract = """
-        Return only a unified diff.
-        The diff must edit ContentView.swift only.
-        Use normal unified diff hunks with @@ headers and enough surrounding context to locate each edit uniquely.
-        Every @@ hunk must include at least one real + or - changed line; do not use @@ as an ellipsis or section separator.
-        Do not include prose, markdown fences, JSON, explanations, or unrelated rewrites in the diff.
-        Do not include apply-patch markers such as *** Begin Patch or *** End Patch.
+    private static let searchReplaceOutputContract = """
+        Return only search/replace patch blocks.
+        Each block must use this exact marker shape:
+        <<<<<<< SEARCH
+        exact code currently in ContentView.swift
+        =======
+        replacement code
+        >>>>>>> REPLACE
+        SEARCH text must be non-empty.
+        SEARCH text must be copied exactly from the current ContentView.swift and must match one unique region.
+        Include enough surrounding code in SEARCH to make it unique.
+        Empty REPLACE is allowed only when deleting code.
+        Do not include apply-patch markers.
+        Do not include prose, markdown fences, JSON, explanations, file paths, or unrelated rewrites.
         Do not rewrite the entire file unless the whole file is malformed.
         """
 
-    private static func diffTurnReminder(_ maximumDiffHunks: Int?) -> String {
+    private static func patchTurnReminder(_ maximumPatchBlocks: Int) -> String {
         """
-        \(diffHunkLimitInstruction(maximumDiffHunks))
-        Follow the diff output contract from your instructions.
+        Return at most \(max(1, maximumPatchBlocks)) search/replace patch block(s).
+        Follow the search/replace patch output contract from your instructions.
         """
     }
 
-    private static func diffHunkLimitInstruction(_ maximumDiffHunks: Int?) -> String {
-        if let maximumDiffHunks {
-            return "Return at most \(maximumDiffHunks) unified diff hunk(s)."
-        }
-        return "Use as many unified diff hunks as needed."
-    }
-
-    private static let validUnifiedDiffShapeExample = """
+    private static let validSearchReplaceShapeExample = """
         Valid response shape example (format only; do not copy this content):
-        --- ContentView.swift
-        +++ ContentView.swift
-        @@ -3,5 +3,5 @@
-        -    Text("Old")
-        +    Text("New")
+        <<<<<<< SEARCH
+            Text("Old")
+        =======
+            Text("New")
+        >>>>>>> REPLACE
         """
 
     private static func repairExcerptsText(_ snippets: [ContentViewRepairSnippet]) -> String {

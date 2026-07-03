@@ -65,7 +65,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func modelDiffEditAppliesUnifiedDiffAndStoresPreviousVersion() async throws {
+    func modelPatchEditAppliesSearchReplacePatchAndStoresPreviousVersion() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -74,13 +74,13 @@ extension AgentPipelineTests {
             executableName: "Calculator",
             source: Self.originalEditableSource
         )
-        let responses = LanguageModelResponseQueue([Self.renameOldToNewDiff])
+        let responses = LanguageModelResponseQueue([Self.renameOldToNewPatch])
         let runtime = Self.makeRuntime(
             languageModel: StubAgentLanguageModel { _, _ in
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -104,7 +104,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func modelDiffEditRetriesInvalidInitialDiffCandidate() async throws {
+    func modelPatchEditRetriesInvalidInitialPatchCandidate() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -114,8 +114,8 @@ extension AgentPipelineTests {
             source: Self.originalEditableSource
         )
         let responses = LanguageModelResponseQueue([
-            "not a diff",
-            Self.renameOldToNewDiff
+            "not a patch",
+            Self.renameOldToNewPatch
         ])
         let promptCapture = PromptCapture()
         let runtime = Self.makeRuntime(
@@ -124,7 +124,7 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -140,14 +140,14 @@ extension AgentPipelineTests {
         #expect(contentView.contains(#"Text("new")"#))
         let prompts = await promptCapture.prompts
         #expect(prompts.count == 2)
-        #expect(prompts.allSatisfy { $0.contains("Edit ContentView.swift by returning a unified diff only.") })
+        #expect(prompts.allSatisfy { $0.contains("Edit ContentView.swift by returning search/replace patch blocks only.") })
         #expect(!(prompts.contains { $0.contains("Rewrite ContentView.swift only.") }))
         #expect(await responses.count == 2)
     }
 
     @MainActor
     @Test
-    func modelDiffEditFallsBackToWholeFileEditAfterRepeatedInvalidInitialDiffs() async throws {
+    func smallModelPatchEditFallsBackToWholeFileEditAfterRepeatedInvalidInitialPatches() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -167,7 +167,7 @@ extension AgentPipelineTests {
         """
         let responses = LanguageModelResponseQueue([
             "",
-            "not a diff",
+            "not a patch",
             wholeFileEditedSource
         ])
         let promptCapture = PromptCapture()
@@ -177,7 +177,7 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -193,16 +193,16 @@ extension AgentPipelineTests {
         let prompts = await promptCapture.prompts
         #expect(contentView.contains(#"Text("whole file fallback")"#))
         #expect(prompts.count == 3)
-        #expect(prompts[0].contains("Edit ContentView.swift by returning a unified diff only."))
-        #expect(prompts[1].contains("Edit ContentView.swift by returning a unified diff only."))
+        #expect(prompts[0].contains("Edit ContentView.swift by returning search/replace patch blocks only."))
+        #expect(prompts[1].contains("Edit ContentView.swift by returning search/replace patch blocks only."))
         #expect(prompts[2].contains("Rewrite ContentView.swift only."))
-        #expect(!(prompts[2].contains("Edit ContentView.swift by returning a unified diff only.")))
+        #expect(!(prompts[2].contains("Edit ContentView.swift by returning search/replace patch blocks only.")))
         #expect(await responses.count == 3)
     }
 
     @MainActor
     @Test
-    func createModeDoesNotUseEditDiffFallback() async throws {
+    func createModeDoesNotUseEditPatchFallback() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -216,7 +216,7 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -232,14 +232,14 @@ extension AgentPipelineTests {
         #expect(contentView.contains(#"Text("created normally")"#))
         #expect(prompts.count == 1)
         #expect(prompts[0].contains("Generate ContentView.swift only."))
-        #expect(!(prompts[0].contains("Edit ContentView.swift by returning a unified diff only.")))
+        #expect(!(prompts[0].contains("Edit ContentView.swift by returning search/replace patch blocks only.")))
         #expect(!(prompts[0].contains("Rewrite ContentView.swift only.")))
         #expect(await responses.count == 1)
     }
 
     @MainActor
     @Test
-    func modelDiffEditUsesUnboundedRemoteInitialEditPolicy() async throws {
+    func modelPatchEditUsesProfilePatchBlockCaps() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -255,8 +255,8 @@ extension AgentPipelineTests {
         )
         let promptCapture = PromptCapture()
         let responses = LanguageModelResponseQueue([
-            Self.renameOldToNewDiff,
-            Self.renameOldToNewDiff
+            Self.renameOldToNewPatch,
+            Self.renameOldToNewPatch
         ])
         let model = StubAgentLanguageModel { prompt, _ in
             await promptCapture.record(prompt)
@@ -265,7 +265,7 @@ extension AgentPipelineTests {
         let localRuntime = Self.makeRuntime(
             languageModel: model,
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -273,7 +273,7 @@ extension AgentPipelineTests {
         let remoteRuntime = Self.makeRuntime(
             languageModel: model,
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: nil),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -292,9 +292,8 @@ extension AgentPipelineTests {
 
         let prompts = await promptCapture.prompts
         #expect(prompts.count == 2)
-        #expect(prompts[0].contains("Return at most 3 unified diff hunk(s)."))
-        #expect(prompts[1].contains("Use as many unified diff hunks as needed."))
-        #expect(!(prompts[1].contains("Return at most")))
+        #expect(prompts[0].contains("Return at most 1 search/replace patch block(s)."))
+        #expect(prompts[1].contains("Return at most 8 search/replace patch block(s)."))
         #expect(await responses.count == 2)
     }
 
@@ -328,7 +327,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .deterministicOnly,
+            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: SwiftPackageProcessClient(
                 build: { packageRoot in

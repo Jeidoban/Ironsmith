@@ -358,7 +358,7 @@ struct SingleFileToolGenerationRuntime {
                 contentViewPath: contentViewPath,
                 existingSource: existingSource,
                 lifecycle: lifecycle,
-                resumePartialDiff: startingPhase == .generatingEditDiff,
+                resumePartialPatch: startingPhase == .generatingEditDiff,
                 resumePartialSource: startingPhase == .generatingSource
             )
             try await compileGeneratedTool(
@@ -425,12 +425,21 @@ struct SingleFileToolGenerationRuntime {
             displayName: displayName,
             contentViewPath: contentViewPath,
             regenerationThreshold: ToolGenerationRepairPolicy.regenerationThreshold,
-            maximumGenerationAttempts: ToolGenerationRepairPolicy.maximumGenerationAttempts,
+            maximumGenerationAttempts: context.pipelineConfiguration.maximumGenerationAttempts,
             lifecycle: lifecycle
         )
+        let effectiveFailureRecovery: ContentViewBuildRepairLoop.FailureRecovery
+        switch failureRecovery {
+        case .restoreOriginalSource:
+            effectiveFailureRecovery = failureRecovery
+        case .restoreBestCandidate, .preserveCurrentSource:
+            effectiveFailureRecovery = context.pipelineConfiguration.restoresBestCandidateOnFailure
+                ? failureRecovery
+                : .preserveCurrentSource
+        }
         try await repairLoop.run(
             generator: generator,
-            failureRecovery: failureRecovery
+            failureRecovery: effectiveFailureRecovery
         )
     }
 
@@ -548,7 +557,7 @@ struct SingleFileToolGenerationRuntime {
         contentViewPath: String,
         existingSource: String,
         lifecycle: ToolGenerationLifecycle,
-        resumePartialDiff: Bool,
+        resumePartialPatch: Bool,
         resumePartialSource: Bool
     ) -> ContentViewCandidateGenerator {
         if resumePartialSource || !context.repairStrategy.usesModelRepair {
@@ -563,58 +572,61 @@ struct SingleFileToolGenerationRuntime {
         }
 
         var didAttemptContinuation = false
-        let originalPrompt = ToolGenerationPrompts.singleFileEditDiffPrompt(
+        let originalPrompt = ToolGenerationPrompts.singleFileEditPatchPrompt(
             userPrompt: userPrompt,
             executableName: layout.executableName,
             existingSource: existingSource,
-            maximumDiffHunks: context.repairStrategy.maxInitialEditHunks
+            maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn
         )
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialDiff ? "continue edit diff" : "edit",
-            instructions: ToolGenerationPrompts.diffEditInstructions,
+            modeDescription: resumePartialPatch ? "continue edit patch" : "edit",
+            instructions: ToolGenerationPrompts.searchReplaceEditInstructions,
             retriesInvalidCandidates: true,
-            invalidCandidateFallback: ContentViewCandidateGenerator.InvalidCandidateFallback(
-                threshold: ToolGenerationRepairPolicy.invalidInitialEditDiffsBeforeFullFileEdit,
-                modeDescription: "edit whole-file fallback"
-            ) { session in
-                try await regenerateEditedContentView(
-                    userPrompt: userPrompt,
-                    layout: layout,
-                    contentViewPath: contentViewPath,
-                    existingSource: existingSource,
-                    lifecycle: lifecycle,
-                    session: session
-                )
-            }
+            invalidCandidateFallback: context.pipelineConfiguration
+                .fallsBackToWholeFileEditAfterInvalidInitialPatch
+                ? ContentViewCandidateGenerator.InvalidCandidateFallback(
+                    threshold: ToolGenerationRepairPolicy.invalidInitialEditPatchesBeforeFullFileEdit,
+                    modeDescription: "edit whole-file fallback"
+                ) { session in
+                    try await regenerateEditedContentView(
+                        userPrompt: userPrompt,
+                        layout: layout,
+                        contentViewPath: contentViewPath,
+                        existingSource: existingSource,
+                        lifecycle: lifecycle,
+                        session: session
+                    )
+                }
+                : nil
         ) { session in
-            if resumePartialDiff && !didAttemptContinuation {
+            if resumePartialPatch && !didAttemptContinuation {
                 didAttemptContinuation = true
-                let partialDiff = try context.readIfPresent(
+                let partialPatch = try context.readIfPresent(
                     ToolPackageLayout.pendingContentViewDraftPath,
                     packageRootURL: layout.packageRootURL
                 )
-                if !partialDiff.isEmpty {
-                    try await continueDiffDraft(
-                        partialDiff: partialDiff,
+                if !partialPatch.isEmpty {
+                    try await continuePatchDraft(
+                        partialPatch: partialPatch,
                         originalPrompt: originalPrompt,
                         originalSource: existingSource,
-                        maximumDiffHunks: context.repairStrategy.maxInitialEditHunks,
+                        maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn,
                         layout: layout,
                         contentViewPath: contentViewPath,
                         lifecycle: lifecycle,
                         session: session
                     )
-                    return
                 }
+                return
             }
 
-            try await regenerateEditedContentViewDiff(
+            try await regenerateEditedContentViewPatch(
                 userPrompt: userPrompt,
                 layout: layout,
                 contentViewPath: contentViewPath,
                 existingSource: existingSource,
-                maximumDiffHunks: context.repairStrategy.maxInitialEditHunks,
+                maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn,
                 lifecycle: lifecycle,
                 session: session
             )
@@ -701,34 +713,34 @@ struct SingleFileToolGenerationRuntime {
         }
     }
 
-    private func continueDiffDraft(
-        partialDiff: String,
+    private func continuePatchDraft(
+        partialPatch: String,
         originalPrompt: String,
         originalSource: String,
-        maximumDiffHunks: Int?,
+        maximumPatchBlocks: Int,
         layout: ToolPackageLayout,
         contentViewPath: String,
         lifecycle: ToolGenerationLifecycle,
         session: LanguageModelSession
     ) async throws {
-        let prompt = ToolGenerationPrompts.diffContinuationPrompt(
+        let prompt = ToolGenerationPrompts.patchContinuationPrompt(
             originalPrompt: originalPrompt,
-            partialDiff: partialDiff
+            partialPatch: partialPatch
         )
         do {
             try await lifecycle.updatePhase(.generating, .generatingEditDiff, nil)
             let continuation = try await context.streamText(in: session, to: prompt) { partialContinuation in
                 try context.write(
-                    partialDiff + partialContinuation,
+                    partialPatch + partialContinuation,
                     to: ToolPackageLayout.pendingContentViewDraftPath,
                     packageRootURL: layout.packageRootURL
                 )
             }
-            let sanitizedDiff = ContentViewRepairSupport.sanitizedRepairDiffSummary(partialDiff + continuation)
-            let editedSource = try ContentViewRepairSupport.applyValidatedDiff(
-                sanitizedDiff,
+            let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(partialPatch + continuation)
+            let editedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+                sanitizedPatch,
                 to: originalSource,
-                maximumHunks: maximumDiffHunks
+                maximumPatchBlocks: maximumPatchBlocks
             )
             try context.write(
                 editedSource,
@@ -736,10 +748,10 @@ struct SingleFileToolGenerationRuntime {
                 packageRootURL: layout.packageRootURL
             )
         } catch {
-            try trimPendingDiffDraftToLastValidPrefix(
+            try trimPendingPatchDraftToLastValidPrefix(
                 layout: layout,
                 originalSource: originalSource,
-                maximumDiffHunks: maximumDiffHunks
+                maximumPatchBlocks: maximumPatchBlocks
             )
             throw error
         }
@@ -823,10 +835,10 @@ struct SingleFileToolGenerationRuntime {
         return false
     }
 
-    private func trimPendingDiffDraftToLastValidPrefix(
+    private func trimPendingPatchDraftToLastValidPrefix(
         layout: ToolPackageLayout,
         originalSource: String,
-        maximumDiffHunks: Int?
+        maximumPatchBlocks: Int
     ) throws {
         let draft = try context.readIfPresent(
             ToolPackageLayout.pendingContentViewDraftPath,
@@ -837,12 +849,12 @@ struct SingleFileToolGenerationRuntime {
         for endIndex in stride(from: lines.count, through: 0, by: -1) {
             let candidate = lines.prefix(endIndex).joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard candidate.contains("@@") else { continue }
-            let sanitizedDiff = ContentViewRepairSupport.sanitizedRepairDiffSummary(candidate)
-            if (try? ContentViewRepairSupport.applyValidatedDiff(
-                sanitizedDiff,
+            guard candidate.contains("<<<<<<< SEARCH") else { continue }
+            let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(candidate)
+            if (try? ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+                sanitizedPatch,
                 to: originalSource,
-                maximumHunks: maximumDiffHunks
+                maximumPatchBlocks: maximumPatchBlocks
             )) != nil {
                 try context.write(
                     candidate,
@@ -947,29 +959,29 @@ struct SingleFileToolGenerationRuntime {
         }
     }
 
-    private func regenerateEditedContentViewDiff(
+    private func regenerateEditedContentViewPatch(
         userPrompt: String,
         layout: ToolPackageLayout,
         contentViewPath: String,
         existingSource: String,
-        maximumDiffHunks: Int?,
+        maximumPatchBlocks: Int,
         lifecycle: ToolGenerationLifecycle,
         session: LanguageModelSession
     ) async throws {
-        let prompt = ToolGenerationPrompts.singleFileEditDiffPrompt(
+        let prompt = ToolGenerationPrompts.singleFileEditPatchPrompt(
             userPrompt: userPrompt,
             executableName: layout.executableName,
             existingSource: existingSource,
-            maximumDiffHunks: maximumDiffHunks
+            maximumPatchBlocks: maximumPatchBlocks
         )
         let draftPath = ToolPackageLayout.pendingContentViewDraftPath
         let response: String
         do {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingEditDiff, nil)
-            response = try await context.streamText(in: session, to: prompt) { partialDiff in
+            response = try await context.streamText(in: session, to: prompt) { partialPatch in
                 try context.write(
-                    partialDiff,
+                    partialPatch,
                     to: draftPath,
                     packageRootURL: layout.packageRootURL
                 )
@@ -978,42 +990,42 @@ struct SingleFileToolGenerationRuntime {
         } catch {
             AgentDiagnosticsLog.append(
                 """
-                ContentView edit diff request failed.
+                ContentView edit patch request failed.
                 packageRoot: \(layout.packageRootURL.path)
                 mode: edit
                 error:
                 \(AgentDiagnosticsLog.renderError(error))
                 """
             )
-            try? trimPendingDiffDraftToLastValidPrefix(
+            try? trimPendingPatchDraftToLastValidPrefix(
                 layout: layout,
                 originalSource: existingSource,
-                maximumDiffHunks: maximumDiffHunks
+                maximumPatchBlocks: maximumPatchBlocks
             )
             throw error
         }
 
-        let sanitizedDiff = ContentViewRepairSupport.sanitizedRepairDiffSummary(response)
+        let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(response)
         try Task.checkCancellation()
         AgentDiagnosticsLog.append(
             """
-            Model edit diff proposed.
+            Model edit patch proposed.
             packageRoot: \(layout.packageRootURL.path)
             rawCharacters: \(response.count)
-            sanitizedDiff:
-            \(AgentDiagnosticsLog.compactMultiline(sanitizedDiff, limit: AgentDiagnosticsLog.repairDiffLimit))
+            sanitizedPatch:
+            \(AgentDiagnosticsLog.compactMultiline(sanitizedPatch, limit: AgentDiagnosticsLog.repairPatchLimit))
             """
         )
-        let editedSource = try ContentViewRepairSupport.applyValidatedDiff(
-            sanitizedDiff,
+        let editedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            sanitizedPatch,
             to: existingSource,
-            maximumHunks: maximumDiffHunks
+            maximumPatchBlocks: maximumPatchBlocks
         )
         AgentDiagnosticsLog.append(
             """
-            Model edit diff accepted.
+            Model edit patch accepted.
             packageRoot: \(layout.packageRootURL.path)
-            maxDiffHunks: \(maximumDiffHunks.map(String.init) ?? "unlimited")
+            maximumPatchBlocks: \(maximumPatchBlocks)
             """
         )
         try context.write(

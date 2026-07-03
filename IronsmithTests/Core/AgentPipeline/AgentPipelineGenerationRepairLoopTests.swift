@@ -51,7 +51,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .deterministicOnly,
+            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -129,7 +129,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -197,7 +197,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -250,15 +250,11 @@ extension AgentPipelineTests {
             }
             """,
             """
-            --- ContentView.swift
-            +++ ContentView.swift
-            @@ -2,7 +2,7 @@
-             struct ContentView: View {
-                 var body: some View {
-            -        Text("broken").definitelyNotReal()
-            +        Text("fixed by model repair")
-                 }
-             }
+            <<<<<<< SEARCH
+                    Text("broken").definitelyNotReal()
+            =======
+                    Text("fixed by model repair")
+            >>>>>>> REPLACE
             """
         ])
         let invocationCapture = LanguageModelInvocationCapture()
@@ -267,7 +263,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback(),
@@ -319,11 +315,8 @@ extension AgentPipelineTests {
         let brokenLines = (1...brokenLineCount)
             .map { "            Text(\"Broken \($0)\").definitelyNotReal()" }
             .joined(separator: "\n")
-        let removedBrokenLines = (1...brokenLineCount)
-            .map { "-            Text(\"Broken \($0)\").definitelyNotReal()" }
-            .joined(separator: "\n")
-        let addedFixedLines = (1...brokenLineCount)
-            .map { "+            Text(\"Fixed \($0)\")" }
+        let fixedLines = (1...brokenLineCount)
+            .map { "            Text(\"Fixed \($0)\")" }
             .joined(separator: "\n")
         let largeBrokenSource = """
         import SwiftUI
@@ -340,11 +333,11 @@ extension AgentPipelineTests {
         let responses = LanguageModelResponseQueue([
             largeBrokenSource,
             """
-            --- ContentView.swift
-            +++ ContentView.swift
-            @@
-            \(removedBrokenLines)
-            \(addedFixedLines)
+            <<<<<<< SEARCH
+            \(brokenLines)
+            =======
+            \(fixedLines)
+            >>>>>>> REPLACE
             """
         ])
         let runtime = Self.makeRuntime(
@@ -352,10 +345,12 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: nil),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: .fallback()
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(displayName: "Build A Large Model Repair", iconPrompt: "")
+            }
         )
 
         let result = try await runtime.generateTool(
@@ -371,6 +366,239 @@ extension AgentPipelineTests {
         #expect(!(contentView.contains("definitelyNotReal")))
         #expect(await responses.count == 2)
         #expect(await builds.count == 2)
+    }
+
+    @MainActor
+    @Test
+    func largeModelRepairPromptIncludesAllContentViewDiagnostics() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                VStack {
+                    Text("Broken 1").missingOne()
+                    Text("Broken 2").missingTwo()
+                }
+            }
+        }
+        """
+        let diagnostics = [
+            SwiftCompilerDiagnostic(
+                relativePath: "Sources/GeneratedTool/ContentView.swift",
+                line: 6,
+                column: 37,
+                severity: .error,
+                message: "value of type 'Text' has no member 'missingOne'",
+                supportingLines: []
+            ),
+            SwiftCompilerDiagnostic(
+                relativePath: "Sources/GeneratedTool/ContentView.swift",
+                line: 7,
+                column: 37,
+                severity: .error,
+                message: "value of type 'Text' has no member 'missingTwo'",
+                supportingLines: []
+            ),
+        ]
+        let languageModelContext = AgentLanguageModelContext(
+            languageModel: EmptyLanguageModel(),
+            options: GenerationOptions(),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn))
+        )
+        let dependencies = ToolGenerationRuntimeDependencies(
+            toolsDirectoryURL: toolsDirectory,
+            fileClient: .live,
+            processClient: .live,
+            appBundleClient: .noOp(),
+            versionBackupClient: .live
+        )
+        let runtimeContext = ToolGenerationRuntimeContext(
+            languageModelContext: languageModelContext,
+            dependencies: dependencies
+        )
+        let packageRoot = toolsDirectory.appendingPathComponent("PromptPlan", isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "PromptPlan")
+        let loop = ContentViewBuildRepairLoop(
+            context: runtimeContext,
+            layout: layout,
+            displayName: "Prompt Plan",
+            contentViewPath: layout.contentViewSourcePath,
+            regenerationThreshold: ToolGenerationRepairPolicy.regenerationThreshold,
+            maximumGenerationAttempts: 1,
+            lifecycle: .noop
+        )
+
+        let plan = loop.makeRepairPromptPlan(source: source, diagnostics: diagnostics)
+
+        #expect(plan.maximumPatchBlocks == ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)
+        #expect(plan.targetDiagnostics == diagnostics)
+    }
+
+    @MainActor
+    @Test
+    func largeModelSafetyLimitPreservesLatestAcceptedSource() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let initialSource = Self.sourceWithMissingMember("missing1")
+        let responses = LanguageModelResponseQueue(
+            [initialSource] + (1...ToolGenerationRepairPolicy.largeModelMaximumRepairAttempts).map { attempt in
+                """
+                <<<<<<< SEARCH
+                        Text("Broken").missing\(attempt)()
+                =======
+                        Text("Broken").missing\(attempt + 1)()
+                >>>>>>> REPLACE
+                """
+            }
+        )
+        let processClient = SwiftPackageProcessClient(
+            build: { packageRoot in
+                guard let contentViewURL = Self.generatedContentViewURL(in: packageRoot) else {
+                    return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                }
+                let source = (try? String(contentsOf: contentViewURL, encoding: .utf8)) ?? ""
+                guard let line = source.lineNumber(containing: ".missing") else {
+                    return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                }
+                let relativePath = "Sources/\(contentViewURL.deletingLastPathComponent().lastPathComponent)/ContentView.swift"
+                let output = "\(relativePath):\(line):25: error: value of type 'Text' has no member 'missing'"
+                return SwiftPackageBuildResult(succeeded: false, stdout: output, stderr: "", terminationStatus: 1)
+            },
+            showBinPath: { packageRoot in
+                packageRoot.appendingPathComponent(".build/debug", isDirectory: true)
+            },
+            launch: { _ in },
+            stripQuarantine: { _ in },
+            formatSwiftSource: { _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { _, _ in
+                try await responses.next()
+            },
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: processClient,
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(displayName: "Build Safety Limit Repair", iconPrompt: "")
+            }
+        )
+
+        do {
+            _ = try await runtime.generateTool(
+                for: "Build a safety limit repair tool",
+                settings: .default
+            )
+            Issue.record("Expected large-model repair to stop at the safety limit.")
+        } catch let error as ToolGenerationError {
+            #expect(error.localizedDescription.contains("ContentView.swift still has 1 compiler errors"))
+        }
+
+        let packageRoot = toolsDirectory.appendingPathComponent("build-safety-limit-repair", isDirectory: true)
+        let contentViewURL = try #require(Self.generatedContentViewURL(in: packageRoot))
+        let contentView = try String(contentsOf: contentViewURL, encoding: .utf8)
+        #expect(contentView.contains("missing5"))
+        #expect(await responses.count == ToolGenerationRepairPolicy.largeModelMaximumRepairAttempts + 1)
+    }
+
+    @MainActor
+    @Test
+    func largeModelRepairAcceptsTemporaryDiagnosticIncrease() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let initialSource = Self.sourceWithMissingMember("missingOne")
+        let twoErrorSource = """
+                VStack {
+                    Text("Broken").missingOne()
+                    Text("Also Broken").missingTwo()
+                }
+        """
+        let fixedSource = """
+                VStack {
+                    Text("Fixed")
+                    Text("Also Fixed")
+                }
+        """
+        let responses = LanguageModelResponseQueue([
+            initialSource,
+            """
+            <<<<<<< SEARCH
+                    Text("Broken").missingOne()
+            =======
+            \(twoErrorSource)
+            >>>>>>> REPLACE
+            """,
+            """
+            <<<<<<< SEARCH
+            \(twoErrorSource)
+            =======
+            \(fixedSource)
+            >>>>>>> REPLACE
+            """,
+        ])
+        let processClient = SwiftPackageProcessClient(
+            build: { packageRoot in
+                guard let contentViewURL = Self.generatedContentViewURL(in: packageRoot) else {
+                    return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                }
+                let source = (try? String(contentsOf: contentViewURL, encoding: .utf8)) ?? ""
+                let relativePath = "Sources/\(contentViewURL.deletingLastPathComponent().lastPathComponent)/ContentView.swift"
+                var diagnostics: [String] = []
+                if let line = source.lineNumber(containing: "missingOne") {
+                    diagnostics.append("\(relativePath):\(line):25: error: value of type 'Text' has no member 'missingOne'")
+                }
+                if let line = source.lineNumber(containing: "missingTwo") {
+                    diagnostics.append("\(relativePath):\(line):25: error: value of type 'Text' has no member 'missingTwo'")
+                }
+                guard !diagnostics.isEmpty else {
+                    return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                }
+                return SwiftPackageBuildResult(
+                    succeeded: false,
+                    stdout: diagnostics.joined(separator: "\n"),
+                    stderr: "",
+                    terminationStatus: 1
+                )
+            },
+            showBinPath: { packageRoot in
+                packageRoot.appendingPathComponent(".build/debug", isDirectory: true)
+            },
+            launch: { _ in },
+            stripQuarantine: { _ in },
+            formatSwiftSource: { _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { _, _ in
+                try await responses.next()
+            },
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: processClient,
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(displayName: "Temporary Increase Repair", iconPrompt: "")
+            }
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Build a temporary increase repair tool",
+            settings: .default
+        )
+
+        let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        #expect(contentView.contains(#"Text("Fixed")"#))
+        #expect(contentView.contains(#"Text("Also Fixed")"#))
+        #expect(await responses.count == 3)
     }
 
     @MainActor
@@ -432,7 +660,7 @@ extension AgentPipelineTests {
                 try await responses.next(prompt)
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: nil),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -455,7 +683,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func modelDiffEditRequestsFreshDiffAfterRepairPatchStalls() async throws {
+    func smallModelPatchEditRequestsFreshPatchAfterRepairPatchStalls() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -467,17 +695,17 @@ extension AgentPipelineTests {
         )
         let builds = UnsupportedModifierBuilds(executableName: executableName)
         let responses = LanguageModelResponseQueue([
-            Self.breakOldTextDiff,
-            "not a diff",
-            "still not a diff",
-            Self.renameOldToNewDiff
+            Self.breakOldTextPatch,
+            "not a patch",
+            "still not a patch",
+            Self.renameOldToNewPatch
         ])
         let runtime = Self.makeRuntime(
             languageModel: StubAgentLanguageModel { _, _ in
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: SwiftPackageProcessClient(
                 build: { packageRoot in

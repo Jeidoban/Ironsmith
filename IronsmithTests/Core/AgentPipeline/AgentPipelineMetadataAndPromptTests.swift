@@ -157,7 +157,7 @@ extension AgentPipelineTests {
                 return Self.simpleContentViewSource(text: "refined prompt")
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .deterministicOnly,
+            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in
@@ -199,7 +199,7 @@ extension AgentPipelineTests {
                 return Self.simpleContentViewSource(text: "original prompt")
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .deterministicOnly,
+            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in
@@ -240,10 +240,10 @@ extension AgentPipelineTests {
         let runtime = Self.makeRuntime(
             languageModel: StubAgentLanguageModel { prompt, _ in
                 await promptCapture.record(prompt)
-                return Self.renameOldToNewDiff
+                return Self.renameOldToNewPatch
             },
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: nil),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in

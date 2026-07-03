@@ -190,6 +190,7 @@ struct ToolLibraryPopoverView: View {
                 appKind: appKindBinding,
                 sandboxPermissions: sandboxPermissionsBinding,
                 resourcePermissions: resourcePermissionsBinding,
+                agentPipelineProfile: agentPipelineProfileBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
                 showsSandboxControl: showSandboxOverride,
                 modelPickerTitle: composerModelPickerTitle,
@@ -550,6 +551,15 @@ struct ToolLibraryPopoverView: View {
             set: { newValue in
                 toolLibraryStore.resourcePermissions = newValue
                 toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
+            }
+        )
+    }
+
+    private var agentPipelineProfileBinding: Binding<AgentPipelineProfilePreference> {
+        Binding(
+            get: { inferenceStore.generationPreferences.agentPipelineProfile },
+            set: { newValue in
+                inferenceStore.generationPreferences.agentPipelineProfile = newValue
             }
         )
     }

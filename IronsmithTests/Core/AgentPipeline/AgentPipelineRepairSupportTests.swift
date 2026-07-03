@@ -461,11 +461,11 @@ extension AgentPipelineTests {
             executableName: "Timer",
             existingSource: "import SwiftUI\n\nstruct ContentView: View { var body: some View { Text(\"Timer\") } }"
         )
-        let menuBarDiffPrompt = ToolGenerationPrompts.singleFileEditDiffPrompt(
+        let menuBarPatchPrompt = ToolGenerationPrompts.singleFileEditPatchPrompt(
             userPrompt: "Make it simpler",
             executableName: "Timer",
             existingSource: "import SwiftUI\n\nstruct ContentView: View { var body: some View { Text(\"Timer\") } }",
-            maximumDiffHunks: nil
+            maximumPatchBlocks: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn
         )
         let windowCreatePrompt = ToolGenerationPrompts.singleFileCreatePrompt(
             userPrompt: "Build a planner",
@@ -481,7 +481,7 @@ extension AgentPipelineTests {
         #expect(menuBarCreatePrompt.contains("bounded width and height"))
         #expect(!(menuBarCreatePrompt.contains("Avoid full-app layouts")))
 
-        for prompt in [menuBarEditPrompt, menuBarDiffPrompt] {
+        for prompt in [menuBarEditPrompt, menuBarPatchPrompt] {
             #expect(!(prompt.contains("App type: menu bar app.")))
             #expect(!(prompt.contains("MenuBarExtra popover-style window")))
             #expect(!(prompt.contains("compact menu bar utility")))
@@ -506,7 +506,7 @@ extension AgentPipelineTests {
     }
 
     @Test
-    func diffInstructionsIncludeValidUnifiedDiffShapeExample() {
+    func searchReplaceInstructionsIncludeValidPatchShapeExample() {
         let diagnostic = SwiftCompilerDiagnostic(
             relativePath: "Sources/GeneratedTool/ContentView.swift",
             line: 4,
@@ -515,41 +515,41 @@ extension AgentPipelineTests {
             message: "cannot find 'title' in scope",
             supportingLines: []
         )
-        let editPrompt = ToolGenerationPrompts.singleFileEditDiffPrompt(
+        let editPrompt = ToolGenerationPrompts.singleFileEditPatchPrompt(
             userPrompt: "Rename a label",
             executableName: "GeneratedTool",
             existingSource: "import SwiftUI\n\nstruct ContentView: View { var body: some View { Text(\"Old\") } }",
-            maximumDiffHunks: nil
+            maximumPatchBlocks: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
         )
         let repairPrompt = ToolGenerationPrompts.conversationalRepairPrompt(
             diagnostics: [diagnostic],
             source: nil,
             previousOutcome: nil,
             compactionSummary: nil,
-            maximumDiffHunks: 1
+            maximumPatchBlocks: 1
         )
         let prompts = [
-            ToolGenerationPrompts.diffEditInstructions,
-            ToolGenerationPrompts.diffRepairInstructions,
+            ToolGenerationPrompts.searchReplaceEditInstructions,
+            ToolGenerationPrompts.searchReplaceRepairInstructions,
         ]
 
         for prompt in prompts {
             #expect(prompt.contains("Valid response shape example"))
-            #expect(prompt.contains("--- ContentView.swift"))
-            #expect(prompt.contains("+++ ContentView.swift"))
-            #expect(prompt.contains("@@ -3,5 +3,5 @@"))
-            #expect(prompt.contains("-    Text(\"Old\")"))
-            #expect(prompt.contains("+    Text(\"New\")"))
-            #expect(prompt.contains("Every @@ hunk must include at least one real + or - changed line"))
+            #expect(prompt.contains("<<<<<<< SEARCH"))
+            #expect(prompt.contains("======="))
+            #expect(prompt.contains(">>>>>>> REPLACE"))
+            #expect(prompt.contains("Text(\"Old\")"))
+            #expect(prompt.contains("Text(\"New\")"))
+            #expect(prompt.contains("SEARCH text must be non-empty"))
             #expect(prompt.contains("Do not include apply-patch markers"))
             #expect(prompt.contains("Do not rewrite the entire file unless the whole file is malformed"))
         }
         #expect(!(editPrompt.contains("Valid response shape example")))
         #expect(!(repairPrompt.contains("Valid response shape example")))
-        #expect(editPrompt.contains("Follow the diff output contract from your instructions."))
-        #expect(repairPrompt.contains("Follow the diff output contract from your instructions."))
-        #expect(!(editPrompt.contains("Every @@ hunk must include at least one real + or - changed line")))
-        #expect(!(repairPrompt.contains("Every @@ hunk must include at least one real + or - changed line")))
+        #expect(editPrompt.contains("Follow the search/replace patch output contract from your instructions."))
+        #expect(repairPrompt.contains("Follow the search/replace patch output contract from your instructions."))
+        #expect(!(editPrompt.contains("SEARCH text must be non-empty")))
+        #expect(!(repairPrompt.contains("SEARCH text must be non-empty")))
         #expect(!(editPrompt.contains("Do not include apply-patch markers")))
         #expect(!(repairPrompt.contains("Do not include apply-patch markers")))
     }
@@ -583,12 +583,12 @@ extension AgentPipelineTests {
             editableSnippets: [snippet],
             previousOutcome: "accepted; ContentView error count 13 -> 9",
             compactionSummary: nil,
-            maximumDiffHunks: 3
+            maximumPatchBlocks: 3
         )
 
         #expect(prompt.contains("Relevant current excerpts from authoritative ContentView.swift"))
         #expect(prompt.contains("These excerpts are context hints, not edit boundaries"))
-        #expect(prompt.contains("Your diff may edit any part of ContentView.swift"))
+        #expect(prompt.contains("Your search/replace patch may edit any part of ContentView.swift"))
         #expect(prompt.contains("Lines 10-14"))
         #expect(prompt.contains("case .character(\"w\")"))
         #expect(prompt.contains("Do not reuse removed source from previous repair outcomes"))
@@ -596,7 +596,7 @@ extension AgentPipelineTests {
     }
 
     @Test
-    func conversationalRepairPromptAllowsUnboundedDiffHunks() {
+    func conversationalRepairPromptCapsPatchBlocks() {
         let diagnostic = SwiftCompilerDiagnostic(
             relativePath: "Sources/GeneratedTool/ContentView.swift",
             line: 12,
@@ -611,11 +611,10 @@ extension AgentPipelineTests {
             source: nil,
             previousOutcome: nil,
             compactionSummary: nil,
-            maximumDiffHunks: nil
+            maximumPatchBlocks: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
         )
 
-        #expect(prompt.contains("Use as many unified diff hunks as needed."))
-        #expect(!(prompt.contains("Return at most")))
+        #expect(prompt.contains("Return at most 8 search/replace patch block(s)."))
     }
 
     @Test
