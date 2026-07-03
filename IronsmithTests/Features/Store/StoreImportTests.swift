@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Testing
+
 @testable import Ironsmith
 
 struct StoreImportTests {
@@ -8,11 +9,16 @@ struct StoreImportTests {
     @Test
     func storeSourceHashVerificationRejectsTamperedDownloads() throws {
         let version = Self.versionDownload(
-            sourceCode: "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"bad\") } }",
+            sourceCode:
+                "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"bad\") } }",
             sourceSha256: String(repeating: "0", count: 64)
         )
 
-        #expect(throws: IronsmithStoreClientError.sourceHashMismatch(expected: version.sourceSha256, actual: IronsmithStoreClient.sha256Hex(for: version.sourceCode))) {
+        #expect(
+            throws: IronsmithStoreClientError.sourceHashMismatch(
+                expected: version.sourceSha256,
+                actual: IronsmithStoreClient.sha256Hex(for: version.sourceCode))
+        ) {
             try IronsmithStoreClient.verifySourceHash(version)
         }
     }
@@ -36,7 +42,9 @@ struct StoreImportTests {
             .importTool(StoreToolImportRequest(app: app, version: version, mode: .get), context)
 
         let tool = result.tool
-        let sourceOnDisk = try String(contentsOf: try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath), encoding: .utf8)
+        let sourceOnDisk = try String(
+            contentsOf: try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath),
+            encoding: .utf8)
         let tools = try context.fetch(FetchDescriptor<Tool>())
 
         #expect(result.mode == .get)
@@ -131,8 +139,10 @@ struct StoreImportTests {
         )
         let client = StoreToolImportClient.live(toolsDirectoryURL: root)
 
-        let first = try await client.importTool(StoreToolImportRequest(app: app, version: version, mode: .get), context)
-        let second = try await client.importTool(StoreToolImportRequest(app: app, version: version, mode: .get), context)
+        let first = try await client.importTool(
+            StoreToolImportRequest(app: app, version: version, mode: .get), context)
+        let second = try await client.importTool(
+            StoreToolImportRequest(app: app, version: version, mode: .get), context)
         let tools = try context.fetch(FetchDescriptor<Tool>())
 
         #expect(tools.count == 2)
@@ -170,25 +180,33 @@ struct StoreImportTests {
         let imported = try await StoreToolImportClient.live(toolsDirectoryURL: root)
             .importTool(StoreToolImportRequest(app: app, version: oldVersion, mode: .get), context)
 
-        guard case .updateExisting(let updatableTool) = store.installDisposition(for: app, tools: [imported.tool]) else {
+        guard
+            case .updateExisting(let updatableTool) = store.installDisposition(
+                for: app, tools: [imported.tool])
+        else {
             Issue.record("Expected an unchanged older import to be updatable.")
             return
         }
         #expect(updatableTool.id == imported.tool.id)
 
         try currentSource.write(
-            to: try imported.tool.packageLayout.packageFileURL(for: imported.tool.contentViewSourcePath),
+            to: try imported.tool.packageLayout.packageFileURL(
+                for: imported.tool.contentViewSourcePath),
             atomically: true,
             encoding: .utf8
         )
-        guard case .openExisting(let currentTool) = store.installDisposition(for: app, tools: [imported.tool]) else {
+        guard
+            case .openExisting(let currentTool) = store.installDisposition(
+                for: app, tools: [imported.tool])
+        else {
             Issue.record("Expected a local copy matching the current hash to open.")
             return
         }
         #expect(currentTool.id == imported.tool.id)
 
         try Self.sourceCode("edited").write(
-            to: try imported.tool.packageLayout.packageFileURL(for: imported.tool.contentViewSourcePath),
+            to: try imported.tool.packageLayout.packageFileURL(
+                for: imported.tool.contentViewSourcePath),
             atomically: true,
             encoding: .utf8
         )
@@ -233,6 +251,7 @@ struct StoreImportTests {
             name: "Clipboard Cleaner",
             shortDescription: "Clipboard cleanup",
             description: "Cleans clipboard text.",
+            category: .utilities,
             status: .published,
             publishedAt: "2026-06-27T00:00:00.000Z",
             createdAt: "2026-06-27T00:00:00.000Z",
@@ -269,7 +288,8 @@ struct StoreImportTests {
 
     private static func makeTemporaryDirectory() throws -> URL {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ironsmith-store-import-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(
+                "ironsmith-store-import-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }

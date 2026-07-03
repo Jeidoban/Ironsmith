@@ -7,6 +7,7 @@ struct ToolLibraryStorePublishSheetView: View {
     @Binding var publishName: String
     @Binding var publishShortDescription: String
     @Binding var publishDescription: String
+    @Binding var publishCategory: StoreAppCategory
     @Binding var publishDisplayName: String
     let publishScreenshotName: String?
     let needsDisplayName: Bool
@@ -26,7 +27,9 @@ struct ToolLibraryStorePublishSheetView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     TextField("Display Name", text: $publishDisplayName)
                     Button("Save Display Name", action: onSaveDisplayName)
-                        .disabled(publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(
+                            publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty)
                 }
             }
 
@@ -40,6 +43,11 @@ struct ToolLibraryStorePublishSheetView: View {
                     }
                 TextField("Description", text: $publishDescription, axis: .vertical)
                     .lineLimit(3...5)
+                Picker("Category", selection: $publishCategory) {
+                    ForEach(StoreAppCategory.allCases) { category in
+                        Text(category.title).tag(category)
+                    }
+                }
             }
 
             HStack {
@@ -80,7 +88,8 @@ struct ToolLibraryStorePublishSheetView: View {
 
     private var canPublish: Bool {
         (isUpdatingPublishedListing || listingFieldsAreValid)
-            && (!needsDisplayName || !publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && (!needsDisplayName
+                || !publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             && !tool.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 

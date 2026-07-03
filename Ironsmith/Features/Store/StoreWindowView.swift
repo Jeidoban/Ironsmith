@@ -7,80 +7,99 @@ struct StoreWindowView: View {
     @Environment(IronsmithRouteStore.self) private var routeStore
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @State private var store = StoreWindowStore()
+    @State private var path: [StoreNavigationDestination] = []
     @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         @Bindable var store = store
 
-        NavigationSplitView {
-            storeSidebar
-        } content: {
-            switch store.selectedTab {
-            case .discover:
-                StoreDiscoverListView(
-                    store: store,
-                    searchTask: $searchTask
-                )
-            case .published:
-                StorePublishedListView(
-                    store: store,
-                    tools: tools,
-                    inferenceStore: inferenceStore,
-                    onUpdateVersion: { tool in
-                        routeStore.open(.toolLibrary(.publishTool(tool.id)))
-                    }
-                )
-            }
-        } detail: {
-            StoreAppDetailView(
-                app: store.selectedAppDetail,
-                isLoading: store.isLoadingDetail,
-                isWorking: store.workingAppID == store.selectedAppDetail?.id,
-                installDisposition: store.selectedAppDetail.map {
-                    store.installDisposition(for: $0, tools: tools)
-                } ?? .createCopy,
-                canRemix: store.selectedAppDetail.map { !store.isOwnPublishedApp($0) } ?? false,
-                onGet: { app in
-                    Task {
-                        await store.install(
-                            app,
-                            mode: .get,
-                            tools: tools,
-                            modelContext: modelContext,
-                            routeStore: routeStore,
-                            inferenceStore: inferenceStore
-                        )
-                    }
-                },
-                onRemix: { app in
-                    Task {
-                        await store.install(
-                            app,
-                            mode: .remix,
-                            tools: tools,
-                            modelContext: modelContext,
-                            routeStore: routeStore,
-                            inferenceStore: inferenceStore
-                        )
-                    }
-                }
+        NavigationStack(path: $path) {
+            StoreDiscoverHomeView(
+                store: store,
+                tools: tools,
+                inferenceStore: inferenceStore,
+                onOpen: openApp,
+                onSeeAll: openSection,
+                onGet: install
             )
+            .navigationTitle("App Store")
+            .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search App Store")
+            .toolbar {
+                ToolbarItemGroup {
+                    Button {
+                        Task {
+                            if store.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty
+                            {
+                                await store.refreshHome()
+                            } else {
+                                await store.refreshDiscover()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .help("Refresh")
+
+                    Button {
+                        path = [.published]
+                        Task { await store.refreshPublished() }
+                    } label: {
+                        Label("Published", systemImage: "square.and.arrow.up")
+                    }
+                    .help("Published")
+                }
+            }
+            .navigationDestination(for: StoreNavigationDestination.self) { destination in
+                switch destination {
+                case .app(let appID):
+                    StoreAppDetailDestinationView(
+                        appID: appID,
+                        store: store,
+                        tools: tools,
+                        modelContext: modelContext,
+                        routeStore: routeStore,
+                        inferenceStore: inferenceStore
+                    )
+                case .section(let section):
+                    StoreSectionAppsView(
+                        section: section,
+                        store: store,
+                        tools: tools,
+                        inferenceStore: inferenceStore,
+                        onOpen: openApp,
+                        onGet: install
+                    )
+                case .published:
+                    StorePublishedListView(
+                        store: store,
+                        tools: tools,
+                        inferenceStore: inferenceStore,
+                        onOpen: openApp,
+                        onUpdateVersion: { tool in
+                            routeStore.open(.toolLibrary(.publishTool(tool.id)))
+                        }
+                    )
+                }
+            }
         }
-        .navigationTitle("App Store")
+        .onChange(of: store.searchText) { _, _ in
+            searchTask?.cancel()
+            searchTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                await store.refreshDiscover()
+            }
+        }
         .task {
             await store.loadInitial(inferenceStore: inferenceStore)
             if let route = routeStore.consumeStoreRoute() {
-                store.handle(route)
+                handleStoreRoute(route)
             }
         }
         .onChange(of: routeStore.pendingStoreRoute) { _, _ in
             guard let route = routeStore.consumeStoreRoute() else { return }
-            store.handle(route)
-        }
-        .onChange(of: store.selectedTab) { _, tab in
-            if tab == .published {
-                Task { await store.refreshPublished() }
-            }
+            handleStoreRoute(route)
         }
         .alert(
             "App Store",
@@ -99,68 +118,323 @@ struct StoreWindowView: View {
         }
     }
 
-    private var storeSidebar: some View {
-        List {
-            ForEach(StoreSidebarTab.allCases) { tab in
-                Button {
-                    store.selectedTab = tab
-                } label: {
-                    Label(tab.title, systemImage: tab.systemImage)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+    private func openApp(_ app: StoreAppSummary) {
+        store.select(app)
+        path.append(.app(app.id))
+    }
+
+    private func openSection(_ section: StoreHomeSection) {
+        path.append(.section(StoreSectionRoute(section: section)))
+    }
+
+    private func install(_ app: StoreAppSummary, mode: StoreToolImportMode = .get) {
+        Task {
+            await store.install(
+                app,
+                mode: mode,
+                tools: tools,
+                modelContext: modelContext,
+                routeStore: routeStore,
+                inferenceStore: inferenceStore
+            )
+        }
+    }
+
+    @MainActor
+    private func handleStoreRoute(_ route: IronsmithStoreRoute) {
+        switch route {
+        case .root:
+            path = []
+            Task { await store.refreshHome() }
+        case .published:
+            path = [.published]
+            Task { await store.refreshPublished() }
+        case .publishedApp(let appID):
+            path = [.published]
+            Task { @MainActor in
+                await store.refreshPublished()
+                if let app = store.publishedApps.first(where: { $0.id == appID }) {
+                    store.select(app)
+                    path = [.published, .app(app.id)]
                 }
-                .buttonStyle(.plain)
-                .padding(.vertical, 4)
-                .foregroundStyle(store.selectedTab == tab ? .primary : .secondary)
             }
         }
-        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
     }
 }
 
-private struct StoreDiscoverListView: View {
+private enum StoreNavigationDestination: Hashable {
+    case app(String)
+    case section(StoreSectionRoute)
+    case published
+}
+
+private struct StoreSectionRoute: Hashable, Identifiable {
+    let id: String
+    let title: String
+    let sort: StoreAppListSort
+    let category: StoreAppCategory?
+
+    init(section: StoreHomeSection) {
+        id = section.id
+        title = section.title
+        sort = section.sort
+        category = section.category
+    }
+}
+
+private struct StoreDiscoverHomeView: View {
     @Bindable var store: StoreWindowStore
-    @Binding var searchTask: Task<Void, Never>?
+    let tools: [Tool]
+    let inferenceStore: InferenceStore
+    let onOpen: (StoreAppSummary) -> Void
+    let onSeeAll: (StoreHomeSection) -> Void
+    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+
+    private var isSearching: Bool {
+        !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
-        List(selection: $store.selectedAppID) {
-            if store.isLoadingDiscover {
-                ProgressView()
-                    .frame(maxWidth: .infinity, alignment: .center)
-            } else if store.discoverApps.isEmpty {
-                StoreEmptyStateView(
-                    title: store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? "No apps yet"
-                        : "No search results",
-                    systemImage: "magnifyingglass"
-                )
-            } else {
-                ForEach(store.discoverApps) { app in
-                    StoreAppCardView(app: app)
-                        .tag(app.id)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            store.select(app)
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                if isSearching {
+                    StoreSearchResultsView(
+                        store: store,
+                        tools: tools,
+                        inferenceStore: inferenceStore,
+                        onOpen: onOpen,
+                        onGet: onGet
+                    )
+                } else if store.isLoadingDiscover, store.homeSections.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 120)
+                } else if store.homeSections.isEmpty {
+                    StoreEmptyStateView(title: "No apps yet", systemImage: "square.grid.2x2")
+                        .frame(minHeight: 420)
+                } else {
+                    if store.isLoadingDiscover {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.horizontal, 28)
+                    }
+                    ForEach(store.homeSections) { section in
+                        StoreHomeSectionView(
+                            section: section,
+                            tools: tools,
+                            inferenceStore: inferenceStore,
+                            workingAppID: store.workingAppID,
+                            onOpen: onOpen,
+                            onSeeAll: { onSeeAll(section) },
+                            onGet: onGet
+                        )
+                    }
                 }
             }
+            .padding(.vertical, 24)
         }
-        .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search App Store")
-        .onChange(of: store.searchText) { _, _ in
-            searchTask?.cancel()
-            searchTask = Task {
-                try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled else { return }
-                await store.refreshDiscover()
+    }
+}
+
+private struct StoreSearchResultsView: View {
+    @Bindable var store: StoreWindowStore
+    let tools: [Tool]
+    let inferenceStore: InferenceStore
+    let onOpen: (StoreAppSummary) -> Void
+    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Search Results")
+                .font(.largeTitle.weight(.semibold))
+                .padding(.horizontal, 28)
+
+            if store.isLoadingDiscover, store.discoverApps.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 80)
+            } else if store.discoverApps.isEmpty {
+                StoreEmptyStateView(title: "No search results", systemImage: "magnifyingglass")
+                    .frame(minHeight: 360)
+            } else {
+                StoreAppRowsView(
+                    apps: store.discoverApps,
+                    workingAppID: store.workingAppID,
+                    actionTitle: "Get",
+                    onOpen: onOpen,
+                    onAction: { onGet($0, .get) }
+                )
+                .padding(.horizontal, 28)
             }
         }
-        .toolbar {
-            Button {
-                Task { await store.refreshDiscover() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
+    }
+}
+
+private struct StoreHomeSectionView: View {
+    let section: StoreHomeSection
+    let tools: [Tool]
+    let inferenceStore: InferenceStore
+    let workingAppID: String?
+    let onOpen: (StoreAppSummary) -> Void
+    let onSeeAll: () -> Void
+    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 430), spacing: 44, alignment: .top)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Divider()
+                .padding(.horizontal, 28)
+
+            HStack(alignment: .firstTextBaseline) {
+                Text(section.title)
+                    .font(.largeTitle.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Button("See All", action: onSeeAll)
+                    .buttonStyle(.plain)
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(.blue)
             }
-            .help("Refresh")
+            .padding(.horizontal, 28)
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 0) {
+                ForEach(Array(section.apps.prefix(6))) { app in
+                    VStack(spacing: 0) {
+                        StoreAppStoreRowView(
+                            app: app,
+                            actionTitle: "Get",
+                            isWorking: workingAppID == app.id,
+                            onOpen: { onOpen(app) },
+                            onAction: { onGet(app, .get) }
+                        )
+                        Divider()
+                            .padding(.leading, 88)
+                    }
+                }
+            }
+            .padding(.horizontal, 28)
         }
+    }
+}
+
+private struct StoreSectionAppsView: View {
+    let section: StoreSectionRoute
+    @Bindable var store: StoreWindowStore
+    let tools: [Tool]
+    let inferenceStore: InferenceStore
+    let onOpen: (StoreAppSummary) -> Void
+    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+    @State private var apps: [StoreAppSummary] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(section.title)
+                    .font(.largeTitle.weight(.semibold))
+                    .padding(.horizontal, 28)
+
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 80)
+                } else if apps.isEmpty {
+                    StoreEmptyStateView(
+                        title: "No apps in this section", systemImage: "square.grid.2x2"
+                    )
+                    .frame(minHeight: 360)
+                } else {
+                    StoreAppRowsView(
+                        apps: apps,
+                        workingAppID: store.workingAppID,
+                        actionTitle: "Get",
+                        onOpen: onOpen,
+                        onAction: { onGet($0, .get) }
+                    )
+                    .padding(.horizontal, 28)
+                }
+            }
+            .padding(.vertical, 24)
+        }
+        .navigationTitle(section.title)
+        .task(id: section) {
+            isLoading = true
+            apps = await store.loadSectionApps(sort: section.sort, category: section.category)
+            isLoading = false
+        }
+    }
+}
+
+private struct StoreAppRowsView: View {
+    let apps: [StoreAppSummary]
+    let workingAppID: String?
+    let actionTitle: String
+    let onOpen: (StoreAppSummary) -> Void
+    let onAction: (StoreAppSummary) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(apps) { app in
+                StoreAppStoreRowView(
+                    app: app,
+                    actionTitle: actionTitle,
+                    isWorking: workingAppID == app.id,
+                    onOpen: { onOpen(app) },
+                    onAction: { onAction(app) }
+                )
+                Divider()
+                    .padding(.leading, 88)
+            }
+        }
+    }
+}
+
+private struct StoreAppStoreRowView: View {
+    let app: StoreAppSummary
+    let actionTitle: String
+    let isWorking: Bool
+    let onOpen: () -> Void
+    let onAction: () -> Void
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Button(action: onOpen) {
+                HStack(spacing: 16) {
+                    StoreIconView(url: app.icon?.url, size: 64)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(app.name)
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(1)
+                        Text(app.shortDescription)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 16)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isWorking {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 88)
+            } else {
+                Button(actionTitle, action: onAction)
+                    .font(.headline)
+                    .controlSize(.regular)
+                    .buttonStyle(.borderedProminent)
+                    .frame(width: 88)
+            }
+        }
+        .frame(minHeight: 92)
     }
 }
 
@@ -168,45 +442,61 @@ private struct StorePublishedListView: View {
     @Bindable var store: StoreWindowStore
     let tools: [Tool]
     let inferenceStore: InferenceStore
+    let onOpen: (StoreAppSummary) -> Void
     let onUpdateVersion: (Tool) -> Void
 
     var body: some View {
-        List(selection: $store.selectedAppID) {
-            if inferenceStore.ironsmithSession == nil {
-                StoreEmptyStateView(title: "Sign in to view published apps", systemImage: "person.crop.circle.badge.exclamationmark")
-            } else if store.isLoadingPublished {
-                ProgressView()
-                    .frame(maxWidth: .infinity, alignment: .center)
-            } else if store.publishedApps.isEmpty {
-                StoreEmptyStateView(
-                    title: "Published apps will appear here. Publish from your local app list.",
-                    systemImage: "square.and.arrow.up"
-                )
-            } else {
-                ForEach(store.publishedApps) { app in
-                    StorePublishedRowView(
-                        app: app,
-                        linkedTool: tools.first { $0.storeAppId == app.id },
-                        isWorking: store.workingAppID == app.id,
-                        onSelect: {
-                            store.select(app)
-                        },
-                        onUpdateVersion: { tool in
-                            onUpdateVersion(tool)
-                        },
-                        onToggleStatus: {
-                            Task {
-                                await store.setStatus(
-                                    app,
-                                    status: app.status == .published ? .unlisted : .published
-                                )
-                            }
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Published")
+                    .font(.largeTitle.weight(.semibold))
+                    .padding(.horizontal, 28)
+
+                if inferenceStore.ironsmithSession == nil {
+                    StoreEmptyStateView(
+                        title: "Sign in to view published apps",
+                        systemImage: "person.crop.circle.badge.exclamationmark"
                     )
-                    .tag(app.id)
+                    .frame(minHeight: 420)
+                } else if store.isLoadingPublished, store.publishedApps.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 80)
+                } else if store.publishedApps.isEmpty {
+                    StoreEmptyStateView(
+                        title: "Published apps will appear here. Publish from your local app list.",
+                        systemImage: "square.and.arrow.up"
+                    )
+                    .frame(minHeight: 420)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(store.publishedApps) { app in
+                            StorePublishedRowView(
+                                app: app,
+                                linkedTool: tools.first { $0.storeAppId == app.id },
+                                isWorking: store.workingAppID == app.id,
+                                onSelect: { onOpen(app) },
+                                onUpdateVersion: onUpdateVersion,
+                                onToggleStatus: {
+                                    Task {
+                                        await store.setStatus(
+                                            app,
+                                            status: app.status == .published
+                                                ? .unlisted : .published
+                                        )
+                                    }
+                                }
+                            )
+                            Divider()
+                                .padding(.leading, 72)
+                        }
+                    }
+                    .padding(.horizontal, 28)
                 }
             }
+            .padding(.vertical, 24)
         }
+        .navigationTitle("Published")
         .toolbar {
             Button {
                 Task { await store.refreshPublished() }
@@ -215,36 +505,6 @@ private struct StorePublishedListView: View {
             }
             .help("Refresh")
         }
-    }
-}
-
-private struct StoreAppCardView: View {
-    let app: StoreAppSummary
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            StoreIconView(url: app.icon?.url, size: 48)
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
-                    Text(app.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text("v\(app.latestVersionNumber)")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-                Text(app.authorDisplayName)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(app.shortDescription)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-        .padding(.vertical, 6)
     }
 }
 
@@ -258,16 +518,26 @@ private struct StorePublishedRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            StoreIconView(url: app.icon?.url, size: 42)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(app.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text("\(app.status.rawValue.capitalized) · v\(app.latestVersionNumber)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Button(action: onSelect) {
+                HStack(spacing: 12) {
+                    StoreIconView(url: app.icon?.url, size: 56)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(app.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(
+                            "\(app.status.rawValue.capitalized) · \(app.category.title) · v\(app.latestVersionNumber)"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    }
+                    Spacer()
+                }
+                .contentShape(Rectangle())
             }
-            Spacer()
+            .buttonStyle(.plain)
+
             if isWorking {
                 ProgressView()
                     .controlSize(.small)
@@ -286,9 +556,66 @@ private struct StorePublishedRowView: View {
             }
             .menuStyle(.borderlessButton)
         }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onSelect)
-        .padding(.vertical, 6)
+        .frame(minHeight: 76)
+    }
+}
+
+private struct StoreAppDetailDestinationView: View {
+    let appID: String
+    @Bindable var store: StoreWindowStore
+    let tools: [Tool]
+    let modelContext: ModelContext
+    let routeStore: IronsmithRouteStore
+    let inferenceStore: InferenceStore
+
+    var body: some View {
+        StoreAppDetailView(
+            app: store.selectedAppDetail?.id == appID ? store.selectedAppDetail : nil,
+            isLoading: store.isLoadingDetail,
+            isWorking: store.workingAppID == appID,
+            installDisposition: detail.map {
+                store.installDisposition(for: $0, tools: tools)
+            } ?? .createCopy,
+            canRemix: detail.map { !store.isOwnPublishedApp($0) } ?? false,
+            onGet: { app in
+                Task {
+                    await store.install(
+                        app,
+                        mode: .get,
+                        tools: tools,
+                        modelContext: modelContext,
+                        routeStore: routeStore,
+                        inferenceStore: inferenceStore
+                    )
+                }
+            },
+            onRemix: { app in
+                Task {
+                    await store.install(
+                        app,
+                        mode: .remix,
+                        tools: tools,
+                        modelContext: modelContext,
+                        routeStore: routeStore,
+                        inferenceStore: inferenceStore
+                    )
+                }
+            }
+        )
+        .navigationTitle(detail?.name ?? "App")
+        .task(id: appID) {
+            guard store.selectedAppDetail?.id != appID,
+                let summary = store.appSummary(id: appID)
+            else {
+                return
+            }
+            store.select(summary)
+        }
+    }
+
+    private var detail: StoreAppDetail? {
+        guard store.selectedAppDetail?.id == appID else { return nil }
+        return store.selectedAppDetail
     }
 }
 
@@ -307,17 +634,47 @@ private struct StoreAppDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         HStack(alignment: .top, spacing: 16) {
-                            StoreIconView(url: app.iconAsset?.url, size: 72)
+                            StoreIconView(url: app.iconAsset?.url, size: 88)
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(app.name)
-                                    .font(.title2.weight(.semibold))
-                                Text(app.authorDisplayName)
+                                    .font(.largeTitle.weight(.semibold))
+                                Text(app.shortDescription)
+                                    .font(.title3.weight(.medium))
                                     .foregroundStyle(.secondary)
-                                Text("Version \(app.currentVersion.versionNumber)")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                Text(
+                                    "\(app.authorDisplayName) · \(app.category.title) · Version \(app.currentVersion.versionNumber)"
+                                )
+                                .font(.callout.weight(.medium))
+                                .foregroundStyle(.secondary)
                             }
                             Spacer()
+                        }
+
+                        HStack {
+                            Button {
+                                onGet(app)
+                            } label: {
+                                Label(
+                                    installDisposition.buttonTitle,
+                                    systemImage: installDisposition.systemImage)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isWorking)
+
+                            if canRemix {
+                                Button {
+                                    onRemix(app)
+                                } label: {
+                                    Label("Remix", systemImage: "wand.and.sparkles")
+                                }
+                                .disabled(isWorking)
+                            }
+
+                            if isWorking {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
                         }
 
                         Text(app.description)
@@ -345,45 +702,21 @@ private struct StoreAppDetailView: View {
                                     StoreImagePlaceholder(systemImage: "photo")
                                 }
                             }
-                            .frame(maxWidth: .infinity, maxHeight: 320)
+                            .frame(maxWidth: .infinity, maxHeight: 360)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
 
                         StoreDetailMetadataView(app: app)
                         StoreVersionHistoryView(versions: app.recentVersions)
-
-                        HStack {
-                            Button {
-                                onGet(app)
-                            } label: {
-                                Label(installDisposition.buttonTitle, systemImage: installDisposition.systemImage)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(isWorking)
-
-                            if canRemix {
-                                Button {
-                                    onRemix(app)
-                                } label: {
-                                    Label("Remix", systemImage: "wand.and.sparkles")
-                                }
-                                .disabled(isWorking)
-                            }
-
-                            if isWorking {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
                     }
-                    .padding(24)
-                    .frame(maxWidth: 760, alignment: .leading)
+                    .padding(28)
+                    .frame(maxWidth: 860, alignment: .leading)
                 }
             } else if isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                StoreEmptyStateView(title: "Select an app", systemImage: "square.grid.2x2")
+                StoreEmptyStateView(title: "App not found", systemImage: "square.grid.2x2")
             }
         }
     }
@@ -394,8 +727,12 @@ private struct StoreDetailMetadataView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            StorePermissionChipsView(permissions: app.currentVersion.generationSettings.permissionChips)
+            StorePermissionChipsView(
+                permissions: app.currentVersion.generationSettings.permissionChips)
 
+            LabeledContent("Category") {
+                Text(app.category.title)
+            }
             LabeledContent("Source Hash") {
                 Text(shortHash(app.currentVersion.sourceSha256))
                     .monospaced()
@@ -464,6 +801,7 @@ private struct StoreVersionHistoryView: View {
         return date.formatted(date: .abbreviated, time: .omitted)
     }
 }
+
 private struct StoreIconView: View {
     let url: URL?
     let size: CGFloat
@@ -559,17 +897,22 @@ private struct FlowLayout: Layout {
         layout(in: proposal.replacingUnspecifiedDimensions().width, subviews: subviews).size
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
         let placements = layout(in: bounds.width, subviews: subviews).placements
         for placement in placements {
             subviews[placement.index].place(
-                at: CGPoint(x: bounds.minX + placement.frame.minX, y: bounds.minY + placement.frame.minY),
+                at: CGPoint(
+                    x: bounds.minX + placement.frame.minX, y: bounds.minY + placement.frame.minY),
                 proposal: ProposedViewSize(placement.frame.size)
             )
         }
     }
 
-    private func layout(in width: CGFloat, subviews: Subviews) -> (size: CGSize, placements: [(index: Int, frame: CGRect)]) {
+    private func layout(in width: CGFloat, subviews: Subviews) -> (
+        size: CGSize, placements: [(index: Int, frame: CGRect)]
+    ) {
         var x: CGFloat = 0
         var y: CGFloat = 0
         var lineHeight: CGFloat = 0

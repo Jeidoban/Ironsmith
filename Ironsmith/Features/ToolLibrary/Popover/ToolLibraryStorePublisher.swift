@@ -10,6 +10,7 @@ final class ToolLibraryStorePublisher {
     var publishName = ""
     var publishShortDescription = ""
     var publishDescription = ""
+    var publishCategory: StoreAppCategory = .utilities
     var publishDisplayName = ""
     var publishScreenshotData: Data?
     var publishScreenshotName: String?
@@ -63,7 +64,14 @@ final class ToolLibraryStorePublisher {
             for storeID in storeIDs {
                 var cursor: String?
                 repeat {
-                    let page = try await storeClient.listApps(storeID, .mine, nil, cursor)
+                    let page = try await storeClient.listApps(
+                        storeID,
+                        .mine,
+                        nil,
+                        cursor,
+                        .recent,
+                        nil
+                    )
                     for app in page.apps {
                         guard linkedAppIDs.contains(app.id) else { continue }
                         ownedAppsByID[app.id] = app
@@ -99,9 +107,11 @@ final class ToolLibraryStorePublisher {
         )
         publishingToolID = tool.id
         publishName = tool.name
-        publishShortDescription = linkedPublishedApp(for: tool)?.shortDescription
+        publishShortDescription =
+            linkedPublishedApp(for: tool)?.shortDescription
             ?? Self.defaultShortDescription(for: tool)
         publishDescription = "Created with Ironsmith."
+        publishCategory = linkedPublishedApp(for: tool)?.category ?? .utilities
         publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
         publishScreenshotData = nil
         publishScreenshotName = nil
@@ -136,7 +146,8 @@ final class ToolLibraryStorePublisher {
             if needsDisplayName(inferenceStore: inferenceStore) {
                 _ = try await inferenceStore.updateIronsmithAccountProfile(
                     IronsmithAccountProfileUpdate(
-                        displayName: publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        displayName: publishDisplayName.trimmingCharacters(
+                            in: .whitespacesAndNewlines)
                     )
                 )
             }
@@ -169,8 +180,11 @@ final class ToolLibraryStorePublisher {
                     StorePublicationRequest(
                         storeId: tool.storeId ?? IronsmithStoreConstants.communityStoreId,
                         name: publishName.trimmingCharacters(in: .whitespacesAndNewlines),
-                        shortDescription: publishShortDescription.trimmingCharacters(in: .whitespacesAndNewlines),
-                        description: publishDescription.trimmingCharacters(in: .whitespacesAndNewlines),
+                        shortDescription: publishShortDescription.trimmingCharacters(
+                            in: .whitespacesAndNewlines),
+                        description: publishDescription.trimmingCharacters(
+                            in: .whitespacesAndNewlines),
+                        category: publishCategory,
                         sourceCode: source,
                         generationSettings: settings,
                         iconPNG: iconPNG,
@@ -231,7 +245,8 @@ final class ToolLibraryStorePublisher {
     }
 
     private func present(_ error: Error) {
-        errorMessage = IronsmithErrorPresentation.message(for: error)
+        errorMessage =
+            IronsmithErrorPresentation.message(for: error)
             ?? error.localizedDescription
     }
 }

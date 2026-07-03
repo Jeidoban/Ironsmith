@@ -22,8 +22,8 @@ final class IronsmithStoreWindowController: NSWindowController {
         window.title = "App Store"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 880, height: 620)
-        window.setContentSize(NSSize(width: 1120, height: 760))
+        window.minSize = NSSize(width: 980, height: 680)
+        window.setContentSize(NSSize(width: 1200, height: 800))
 
         super.init(window: window)
     }

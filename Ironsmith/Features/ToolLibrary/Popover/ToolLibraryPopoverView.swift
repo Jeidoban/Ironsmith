@@ -334,6 +334,7 @@ struct ToolLibraryPopoverView: View {
                 publishName: $storePublisher.publishName,
                 publishShortDescription: $storePublisher.publishShortDescription,
                 publishDescription: $storePublisher.publishDescription,
+                publishCategory: $storePublisher.publishCategory,
                 publishDisplayName: $storePublisher.publishDisplayName,
                 publishScreenshotName: storePublisher.publishScreenshotName,
                 needsDisplayName: storePublisher.needsDisplayName(inferenceStore: inferenceStore),

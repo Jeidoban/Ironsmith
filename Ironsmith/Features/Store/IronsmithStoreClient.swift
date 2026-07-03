@@ -28,6 +28,41 @@ nonisolated enum StoreAssetKind: String, Codable, Equatable, Sendable {
     case screenshot
 }
 
+nonisolated enum StoreAppCategory: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
+    case productivity
+    case utilities
+    case developerTools
+    case creativity
+    case education
+    case finance
+    case lifestyle
+    case entertainment
+    case reference
+    case other
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .productivity: "Productivity"
+        case .utilities: "Utilities"
+        case .developerTools: "Developer Tools"
+        case .creativity: "Creativity"
+        case .education: "Education"
+        case .finance: "Finance"
+        case .lifestyle: "Lifestyle"
+        case .entertainment: "Entertainment"
+        case .reference: "Reference"
+        case .other: "Other"
+        }
+    }
+}
+
+nonisolated enum StoreAppListSort: String, Codable, Hashable, Sendable {
+    case recent
+    case trending
+}
+
 nonisolated struct AppStoreDescriptor: Decodable, Identifiable, Equatable, Sendable {
     struct Organization: Decodable, Equatable, Sendable {
         let id: String
@@ -71,11 +106,13 @@ nonisolated struct StoreGenerationSettingsDTO: Codable, Equatable, Sendable {
     }
 
     var permissionChips: [String] {
-        let sandbox = sandboxPermissions
+        let sandbox =
+            sandboxPermissions
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        let resources = resourcePermissions
+        let resources =
+            resourcePermissions
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -136,6 +173,7 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
     let authorDisplayName: String
     let name: String
     let shortDescription: String
+    let category: StoreAppCategory
     let status: StoreAppStatus
     let latestVersionNumber: Int
     let publishedAt: String
@@ -148,6 +186,7 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
         authorDisplayName: String,
         name: String,
         shortDescription: String,
+        category: StoreAppCategory,
         status: StoreAppStatus,
         latestVersionNumber: Int,
         publishedAt: String,
@@ -159,6 +198,7 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
         self.authorDisplayName = authorDisplayName
         self.name = name
         self.shortDescription = shortDescription
+        self.category = category
         self.status = status
         self.latestVersionNumber = latestVersionNumber
         self.publishedAt = publishedAt
@@ -173,6 +213,7 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
             authorDisplayName: detail.authorDisplayName,
             name: detail.name,
             shortDescription: detail.shortDescription,
+            category: detail.category,
             status: detail.status,
             latestVersionNumber: detail.currentVersion.versionNumber,
             publishedAt: detail.publishedAt,
@@ -191,6 +232,7 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
     let name: String
     let shortDescription: String
     let description: String
+    let category: StoreAppCategory
     let status: StoreAppStatus
     let publishedAt: String
     let createdAt: String
@@ -212,11 +254,20 @@ nonisolated struct StoreAppPage: Equatable, Sendable {
     let nextCursor: String?
 }
 
+nonisolated struct StoreHomeSection: Decodable, Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let category: StoreAppCategory?
+    let sort: StoreAppListSort
+    let apps: [StoreAppSummary]
+}
+
 nonisolated struct StorePublicationRequest: Sendable {
     let storeId: String
     let name: String
     let shortDescription: String
     let description: String
+    let category: StoreAppCategory
     let sourceCode: String
     let generationSettings: ToolGenerationSettings
     let iconPNG: Data
@@ -239,6 +290,7 @@ nonisolated struct StoreListingUpdateRequest: Encodable, Sendable {
     var name: String?
     var shortDescription: String?
     var description: String?
+    var category: StoreAppCategory?
     var status: StoreAppStatus?
 }
 
@@ -267,8 +319,16 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
 
 nonisolated struct IronsmithStoreClient {
     var listStores: @Sendable () async throws -> [AppStoreDescriptor]
+    var listHomeSections: @Sendable (_ storeId: String) async throws -> [StoreHomeSection]
     var listApps:
-        @Sendable (_ storeId: String, _ scope: StoreAppListScope, _ search: String?, _ cursor: String?) async throws
+        @Sendable (
+            _ storeId: String,
+            _ scope: StoreAppListScope,
+            _ search: String?,
+            _ cursor: String?,
+            _ sort: StoreAppListSort,
+            _ category: StoreAppCategory?
+        ) async throws
             -> StoreAppPage
     var fetchApp: @Sendable (_ storeId: String, _ appId: String) async throws -> StoreAppDetail
     var fetchVersion:
@@ -278,7 +338,8 @@ nonisolated struct IronsmithStoreClient {
     var publishVersion:
         @Sendable (_ request: StoreVersionPublicationRequest) async throws -> StoreAppDetail
     var patchListing:
-        @Sendable (_ storeId: String, _ appId: String, _ update: StoreListingUpdateRequest) async throws
+        @Sendable (_ storeId: String, _ appId: String, _ update: StoreListingUpdateRequest)
+            async throws
             -> StoreAppDetail
 }
 
@@ -302,12 +363,24 @@ extension IronsmithStoreClient {
                 )
                 return response.data
             },
-            listApps: { storeId, scope, search, cursor in
+            listHomeSections: { storeId in
+                let response: StoreDataEnvelope<[StoreHomeSection]> = try await api.request(
+                    "api/v1/stores/\(storeId)/apps/home",
+                    method: "GET",
+                    authentication: .optional
+                )
+                return response.data
+            },
+            listApps: { storeId, scope, search, cursor, sort, category in
                 var queryItems = [
                     URLQueryItem(name: "scope", value: scope.rawValue),
+                    URLQueryItem(name: "sort", value: sort.rawValue),
                 ]
                 if let search, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     queryItems.append(URLQueryItem(name: "q", value: search))
+                }
+                if let category {
+                    queryItems.append(URLQueryItem(name: "category", value: category.rawValue))
                 }
                 if let cursor {
                     queryItems.append(URLQueryItem(name: "cursor", value: cursor))
@@ -341,8 +414,10 @@ extension IronsmithStoreClient {
                     name: request.name,
                     shortDescription: request.shortDescription,
                     description: request.description,
+                    category: request.category,
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
-                    generationSettings: StoreGenerationSettingsDTO(settings: request.generationSettings),
+                    generationSettings: StoreGenerationSettingsDTO(
+                        settings: request.generationSettings),
                     remixedFromVersionId: request.remixedFromVersionId
                 )
                 let body = try StoreMultipartBody()
@@ -353,7 +428,10 @@ extension IronsmithStoreClient {
                         contentType: "text/x-swift",
                         data: Data(request.sourceCode.utf8)
                     )
-                    .addingFile(name: "icon", filename: "icon.png", contentType: "image/png", data: request.iconPNG)
+                    .addingFile(
+                        name: "icon", filename: "icon.png", contentType: "image/png",
+                        data: request.iconPNG
+                    )
                     .addingScreenshotFiles(request.screenshotPNGs)
                 let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(request.storeId)/apps",
@@ -367,7 +445,8 @@ extension IronsmithStoreClient {
             publishVersion: { request in
                 let metadata = StoreVersionMetadataPayload(
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
-                    generationSettings: StoreGenerationSettingsDTO(settings: request.generationSettings),
+                    generationSettings: StoreGenerationSettingsDTO(
+                        settings: request.generationSettings),
                     remixedFromVersionId: request.remixedFromVersionId,
                     replaceScreenshots: request.replaceScreenshots
                 )
@@ -380,7 +459,8 @@ extension IronsmithStoreClient {
                         data: Data(request.sourceCode.utf8)
                     )
                 if let iconPNG = request.iconPNG {
-                    body = body.addingFile(name: "icon", filename: "icon.png", contentType: "image/png", data: iconPNG)
+                    body = body.addingFile(
+                        name: "icon", filename: "icon.png", contentType: "image/png", data: iconPNG)
                 }
                 body = body.addingScreenshotFiles(request.screenshotPNGs)
                 let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
@@ -408,7 +488,8 @@ extension IronsmithStoreClient {
     nonisolated static var unconfigured: Self {
         Self(
             listStores: { throw IronsmithStoreClientError.notConfigured },
-            listApps: { _, _, _, _ in throw IronsmithStoreClientError.notConfigured },
+            listHomeSections: { _ in throw IronsmithStoreClientError.notConfigured },
+            listApps: { _, _, _, _, _, _ in throw IronsmithStoreClientError.notConfigured },
             fetchApp: { _, _ in throw IronsmithStoreClientError.notConfigured },
             fetchVersion: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
             publishApp: { _ in throw IronsmithStoreClientError.notConfigured },
@@ -526,7 +607,8 @@ nonisolated private struct StoreHTTPClient {
         }
         return .requestFailed(
             statusCode: statusCode,
-            message: backendError?.message ?? HTTPURLResponse.localizedString(forStatusCode: statusCode)
+            message: backendError?.message
+                ?? HTTPURLResponse.localizedString(forStatusCode: statusCode)
         )
     }
 }
@@ -558,6 +640,7 @@ nonisolated private struct StorePublicationMetadataPayload: Encodable {
     let name: String
     let shortDescription: String
     let description: String
+    let category: StoreAppCategory
     let runtimeVersion: String
     let generationSettings: StoreGenerationSettingsDTO
     let remixedFromVersionId: String?
@@ -582,8 +665,11 @@ nonisolated private struct StoreMultipartBody {
         "multipart/form-data; boundary=\(boundary)"
     }
 
-    func addingJSONField<Value: Encodable>(name: String, value: Value) throws -> StoreMultipartBody {
-        try addingField(name: name, value: String(data: StoreJSON.encoder.encode(value), encoding: .utf8) ?? "{}")
+    func addingJSONField<Value: Encodable>(name: String, value: Value) throws -> StoreMultipartBody
+    {
+        try addingField(
+            name: name,
+            value: String(data: StoreJSON.encoder.encode(value), encoding: .utf8) ?? "{}")
     }
 
     func addingField(name: String, value: String) throws -> StoreMultipartBody {
@@ -595,10 +681,13 @@ nonisolated private struct StoreMultipartBody {
         return copy
     }
 
-    func addingFile(name: String, filename: String, contentType: String, data fileData: Data) -> StoreMultipartBody {
+    func addingFile(name: String, filename: String, contentType: String, data fileData: Data)
+        -> StoreMultipartBody
+    {
         var copy = self
         copy.append("--\(boundary)\r\n")
-        copy.append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n")
+        copy.append(
+            "Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n")
         copy.append("Content-Type: \(contentType)\r\n\r\n")
         copy.data.append(fileData)
         copy.append("\r\n")

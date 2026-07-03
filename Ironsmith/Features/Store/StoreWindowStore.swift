@@ -2,27 +2,6 @@ import Foundation
 import Observation
 import SwiftData
 
-enum StoreSidebarTab: String, CaseIterable, Identifiable {
-    case discover
-    case published
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .discover: "Discover"
-        case .published: "Published"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .discover: "sparkles"
-        case .published: "square.and.arrow.up"
-        }
-    }
-}
-
 enum StoreAppInstallDisposition {
     case openExisting(Tool)
     case updateExisting(Tool)
@@ -48,9 +27,9 @@ enum StoreAppInstallDisposition {
 @MainActor
 @Observable
 final class StoreWindowStore {
-    var selectedTab: StoreSidebarTab = .discover
     var stores: [AppStoreDescriptor] = []
     var selectedStoreId = IronsmithStoreConstants.communityStoreId
+    var homeSections: [StoreHomeSection] = []
     var discoverApps: [StoreAppSummary] = []
     var publishedApps: [StoreAppSummary] = []
     var selectedAppID: String?
@@ -88,14 +67,23 @@ final class StoreWindowStore {
     }
 
     var selectedAppSummary: StoreAppSummary? {
-        discoverApps.first { $0.id == selectedAppID }
-            ?? publishedApps.first { $0.id == selectedAppID }
+        appSummary(id: selectedAppID)
+    }
+
+    func appSummary(id: String?) -> StoreAppSummary? {
+        guard let id else { return nil }
+        return
+            homeSections
+            .flatMap(\.apps)
+            .first { $0.id == id }
+            ?? discoverApps.first { $0.id == id }
+            ?? publishedApps.first { $0.id == id }
     }
 
     func loadInitial(inferenceStore: InferenceStore) async {
         guard stores.isEmpty else { return }
         await loadStores()
-        await refreshDiscover()
+        await refreshHome()
         if inferenceStore.ironsmithSession != nil {
             await refreshPublished()
         }
@@ -107,7 +95,8 @@ final class StoreWindowStore {
         do {
             stores = try await client.listStores()
             if !stores.contains(where: { $0.id == selectedStoreId }),
-               let firstStore = stores.first {
+                let firstStore = stores.first
+            {
                 selectedStoreId = firstStore.id
             }
         } catch {
@@ -115,14 +104,35 @@ final class StoreWindowStore {
         }
     }
 
+    func refreshHome() async {
+        isLoadingDiscover = true
+        defer { isLoadingDiscover = false }
+        do {
+            homeSections = try await client.listHomeSections(selectedStoreId)
+            if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                discoverApps = []
+            }
+            reconcileSelection()
+        } catch {
+            present(error)
+        }
+    }
+
     func refreshDiscover() async {
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearch.isEmpty else {
+            await refreshHome()
+            return
+        }
         isLoadingDiscover = true
         defer { isLoadingDiscover = false }
         do {
             let page = try await client.listApps(
                 selectedStoreId,
                 .discover,
-                searchText.trimmingCharacters(in: .whitespacesAndNewlines),
+                trimmedSearch,
+                nil,
+                .recent,
                 nil
             )
             discoverApps = page.apps
@@ -132,11 +142,69 @@ final class StoreWindowStore {
         }
     }
 
+    func loadSectionApps(
+        sort: StoreAppListSort,
+        category: StoreAppCategory?
+    ) async -> [StoreAppSummary] {
+        do {
+            return try await client.listApps(
+                selectedStoreId,
+                .discover,
+                nil,
+                nil,
+                sort,
+                category
+            ).apps
+        } catch {
+            present(error)
+            return []
+        }
+    }
+
+    func install(
+        _ app: StoreAppSummary,
+        mode: StoreToolImportMode,
+        tools: [Tool],
+        modelContext: ModelContext,
+        routeStore: IronsmithRouteStore,
+        inferenceStore: InferenceStore
+    ) async {
+        selectedAppID = app.id
+        do {
+            let detail: StoreAppDetail
+            if let selectedAppDetail, selectedAppDetail.id == app.id {
+                detail = selectedAppDetail
+            } else {
+                isLoadingDetail = true
+                defer { isLoadingDetail = false }
+                detail = try await client.fetchApp(app.storeId, app.id)
+                selectedAppDetail = detail
+            }
+            await install(
+                detail,
+                mode: mode,
+                tools: tools,
+                modelContext: modelContext,
+                routeStore: routeStore,
+                inferenceStore: inferenceStore
+            )
+        } catch {
+            present(error)
+        }
+    }
+
     func refreshPublished() async {
         isLoadingPublished = true
         defer { isLoadingPublished = false }
         do {
-            let page = try await client.listApps(selectedStoreId, .mine, nil, nil)
+            let page = try await client.listApps(
+                selectedStoreId,
+                .mine,
+                nil,
+                nil,
+                .recent,
+                nil
+            )
             publishedApps = page.apps
             reconcileSelection()
         } catch {
@@ -152,36 +220,20 @@ final class StoreWindowStore {
         }
     }
 
-    func handle(_ route: IronsmithStoreRoute) {
-        switch route {
-        case .root:
-            selectedTab = .discover
-        case .published:
-            selectedTab = .published
-            Task { await refreshPublished() }
-        case .publishedApp(let appId):
-            selectedTab = .published
-            Task {
-                await refreshPublished()
-                if let app = publishedApps.first(where: { $0.id == appId }) {
-                    select(app)
-                }
-            }
-        }
-    }
-
     func isOwnPublishedApp(_ app: StoreAppDetail) -> Bool {
         publishedApps.contains { $0.id == app.id }
     }
 
     func installDisposition(for app: StoreAppDetail, tools: [Tool]) -> StoreAppInstallDisposition {
         let linkedTools = tools.filter { $0.storeAppId == app.id }
-        if let currentTool = linkedTools.first(where: { localSourceHash(for: $0) == app.currentVersion.sourceSha256 }) {
+        if let currentTool = linkedTools.first(where: {
+            localSourceHash(for: $0) == app.currentVersion.sourceSha256
+        }) {
             return .openExisting(currentTool)
         }
         if let updatableTool = linkedTools.first(where: { tool in
             guard let importedHash = tool.storeSourceSha256,
-                  importedHash != app.currentVersion.sourceSha256
+                importedHash != app.currentVersion.sourceSha256
             else { return false }
             return localSourceHash(for: tool) == importedHash
         }) {
@@ -293,7 +345,8 @@ final class StoreWindowStore {
         routeStore: IronsmithRouteStore,
         inferenceStore: InferenceStore
     ) async throws {
-        let defaults = ToolLibraryStore.defaultGenerationSettings(from: inferenceStore.generationPreferences)
+        let defaults = ToolLibraryStore.defaultGenerationSettings(
+            from: inferenceStore.generationPreferences)
         let previousSettings = tool.generationSettings(defaults: defaults)
         let previousState = tool.generationState
         let previousPhase = tool.generationPhase
@@ -437,6 +490,20 @@ final class StoreWindowStore {
         if let index = discoverApps.firstIndex(where: { $0.id == app.id }) {
             discoverApps[index] = summary
         }
+        for sectionIndex in homeSections.indices {
+            if let appIndex = homeSections[sectionIndex].apps.firstIndex(where: { $0.id == app.id })
+            {
+                var apps = homeSections[sectionIndex].apps
+                apps[appIndex] = summary
+                homeSections[sectionIndex] = StoreHomeSection(
+                    id: homeSections[sectionIndex].id,
+                    title: homeSections[sectionIndex].title,
+                    category: homeSections[sectionIndex].category,
+                    sort: homeSections[sectionIndex].sort,
+                    apps: apps
+                )
+            }
+        }
         if selectedAppID == app.id {
             selectedAppDetail = app
         }
@@ -444,13 +511,9 @@ final class StoreWindowStore {
 
     private func reconcileSelection() {
         guard let selectedAppID else {
-            if let first = discoverApps.first ?? publishedApps.first {
-                select(first)
-            }
             return
         }
-        if discoverApps.contains(where: { $0.id == selectedAppID })
-            || publishedApps.contains(where: { $0.id == selectedAppID }) {
+        if appSummary(id: selectedAppID) != nil {
             return
         }
         selectedAppDetail = nil
@@ -458,7 +521,8 @@ final class StoreWindowStore {
     }
 
     private func present(_ error: Error) {
-        errorMessage = IronsmithErrorPresentation.message(for: error)
+        errorMessage =
+            IronsmithErrorPresentation.message(for: error)
             ?? error.localizedDescription
     }
 }
