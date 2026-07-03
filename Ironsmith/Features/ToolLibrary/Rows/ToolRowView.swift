@@ -14,6 +14,7 @@ struct ToolRowView: View {
     let isRebuilding: Bool
     let isRestoring: Bool
     let canRevert: Bool
+    let showsStoreActions: Bool
     let canUpdateStoreVersion: Bool
     let onSelect: () -> Void
     let onEdit: () -> Void
@@ -162,8 +163,10 @@ struct ToolRowView: View {
             .disabled(isGenerating || isBusy)
         Button("Rebuild App", action: onRebuild)
             .disabled(!tool.isGenerationReady || isBusy)
-        Button(storePublishActionTitle, action: onPublishToStore)
-            .disabled(!tool.isGenerationReady || isBusy)
+        if showsStoreActions {
+            Button(storePublishActionTitle, action: onPublishToStore)
+                .disabled(!tool.isGenerationReady || isBusy)
+        }
         Button("Go Back to Previous Version", action: onRevert)
             .disabled(!tool.isGenerationReady || !canRevert || isBusy)
         Button("Export App", action: onExport)
@@ -310,6 +313,7 @@ struct ToolRowView: View {
         isRebuilding: false,
         isRestoring: false,
         canRevert: true,
+        showsStoreActions: true,
         canUpdateStoreVersion: false,
         onSelect: {},
         onEdit: {},

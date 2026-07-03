@@ -128,6 +128,42 @@ struct AppRoutingTests {
 
     @MainActor
     @Test
+    func routeStoreIgnoresStoreRoutesWhenStoreFeatureIsDisabled() {
+        let storeCapture = SettingsWindowOpenCapture()
+        let store = IronsmithRouteStore(
+            openSettingsWindow: {},
+            openStoreWindow: {
+                storeCapture.open()
+            },
+            isStoreFeatureEnabled: { false }
+        )
+
+        store.open(.store(.root))
+
+        #expect(storeCapture.openCount == 0)
+        #expect(store.pendingStoreRoute == nil)
+    }
+
+    @MainActor
+    @Test
+    func routeStoreReportsStoreURLHandledButDoesNotOpenWhenStoreFeatureIsDisabled() throws {
+        let storeCapture = SettingsWindowOpenCapture()
+        let store = IronsmithRouteStore(
+            openSettingsWindow: {},
+            openStoreWindow: {
+                storeCapture.open()
+            },
+            isStoreFeatureEnabled: { false }
+        )
+        let url = try #require(URL(string: "com.jeidoban.ironsmith://store"))
+
+        #expect(store.handle(url))
+        #expect(storeCapture.openCount == 0)
+        #expect(store.pendingStoreRoute == nil)
+    }
+
+    @MainActor
+    @Test
     func routeStoreHandlesSupportedURL() throws {
         let capture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(openSettingsWindow: {

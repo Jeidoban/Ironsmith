@@ -8,6 +8,7 @@ struct ToolLibraryPopoverHeaderView: View {
     let isLoadingModels: Bool
     let selectedModelStatusText: String?
     let selectedIronsmithCreditWarningText: String?
+    let isStoreEnabled: Bool
     let onOpenStore: () -> Void
     let onOpenSettings: () -> Void
     private static let issueReportURL = URL(
@@ -30,15 +31,17 @@ struct ToolLibraryPopoverHeaderView: View {
                 .accessibilityIdentifier("app-update-button")
             }
 
-            Button(action: onOpenStore) {
-                Image(systemName: "shippingbox")
-                    .font(.system(size: 15, weight: .semibold))
+            if isStoreEnabled {
+                Button(action: onOpenStore) {
+                    Image(systemName: "shippingbox")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("App Store")
+                .accessibilityLabel("App Store")
+                .accessibilityIdentifier("app-store-button")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("App Store")
-            .accessibilityLabel("App Store")
-            .accessibilityIdentifier("app-store-button")
 
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape")
@@ -51,11 +54,13 @@ struct ToolLibraryPopoverHeaderView: View {
             .accessibilityIdentifier("settings-button")
 
             Menu {
-                Button("Browse App Store...") {
-                    onOpenStore()
-                }
+                if isStoreEnabled {
+                    Button("Browse App Store...") {
+                        onOpenStore()
+                    }
 
-                Divider()
+                    Divider()
+                }
 
                 Button("About Ironsmith") {
                     IronsmithAboutWindowController.shared.show()

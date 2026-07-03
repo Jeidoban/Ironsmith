@@ -11,6 +11,7 @@ struct ToolLibraryPopoverView: View {
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
+    @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled) private var isStoreFeatureEnabled = false
     #if DEBUG
     @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowWelcomeOnboarding)
     private var debugAlwaysShowWelcomeOnboarding = false
@@ -64,6 +65,7 @@ struct ToolLibraryPopoverView: View {
                 isLoadingModels: !inferenceStore.hasLoadedModels && !shouldForceNoModels,
                 selectedModelStatusText: selectedModelStatusText,
                 selectedIronsmithCreditWarningText: selectedIronsmithCreditWarningText,
+                isStoreEnabled: isStoreFeatureEnabled,
                 onOpenStore: {
                     routeStore.open(.store(.root))
                 },
@@ -92,6 +94,7 @@ struct ToolLibraryPopoverView: View {
                                 isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
                                 isRestoring: toolLibraryStore.restoringToolID == tool.id,
                                 canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
+                                showsStoreActions: isStoreFeatureEnabled,
                                 canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
                                 onSelect: {
                                     toolLibraryStore.toggleSelection(
@@ -168,6 +171,13 @@ struct ToolLibraryPopoverView: View {
                 await toolLibraryStore.refreshRestoreAvailability(for: tools)
             }
             .task(id: publishedStoreLinkRefreshID) {
+                guard isStoreFeatureEnabled else {
+                    await storePublisher.refreshPublishedStoreApps(
+                        isSignedIn: false,
+                        tools: tools
+                    )
+                    return
+                }
                 await storePublisher.refreshPublishedStoreApps(
                     isSignedIn: inferenceStore.ironsmithSession != nil,
                     tools: tools
@@ -388,6 +398,7 @@ struct ToolLibraryPopoverView: View {
 
     private var publishedStoreLinkRefreshID: String {
         let session = inferenceStore.ironsmithSession == nil ? "signed-out" : "signed-in"
+        let storeFeature = isStoreFeatureEnabled ? "store-on" : "store-off"
         let links = tools
             .compactMap { tool -> String? in
                 guard let storeId = tool.storeId,
@@ -397,7 +408,7 @@ struct ToolLibraryPopoverView: View {
             }
             .sorted()
             .joined(separator: "|")
-        return "\(session)|\(links)"
+        return "\(storeFeature)|\(session)|\(links)"
     }
 
     private func canUpdateStoreVersion(for tool: Tool) -> Bool {
@@ -584,6 +595,7 @@ struct ToolLibraryPopoverView: View {
             toolLibraryStore.selectForEditing(tool, defaultSettings: defaultGenerationSettings)
             isPromptFocused = focusPrompt
         case .publishTool(let id):
+            guard isStoreFeatureEnabled else { return }
             guard let tool = tools.first(where: { $0.id == id }) else { return }
             Task {
                 await storePublisher.beginPublishing(
