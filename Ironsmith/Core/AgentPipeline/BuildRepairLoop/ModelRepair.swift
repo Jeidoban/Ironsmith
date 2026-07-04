@@ -71,6 +71,9 @@ extension ContentViewBuildRepairLoop {
                     throw error
                 }
 
+                repairConversation.keepAuthoritativeSourceInSession(
+                    outcome: invalidRepairOutcome(for: error)
+                )
                 logSkippedRepairAttempt(
                     reason: skippedRepairReason,
                     attempt: attempt,
@@ -79,7 +82,8 @@ extension ContentViewBuildRepairLoop {
                 )
                 let invalidAttempts = increment(&failedCandidateAttemptsBySignature, for: failedCandidateSignature)
 
-                if invalidAttempts >= ToolGenerationRepairPolicy.invalidPatchAttemptsBeforeStall {
+                if context.pipelineConfiguration.regeneratesAfterModelRepairStall,
+                   invalidAttempts >= ToolGenerationRepairPolicy.invalidPatchAttemptsBeforeStall {
                     return .regenerate("model produced repeated \(skippedRepairReason.regenerationTitle)")
                 }
                 continue
@@ -91,7 +95,8 @@ extension ContentViewBuildRepairLoop {
                     originalSource: originalSource,
                     previousContentViewErrorCount: contentViewErrors.count,
                     phase: "repair attempt \(attempt)",
-                    rollbackSubject: "Repair diff"
+                    rollbackSubject: "Repair patch",
+                    allowsIncreasedContentViewErrors: !context.pipelineConfiguration.rollsBackModelRepairWhenErrorCountIncreases
                 )
             ) {
             case .finished:
@@ -109,7 +114,7 @@ extension ContentViewBuildRepairLoop {
                 } else {
                     progressOutcome = """
                     accepted but made no compiler progress; ContentView error count stayed \(contentViewErrors.count).
-                    The previous diff did not reduce compiler errors. Do not repeat the same diff; choose a different fix for the remaining diagnostics.
+                    The previous patch did not reduce compiler errors. Do not repeat the same patch; choose a different fix for the remaining diagnostics.
                     """
                 }
                 let outcome = repairOutcomeSummary(
@@ -129,8 +134,9 @@ extension ContentViewBuildRepairLoop {
                         maximumCount: repairDiagnosticBatchLimit(for: state.contentViewErrors)
                     )
                     let noProgressAttempts = increment(&acceptedNoProgressAttemptsBySignature, for: noProgressSignature)
-                    if noProgressAttempts >= 3 {
-                        return .regenerate("model accepted repeated no-progress diffs")
+                    if context.pipelineConfiguration.regeneratesAfterModelRepairStall,
+                       noProgressAttempts >= 3 {
+                        return .regenerate("model accepted repeated no-progress patches")
                     }
                 } else {
                     acceptedNoProgressAttemptsBySignature.removeAll()
@@ -142,8 +148,9 @@ extension ContentViewBuildRepairLoop {
                 )
                 repairConversation.keepAuthoritativeSourceInSession(outcome: outcome)
                 let rolledBackAttempts = increment(&failedCandidateAttemptsBySignature, for: failedCandidateSignature)
-                if rolledBackAttempts >= ToolGenerationRepairPolicy.invalidPatchAttemptsBeforeStall {
-                    return .regenerate("model diffs repeatedly rolled back")
+                if context.pipelineConfiguration.regeneratesAfterModelRepairStall,
+                   rolledBackAttempts >= ToolGenerationRepairPolicy.invalidPatchAttemptsBeforeStall {
+                    return .regenerate("model patches repeatedly rolled back")
                 }
             }
         }
@@ -153,12 +160,38 @@ extension ContentViewBuildRepairLoop {
         }
         AgentDiagnosticsLog.append(
             """
-            Repair budget exhausted; requesting regeneration.
+            Repair safety limit reached.
             packageRoot: \(layout.packageRootURL.path)
             repairBudget: \(repairBudget)
             contentViewErrorCount: \(state.contentViewErrors.count)
             """
         )
-        return .regenerate("model repair budget exhausted after \(repairBudget) attempts")
+        if context.pipelineConfiguration.regeneratesAfterModelRepairStall {
+            return .regenerate("model repair budget exhausted after \(repairBudget) attempts")
+        }
+        throw ToolGenerationError.stoppedToSaveTokens(
+            "Stopped after \(repairBudget) repair attempts preserve tokens. Continue to keep repairing from current source."
+        )
+    }
+
+    func invalidRepairOutcome(for error: any Error) -> String {
+        guard let validationError = error as? ContentViewRepairSupport.SearchReplacePatchValidationError else {
+            return """
+            The previous repair patch was invalid and was not applied.
+            Only patch code that exists in the current excerpts below.
+            """
+        }
+
+        if validationError.isStaleSearchFailure {
+            return """
+            The previous patch was invalid because a SEARCH block did not match the current ContentView.swift. Treat that block as stale; it may have already changed.
+            Only patch code that exists in the current excerpts below.
+            """
+        }
+
+        return """
+        The previous repair patch was invalid and was not applied: \(validationError.reason)
+        Only patch code that exists in the current excerpts below.
+        """
     }
 }

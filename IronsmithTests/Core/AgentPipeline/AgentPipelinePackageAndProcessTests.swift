@@ -22,7 +22,8 @@ extension AgentPipelineTests {
         #expect(layout.appEntrySourcePath == "Sources/DemoTool/DemoTool.swift")
         #expect(layout.sourcePath(for: "ContentView.swift") == "Sources/DemoTool/ContentView.swift")
         #expect(layout.contentViewSourcePath == "Sources/DemoTool/ContentView.swift")
-        #expect(layout.packageManifestContent().contains("swiftLanguageModes: [.v6]"))
+        #expect(layout.packageManifestContent().contains("swiftLanguageModes: [.v5]"))
+        #expect(!(layout.packageManifestContent().contains("swiftLanguageModes: [.v6]")))
         #expect(layout.fixedAppEntrySource().contains("ContentView()"))
     }
 
@@ -253,7 +254,7 @@ extension AgentPipelineTests {
         let languageModelContext = AgentLanguageModelContext(
             languageModel: EmptyLanguageModel(),
             options: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 1)
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1))
         )
         let dependencies = ToolGenerationRuntimeDependencies(
             toolsDirectoryURL: root,

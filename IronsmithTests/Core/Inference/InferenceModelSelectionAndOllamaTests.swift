@@ -8,7 +8,7 @@ import Testing
 extension InferenceTests {
     @MainActor
     @Test
-    func remoteModelsUseConversationalDiffRepairStrategy() async throws {
+    func openAIModelsDefaultToLargeModelPatchRepairStrategy() async throws {
         let store = Self.dependenciesBackedStore()
         let provider = ProviderCatalog.makeProvider(for: .openAI)!
         let model = ModelConfig(
@@ -24,7 +24,56 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.repairStrategy == .modelDiff(maxHunksPerTurn: nil))
+        #expect(context.pipelineConfiguration.profile == .largeModel)
+        #expect(
+            context.repairStrategy == .modelSearchReplace(
+                maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
+            )
+        )
+    }
+
+    @MainActor
+    @Test
+    func ollamaModelsDefaultToSmallModelPatchRepairStrategy() async throws {
+        let store = Self.dependenciesBackedStore()
+        let provider = ProviderCatalog.makeProvider(for: .ollama)!
+        let model = ModelConfig(
+            identifier: "gemma4:e2b",
+            displayName: "Gemma 4 E2B",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        store.providers = [provider]
+        store.remoteModels = [model]
+        store.selectedModelID = model.selectionIdentifier
+
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+        #expect(context.pipelineConfiguration.profile == .smallModel)
+        #expect(context.repairStrategy == .modelSearchReplace(maxPatchBlocksPerTurn: 3))
+    }
+
+    @MainActor
+    @Test
+    func customOpenAICompatibleModelsDefaultToSmallModelPatchRepairStrategy() async throws {
+        let store = Self.dependenciesBackedStore()
+        let provider = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        let model = ModelConfig(
+            identifier: "qwen2.5-coder",
+            displayName: "Qwen Coder",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        store.providers = [provider]
+        store.remoteModels = [model]
+        store.selectedModelID = model.selectionIdentifier
+
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+        #expect(context.pipelineConfiguration.profile == .smallModel)
+        #expect(context.repairStrategy == .modelSearchReplace(maxPatchBlocksPerTurn: 3))
     }
 
     @MainActor

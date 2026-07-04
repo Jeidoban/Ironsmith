@@ -14,6 +14,7 @@ final class GenerationPreferencesStore {
         static let mlxKVCacheBitsEnabled = "generation.mlxKVCacheBitsEnabled"
         static let mlxKVCacheBits = "generation.mlxKVCacheBits"
         static let generatedPromptRefinementEnabled = "generation.generatedPromptRefinementEnabled"
+        static let agentPipelineProfile = "generation.agentPipelineProfile"
     }
 
     var customOptionsEnabled: Bool {
@@ -22,6 +23,11 @@ final class GenerationPreferencesStore {
     var generatedPromptRefinementEnabled: Bool {
         didSet {
             userDefaults.set(generatedPromptRefinementEnabled, forKey: Key.generatedPromptRefinementEnabled)
+        }
+    }
+    var agentPipelineProfile: AgentPipelineProfilePreference {
+        didSet {
+            userDefaults.set(agentPipelineProfile.rawValue, forKey: Key.agentPipelineProfile)
         }
     }
     var temperature: Double {
@@ -134,6 +140,9 @@ final class GenerationPreferencesStore {
         ) == nil
             ? true
             : userDefaults.bool(forKey: Key.generatedPromptRefinementEnabled)
+        self.agentPipelineProfile = userDefaults
+            .string(forKey: Key.agentPipelineProfile)
+            .flatMap(AgentPipelineProfilePreference.init(rawValue:)) ?? .automatic
         self.temperature = userDefaults.object(forKey: Key.temperature) == nil
             ? ModelGenerationDefaults.foundation.temperature ?? 0.7
             : userDefaults.double(forKey: Key.temperature)

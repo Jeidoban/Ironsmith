@@ -6,11 +6,14 @@ extension ContentViewBuildRepairLoop {
         source: String,
         diagnostics: [SwiftCompilerDiagnostic]
     ) -> RepairPromptPlan {
-        let maximumDiffHunks = context.repairStrategy.maxHunksPerTurn
-        let targetDiagnostics = ContentViewRepairSupport.selectedDiagnosticGroup(
-            from: diagnostics,
-            maximumCount: repairDiagnosticBatchLimit(for: diagnostics)
-        )
+        let maximumPatchBlocks = context.repairStrategy.maxPatchBlocksPerTurn
+        let diagnosticLimit = repairDiagnosticBatchLimit(for: diagnostics)
+        let targetDiagnostics = context.pipelineConfiguration.batchesRepairDiagnostics
+            ? ContentViewRepairSupport.selectedDiagnosticGroup(
+                from: diagnostics,
+                maximumCount: diagnosticLimit
+            )
+            : Array(diagnostics.prefix(diagnosticLimit))
         let immediateSnippets = ContentViewRepairSupport.snippets(
             from: source,
             diagnostics: targetDiagnostics
@@ -25,11 +28,14 @@ extension ContentViewBuildRepairLoop {
             diagnostics: targetDiagnostics,
             excluding: immediateSnippets + blockSnippets
         )
-        let extraEditableSnippets = blockSnippets + relatedSnippets
+        let allSnippets = immediateSnippets + blockSnippets + relatedSnippets
+        let snippets = context.pipelineConfiguration.batchesRepairDiagnostics
+            ? allSnippets
+            : Array(allSnippets.prefix(ToolGenerationRepairPolicy.largeModelMaximumRepairDiagnostics))
         return RepairPromptPlan(
-            maximumDiffHunks: maximumDiffHunks,
+            maximumPatchBlocks: maximumPatchBlocks,
             targetDiagnostics: targetDiagnostics,
-            snippets: immediateSnippets + extraEditableSnippets
+            snippets: snippets
         )
     }
 
@@ -53,14 +59,14 @@ extension ContentViewBuildRepairLoop {
             source: originalSource,
             diagnostics: diagnostics
         )
-        let maximumDiffHunks = promptPlan.maximumDiffHunks
+        let maximumPatchBlocks = promptPlan.maximumPatchBlocks
         let repairTargetKey = compactRepairTargetLogKey(for: promptPlan)
         if lastLoggedRepairTargetKey == repairTargetKey {
             AgentDiagnosticsLog.append(
                 """
                 Repair target repeated.
                 packageRoot: \(layout.packageRootURL.path)
-                maximumDiffHunks: \(diffHunkLimitDescription(maximumDiffHunks))
+                maximumPatchBlocks: \(maximumPatchBlocks)
                 selectedDiagnosticCount: \(promptPlan.targetDiagnostics.count)
                 diagnostics:
                 \(AgentDiagnosticsLog.renderDiagnostics(promptPlan.targetDiagnostics, limit: 4))
@@ -72,7 +78,7 @@ extension ContentViewBuildRepairLoop {
                 """
                 Repair target selected.
                 packageRoot: \(layout.packageRootURL.path)
-                maximumDiffHunks: \(diffHunkLimitDescription(maximumDiffHunks))
+                maximumPatchBlocks: \(maximumPatchBlocks)
                 selectedDiagnosticCount: \(promptPlan.targetDiagnostics.count)
                 diagnostics:
                 \(AgentDiagnosticsLog.renderDiagnostics(promptPlan.targetDiagnostics, limit: 8, includeSupportingLines: true, supportingLineLimit: AgentDiagnosticsLog.repairRequestSupportingLineLimit))
@@ -85,7 +91,7 @@ extension ContentViewBuildRepairLoop {
             diagnostics: promptPlan.targetDiagnostics,
             source: originalSource,
             editableSnippets: promptPlan.snippets,
-            maximumDiffHunks: maximumDiffHunks
+            maximumPatchBlocks: maximumPatchBlocks
         )
         AgentDiagnosticsLog.append(
             """
@@ -98,7 +104,7 @@ extension ContentViewBuildRepairLoop {
             relevantExcerptCount: \(promptPlan.snippets.count)
             """
         )
-        let diff: String
+        let patch: String
         do {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingRepairDiff, nil)
@@ -106,17 +112,16 @@ extension ContentViewBuildRepairLoop {
             let response = try await context.streamText(
                 in: repairConversation.session,
                 to: prompt
-            ) { partialDiff in
+            ) { partialPatch in
                 try context.write(
-                    partialDiff,
+                    partialPatch,
                     to: draftPath,
                     packageRootURL: layout.packageRootURL
                 )
             }
             try Task.checkCancellation()
-            diff = response
+            patch = response
         } catch {
-            try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             AgentDiagnosticsLog.append(
                 """
                 Model repair request failed.
@@ -129,47 +134,66 @@ extension ContentViewBuildRepairLoop {
             throw error
         }
 
-        let sanitizedDiff = ContentViewRepairSupport.sanitizedRepairDiffSummary(diff)
+        let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(patch)
         AgentDiagnosticsLog.append(
             """
-            Model repair diff proposed.
+            Model repair patch proposed.
             packageRoot: \(layout.packageRootURL.path)
-            rawCharacters: \(diff.count)
-            sanitizedDiff:
-            \(AgentDiagnosticsLog.compactMultiline(sanitizedDiff, limit: AgentDiagnosticsLog.repairDiffLimit))
+            rawCharacters: \(patch.count)
+            sanitizedPatch:
+            \(sanitizedPatch)
             """
         )
         let repairedSource: String
         do {
-            repairedSource = try ContentViewRepairSupport.applyValidatedDiff(
-                sanitizedDiff,
-                to: originalSource,
-                maximumHunks: maximumDiffHunks
-            )
+            if context.pipelineConfiguration.profile == .largeModel {
+                let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
+                    sanitizedPatch,
+                    to: originalSource,
+                    maximumPatchBlocks: maximumPatchBlocks
+                )
+                repairedSource = application.source
+                if !application.skippedBlocks.isEmpty {
+                    AgentDiagnosticsLog.append(
+                        """
+                        Model repair patch partially applied.
+                        packageRoot: \(layout.packageRootURL.path)
+                        \(application.logSummary)
+                        """
+                    )
+                }
+            } else {
+                repairedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+                    sanitizedPatch,
+                    to: originalSource,
+                    maximumPatchBlocks: maximumPatchBlocks
+                )
+            }
         } catch {
             AgentDiagnosticsLog.append(
                 """
-                Model repair diff rejected.
+                Model repair patch rejected.
                 packageRoot: \(layout.packageRootURL.path)
-                maxDiffHunks: \(diffHunkLimitDescription(maximumDiffHunks))
+                maximumPatchBlocks: \(maximumPatchBlocks)
                 error:
                 \(AgentDiagnosticsLog.renderError(error, limit: 800))
-                sanitizedDiff:
-                \(AgentDiagnosticsLog.compactMultiline(sanitizedDiff, limit: AgentDiagnosticsLog.repairDiffLimit))
+                sanitizedPatch:
+                \(sanitizedPatch)
                 """
             )
             throw error
         }
+        try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
         AgentDiagnosticsLog.append(
             """
-            Model repair diff accepted.
+            Model repair patch accepted.
             packageRoot: \(layout.packageRootURL.path)
-            maxDiffHunks: \(diffHunkLimitDescription(maximumDiffHunks))
+            maximumPatchBlocks: \(maximumPatchBlocks)
             """
         )
         return RepairSourceCandidate(
             source: repairedSource,
-            summary: AgentDiagnosticsLog.compact(sanitizedDiff, limit: AgentDiagnosticsLog.repairDiffLimit)
+            summary: AgentDiagnosticsLog.compact(sanitizedPatch, limit: AgentDiagnosticsLog.repairPatchLimit)
         )
     }
 
@@ -180,14 +204,16 @@ extension ContentViewBuildRepairLoop {
         let snippetKey = promptPlan.snippets
             .map { "\($0.startLine)-\($0.endLine)" }
             .joined(separator: "|")
-        return "\(diffHunkLimitDescription(promptPlan.maximumDiffHunks))::\(diagnosticKey)::\(snippetKey)"
+        return "\(promptPlan.maximumPatchBlocks)::\(diagnosticKey)::\(snippetKey)"
     }
 
     func repairDiagnosticBatchLimit(for diagnostics: [SwiftCompilerDiagnostic]) -> Int {
-        context.repairStrategy.maxHunksPerTurn ?? max(1, diagnostics.count)
-    }
-
-    func diffHunkLimitDescription(_ maximumDiffHunks: Int?) -> String {
-        maximumDiffHunks.map(String.init) ?? "unlimited"
+        guard context.pipelineConfiguration.batchesRepairDiagnostics else {
+            return min(
+                max(1, diagnostics.count),
+                ToolGenerationRepairPolicy.largeModelMaximumRepairDiagnostics
+            )
+        }
+        return context.repairStrategy.maxPatchBlocksPerTurn
     }
 }

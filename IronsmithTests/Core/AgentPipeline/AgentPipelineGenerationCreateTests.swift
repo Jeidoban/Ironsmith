@@ -24,7 +24,7 @@ extension AgentPipelineTests {
         let runtime = Self.makeRuntime(
             languageModel: model,
             generationOptions: GenerationOptions(),
-            repairStrategy: .deterministicOnly,
+            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: .live,
             appBundleClient: .noOp(),

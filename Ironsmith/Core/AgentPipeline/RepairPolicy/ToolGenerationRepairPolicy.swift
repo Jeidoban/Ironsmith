@@ -14,14 +14,29 @@ enum ToolGenerationRepairPolicy {
     // Default batch size for deterministic JSON edit repairs.
     static let defaultDeterministicEditOperationsPerBatch = 3
 
-    // Initial local-model edit diffs can span more user-requested regions than compiler repairs.
-    static let localModelEditDiffHunks = 3
+    // Initial local-model edit patches can span more user-requested regions than compiler repairs.
+    static let smallModelPatchBlocksPerTurn = 3
+
+    // Larger remote-capable models can usually coordinate a broader patch without requiring regeneration.
+    static let largeModelPatchBlocksPerTurn = 24
+
+    // Catastrophic compiler cascades are usually one root issue repeated many times; keep prompts bounded.
+    static let largeModelMaximumRepairDiagnostics = 200
+
+    // Large-model edit patches get one fresh retry after an invalid/unappliable patch.
+    static let minimumEditPatchGenerationAttempts = 2
+
+    // Hard cap on search/replace patch response size before validation.
+    static let maximumPatchCharacters = 128_000
+
+    // Paid-call safety limit for the large-model profile.
+    static let largeModelMaximumRepairAttempts = 6
 
     // Number of invalid model repairs for the same target before trying regeneration.
     static let invalidPatchAttemptsBeforeStall = 2
 
-    // Number of invalid initial edit diffs before falling back to whole-file edit generation.
-    static let invalidInitialEditDiffsBeforeFullFileEdit = 2
+    // Number of invalid initial edit patches before falling back to whole-file edit generation.
+    static let invalidInitialEditPatchesBeforeFullFileEdit = 2
 
     // Maximum deterministic compile/fix passes for one source candidate before declaring it stable.
     static let maximumDeterministicRepairPasses = 4

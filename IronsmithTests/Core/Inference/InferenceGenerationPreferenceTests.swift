@@ -27,6 +27,22 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func agentPipelineProfilePreferenceDefaultsAutomaticAndPersists() {
+        let suiteName = "IronsmithTests.AgentPipelineProfile.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(preferences.agentPipelineProfile == .automatic)
+
+        preferences.agentPipelineProfile = .largeModel
+
+        let reloadedPreferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(reloadedPreferences.agentPipelineProfile == .largeModel)
+    }
+
+    @MainActor
+    @Test
     func generatedAppResourcePermissionPreferencesDefaultOffAndPersist() {
         let suiteName = "IronsmithTests.GeneratedAppResourcePermissions.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
@@ -464,7 +480,7 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func largerQwenMLXModelsUseModelDiffRepairStrategy() async throws {
+    func largerQwenMLXModelsUseSmallModelPatchRepairStrategyByDefault() async throws {
         let store = Self.dependenciesBackedStore()
         let provider = ProviderCatalog.makeProvider(for: .local)!
         let model = ModelConfig(
@@ -479,7 +495,9 @@ extension InferenceTests {
         store.persistedModels = [model]
         store.selectedModelID = model.selectionIdentifier
 
-        #expect(try await store.makeSelectedAgentLanguageModelContext().repairStrategy == .modelDiff(maxHunksPerTurn: 1))
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+        #expect(context.pipelineConfiguration.profile == .smallModel)
+        #expect(context.repairStrategy == .modelSearchReplace(maxPatchBlocksPerTurn: 3))
     }
 
     @MainActor
@@ -502,6 +520,36 @@ extension InferenceTests {
         store.persistedModels = [model]
         store.selectedModelID = model.selectionIdentifier
 
-        #expect(try await store.makeSelectedAgentLanguageModelContext().repairStrategy == .modelDiff(maxHunksPerTurn: 1))
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+        #expect(context.pipelineConfiguration.profile == .smallModel)
+        #expect(context.repairStrategy == .modelSearchReplace(maxPatchBlocksPerTurn: 3))
+    }
+
+    @MainActor
+    @Test
+    func explicitAgentPipelineProfileOverridesAutomaticProviderDefault() async throws {
+        let preferences = Self.generationPreferences()
+        preferences.agentPipelineProfile = .largeModel
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
+        let provider = ProviderCatalog.makeProvider(for: .ollama)!
+        let model = ModelConfig(
+            identifier: "gemma4:e2b",
+            displayName: "Gemma 4 E2B",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        store.providers = [provider]
+        store.remoteModels = [model]
+        store.selectedModelID = model.selectionIdentifier
+
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+        #expect(context.pipelineConfiguration.profile == .largeModel)
+        #expect(
+            context.repairStrategy == .modelSearchReplace(
+                maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
+            )
+        )
     }
 }

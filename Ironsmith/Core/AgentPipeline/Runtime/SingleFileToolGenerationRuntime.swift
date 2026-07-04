@@ -240,7 +240,8 @@ struct SingleFileToolGenerationRuntime {
                 contentViewPath: setup.contentViewPath,
                 lifecycle: lifecycle,
                 resumePartialSource: startingPhase == .generatingSource,
-                useCurrentSourceOnFirstAttempt: startingPhase == .repairing || startingPhase == .generatingRepairDiff
+                useCurrentSourceOnFirstAttempt: startingPhase == .repairing || startingPhase == .generatingRepairDiff,
+                resumePartialRepairPatch: startingPhase == .generatingRepairDiff
             )
             try await compileGeneratedTool(
                 displayName: setup.displayName,
@@ -358,15 +359,18 @@ struct SingleFileToolGenerationRuntime {
                 contentViewPath: contentViewPath,
                 existingSource: existingSource,
                 lifecycle: lifecycle,
-                resumePartialDiff: startingPhase == .generatingEditDiff,
-                resumePartialSource: startingPhase == .generatingSource
+                resumePartialPatch: startingPhase == .generatingEditDiff,
+                resumePartialSource: startingPhase == .generatingSource,
+                useCurrentSourceOnFirstAttempt: startingPhase == .repairing || startingPhase == .generatingRepairDiff,
+                resumePartialRepairPatch: startingPhase == .generatingRepairDiff
             )
             try await compileGeneratedTool(
                 displayName: existingTool.name,
                 layout: layout,
                 contentViewPath: contentViewPath,
                 generator: generator,
-                failureRecovery: .restoreOriginalSource(existingSource),
+                failureRecovery: .preserveCurrentSource,
+                maximumGenerationAttempts: editGenerationAttempts(),
                 lifecycle: lifecycle
             )
             try Task.checkCancellation()
@@ -383,12 +387,11 @@ struct SingleFileToolGenerationRuntime {
             try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             try context.versionBackupClient.promoteStagedVersion(backup)
         } catch {
-            try? context.write(existingSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            let isCancellation = IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled
             try? context.write(existingAppEntrySource, to: layout.appEntrySourcePath, packageRootURL: layout.packageRootURL)
-            try? context.versionBackupClient.discardStagedVersion(backup)
             AgentDiagnosticsLog.append(
                 """
-                Restored original ContentView.swift after edit failure.
+                Preserved current ContentView.swift after \(isCancellation ? "interrupted" : "failed") edit.
                 packageRoot: \(existingTool.packageRootURL.path)
                 error:
                 \(AgentDiagnosticsLog.renderError(error, limit: 800))
@@ -416,6 +419,7 @@ struct SingleFileToolGenerationRuntime {
         contentViewPath: String,
         generator: ContentViewCandidateGenerator,
         failureRecovery: ContentViewBuildRepairLoop.FailureRecovery = .restoreBestCandidate,
+        maximumGenerationAttempts: Int? = nil,
         lifecycle: ToolGenerationLifecycle
     ) async throws {
         try await lifecycle.updatePhase(.generating, .repairing, nil)
@@ -425,12 +429,33 @@ struct SingleFileToolGenerationRuntime {
             displayName: displayName,
             contentViewPath: contentViewPath,
             regenerationThreshold: ToolGenerationRepairPolicy.regenerationThreshold,
-            maximumGenerationAttempts: ToolGenerationRepairPolicy.maximumGenerationAttempts,
+            maximumGenerationAttempts: maximumGenerationAttempts
+                ?? context.pipelineConfiguration.maximumGenerationAttempts,
             lifecycle: lifecycle
         )
+        let effectiveFailureRecovery: ContentViewBuildRepairLoop.FailureRecovery
+        switch failureRecovery {
+        case .restoreOriginalSource,
+             .restoreOriginalSourceAfterFailurePreservingInterruptedSource:
+            effectiveFailureRecovery = failureRecovery
+        case .restoreBestCandidate, .preserveCurrentSource:
+            effectiveFailureRecovery = context.pipelineConfiguration.restoresBestCandidateOnFailure
+                ? failureRecovery
+                : .preserveCurrentSource
+        }
         try await repairLoop.run(
             generator: generator,
-            failureRecovery: failureRecovery
+            failureRecovery: effectiveFailureRecovery
+        )
+    }
+
+    private func editGenerationAttempts() -> Int {
+        guard context.repairStrategy.usesModelRepair else {
+            return context.pipelineConfiguration.maximumGenerationAttempts
+        }
+        return max(
+            context.pipelineConfiguration.maximumGenerationAttempts,
+            ToolGenerationRepairPolicy.minimumEditPatchGenerationAttempts
         )
     }
 
@@ -473,7 +498,8 @@ struct SingleFileToolGenerationRuntime {
         contentViewPath: String,
         lifecycle: ToolGenerationLifecycle,
         resumePartialSource: Bool,
-        useCurrentSourceOnFirstAttempt: Bool
+        useCurrentSourceOnFirstAttempt: Bool,
+        resumePartialRepairPatch: Bool
     ) -> ContentViewCandidateGenerator {
         var didUseCurrentSource = false
         var didAttemptContinuation = false
@@ -489,6 +515,18 @@ struct SingleFileToolGenerationRuntime {
         ) { session in
             if useCurrentSourceOnFirstAttempt && !didUseCurrentSource {
                 didUseCurrentSource = true
+                if resumePartialRepairPatch {
+                    let currentSource = try context.readIfPresent(
+                        contentViewPath,
+                        packageRootURL: layout.packageRootURL
+                    )
+                    try? applyCompletedPendingPatchBlocksAndClearDraft(
+                        layout: layout,
+                        contentViewPath: contentViewPath,
+                        originalSource: currentSource,
+                        maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn
+                    )
+                }
                 let currentSource = try context.readIfPresent(
                     contentViewPath,
                     packageRootURL: layout.packageRootURL
@@ -548,10 +586,12 @@ struct SingleFileToolGenerationRuntime {
         contentViewPath: String,
         existingSource: String,
         lifecycle: ToolGenerationLifecycle,
-        resumePartialDiff: Bool,
-        resumePartialSource: Bool
+        resumePartialPatch: Bool,
+        resumePartialSource: Bool,
+        useCurrentSourceOnFirstAttempt: Bool,
+        resumePartialRepairPatch: Bool
     ) -> ContentViewCandidateGenerator {
-        if resumePartialSource || !context.repairStrategy.usesModelRepair {
+        if resumePartialSource || (!context.repairStrategy.usesModelRepair && !useCurrentSourceOnFirstAttempt) {
             return wholeFileEditGenerator(
                 userPrompt: userPrompt,
                 layout: layout,
@@ -562,22 +602,76 @@ struct SingleFileToolGenerationRuntime {
             )
         }
 
-        var didAttemptContinuation = false
-        let originalPrompt = ToolGenerationPrompts.singleFileEditDiffPrompt(
-            userPrompt: userPrompt,
-            executableName: layout.executableName,
-            existingSource: existingSource,
-            maximumDiffHunks: context.repairStrategy.maxInitialEditHunks
-        )
+        var didApplyResumedPatchDraft = false
+        var didUseCurrentSource = false
+        var currentExistingSource = existingSource
+        var previousPatchFailure: String?
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialDiff ? "continue edit diff" : "edit",
-            instructions: ToolGenerationPrompts.diffEditInstructions,
+            modeDescription: "edit",
+            instructions: ToolGenerationPrompts.searchReplaceEditInstructions,
             retriesInvalidCandidates: true,
-            invalidCandidateFallback: ContentViewCandidateGenerator.InvalidCandidateFallback(
-                threshold: ToolGenerationRepairPolicy.invalidInitialEditDiffsBeforeFullFileEdit,
-                modeDescription: "edit whole-file fallback"
-            ) { session in
+            invalidCandidateFallback: context.pipelineConfiguration
+                .fallsBackToWholeFileEditAfterInvalidInitialPatch
+                ? ContentViewCandidateGenerator.InvalidCandidateFallback(
+                    threshold: ToolGenerationRepairPolicy.invalidInitialEditPatchesBeforeFullFileEdit,
+                    modeDescription: "edit whole-file fallback"
+                ) { session in
+                    try await regenerateEditedContentView(
+                        userPrompt: userPrompt,
+                        layout: layout,
+                        contentViewPath: contentViewPath,
+                        existingSource: existingSource,
+                        lifecycle: lifecycle,
+                        session: session
+                    )
+                }
+                : nil
+        ) { session in
+            if useCurrentSourceOnFirstAttempt && !didUseCurrentSource {
+                didUseCurrentSource = true
+                if resumePartialRepairPatch {
+                    let currentSource = try context.readIfPresent(
+                        contentViewPath,
+                        packageRootURL: layout.packageRootURL
+                    )
+                    try? applyCompletedPendingPatchBlocksAndClearDraft(
+                        layout: layout,
+                        contentViewPath: contentViewPath,
+                        originalSource: currentSource,
+                        maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn
+                    )
+                }
+                currentExistingSource = try context.readIfPresent(
+                    contentViewPath,
+                    packageRootURL: layout.packageRootURL
+                )
+                if !currentExistingSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return
+                }
+            }
+
+            if resumePartialPatch && !didApplyResumedPatchDraft {
+                didApplyResumedPatchDraft = true
+                let partialPatch = try context.readIfPresent(
+                    ToolPackageLayout.pendingContentViewDraftPath,
+                    packageRootURL: layout.packageRootURL
+                )
+                if !partialPatch.isEmpty {
+                    try? applyCompletedPendingPatchBlocksAndClearDraft(
+                        layout: layout,
+                        contentViewPath: contentViewPath,
+                        originalSource: currentExistingSource,
+                        maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn
+                    )
+                    currentExistingSource = try context.readIfPresent(
+                        contentViewPath,
+                        packageRootURL: layout.packageRootURL
+                    )
+                }
+            }
+
+            if !context.repairStrategy.usesModelRepair {
                 try await regenerateEditedContentView(
                     userPrompt: userPrompt,
                     layout: layout,
@@ -586,38 +680,25 @@ struct SingleFileToolGenerationRuntime {
                     lifecycle: lifecycle,
                     session: session
                 )
-            }
-        ) { session in
-            if resumePartialDiff && !didAttemptContinuation {
-                didAttemptContinuation = true
-                let partialDiff = try context.readIfPresent(
-                    ToolPackageLayout.pendingContentViewDraftPath,
-                    packageRootURL: layout.packageRootURL
-                )
-                if !partialDiff.isEmpty {
-                    try await continueDiffDraft(
-                        partialDiff: partialDiff,
-                        originalPrompt: originalPrompt,
-                        originalSource: existingSource,
-                        maximumDiffHunks: context.repairStrategy.maxInitialEditHunks,
-                        layout: layout,
-                        contentViewPath: contentViewPath,
-                        lifecycle: lifecycle,
-                        session: session
-                    )
-                    return
-                }
+                return
             }
 
-            try await regenerateEditedContentViewDiff(
-                userPrompt: userPrompt,
-                layout: layout,
-                contentViewPath: contentViewPath,
-                existingSource: existingSource,
-                maximumDiffHunks: context.repairStrategy.maxInitialEditHunks,
-                lifecycle: lifecycle,
-                session: session
-            )
+            do {
+                try await regenerateEditedContentViewPatch(
+                    userPrompt: userPrompt,
+                    layout: layout,
+                    contentViewPath: contentViewPath,
+                    existingSource: currentExistingSource,
+                    maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn,
+                    previousPatchFailure: previousPatchFailure,
+                    lifecycle: lifecycle,
+                    session: session
+                )
+                previousPatchFailure = nil
+            } catch {
+                previousPatchFailure = AgentDiagnosticsLog.renderError(error, limit: 800)
+                throw error
+            }
         }
     }
 
@@ -701,50 +782,6 @@ struct SingleFileToolGenerationRuntime {
         }
     }
 
-    private func continueDiffDraft(
-        partialDiff: String,
-        originalPrompt: String,
-        originalSource: String,
-        maximumDiffHunks: Int?,
-        layout: ToolPackageLayout,
-        contentViewPath: String,
-        lifecycle: ToolGenerationLifecycle,
-        session: LanguageModelSession
-    ) async throws {
-        let prompt = ToolGenerationPrompts.diffContinuationPrompt(
-            originalPrompt: originalPrompt,
-            partialDiff: partialDiff
-        )
-        do {
-            try await lifecycle.updatePhase(.generating, .generatingEditDiff, nil)
-            let continuation = try await context.streamText(in: session, to: prompt) { partialContinuation in
-                try context.write(
-                    partialDiff + partialContinuation,
-                    to: ToolPackageLayout.pendingContentViewDraftPath,
-                    packageRootURL: layout.packageRootURL
-                )
-            }
-            let sanitizedDiff = ContentViewRepairSupport.sanitizedRepairDiffSummary(partialDiff + continuation)
-            let editedSource = try ContentViewRepairSupport.applyValidatedDiff(
-                sanitizedDiff,
-                to: originalSource,
-                maximumHunks: maximumDiffHunks
-            )
-            try context.write(
-                editedSource,
-                to: contentViewPath,
-                packageRootURL: layout.packageRootURL
-            )
-        } catch {
-            try trimPendingDiffDraftToLastValidPrefix(
-                layout: layout,
-                originalSource: originalSource,
-                maximumDiffHunks: maximumDiffHunks
-            )
-            throw error
-        }
-    }
-
     private func packageTool(
         displayName: String,
         executableName: String,
@@ -823,36 +860,57 @@ struct SingleFileToolGenerationRuntime {
         return false
     }
 
-    private func trimPendingDiffDraftToLastValidPrefix(
+    private func applyCompletedPendingPatchBlocksAndClearDraft(
         layout: ToolPackageLayout,
+        contentViewPath: String,
         originalSource: String,
-        maximumDiffHunks: Int?
+        maximumPatchBlocks: Int
     ) throws {
+        defer {
+            try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
+        }
         let draft = try context.readIfPresent(
             ToolPackageLayout.pendingContentViewDraftPath,
             packageRootURL: layout.packageRootURL
         )
         guard !draft.isEmpty else { return }
-        let lines = draft.components(separatedBy: .newlines)
-        for endIndex in stride(from: lines.count, through: 0, by: -1) {
-            let candidate = lines.prefix(endIndex).joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard candidate.contains("@@") else { continue }
-            let sanitizedDiff = ContentViewRepairSupport.sanitizedRepairDiffSummary(candidate)
-            if (try? ContentViewRepairSupport.applyValidatedDiff(
-                sanitizedDiff,
+        if context.pipelineConfiguration.profile == .largeModel {
+            let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
+                draft,
                 to: originalSource,
-                maximumHunks: maximumDiffHunks
-            )) != nil {
-                try context.write(
-                    candidate,
-                    to: ToolPackageLayout.pendingContentViewDraftPath,
-                    packageRootURL: layout.packageRootURL
+                maximumPatchBlocks: maximumPatchBlocks
+            )
+            try context.write(application.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            AgentDiagnosticsLog.append(
+                """
+                Applied completed edit patch blocks from interrupted draft.
+                packageRoot: \(layout.packageRootURL.path)
+                \(application.logSummary)
+                """
+            )
+        } else {
+            guard let application = try ContentViewRepairSupport.applyCompletedSearchReplacePatchBlocks(
+                draft,
+                to: originalSource,
+                maximumPatchBlocks: maximumPatchBlocks
+            ) else {
+                AgentDiagnosticsLog.append(
+                    """
+                    Cleared interrupted edit patch draft with no completed patch blocks.
+                    packageRoot: \(layout.packageRootURL.path)
+                    """
                 )
                 return
             }
+            try context.write(application.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            AgentDiagnosticsLog.append(
+                """
+                Applied completed edit patch blocks from interrupted draft.
+                packageRoot: \(layout.packageRootURL.path)
+                appliedBlockCount: \(application.appliedBlockCount)
+                """
+            )
         }
-        try context.write("", to: ToolPackageLayout.pendingContentViewDraftPath, packageRootURL: layout.packageRootURL)
     }
 
     private func regenerateCreatedContentView(
@@ -947,29 +1005,31 @@ struct SingleFileToolGenerationRuntime {
         }
     }
 
-    private func regenerateEditedContentViewDiff(
+    private func regenerateEditedContentViewPatch(
         userPrompt: String,
         layout: ToolPackageLayout,
         contentViewPath: String,
         existingSource: String,
-        maximumDiffHunks: Int?,
+        maximumPatchBlocks: Int,
+        previousPatchFailure: String?,
         lifecycle: ToolGenerationLifecycle,
         session: LanguageModelSession
     ) async throws {
-        let prompt = ToolGenerationPrompts.singleFileEditDiffPrompt(
+        let prompt = ToolGenerationPrompts.singleFileEditPatchPrompt(
             userPrompt: userPrompt,
             executableName: layout.executableName,
             existingSource: existingSource,
-            maximumDiffHunks: maximumDiffHunks
+            maximumPatchBlocks: maximumPatchBlocks,
+            previousPatchFailure: previousPatchFailure
         )
         let draftPath = ToolPackageLayout.pendingContentViewDraftPath
         let response: String
         do {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingEditDiff, nil)
-            response = try await context.streamText(in: session, to: prompt) { partialDiff in
+            response = try await context.streamText(in: session, to: prompt) { partialPatch in
                 try context.write(
-                    partialDiff,
+                    partialPatch,
                     to: draftPath,
                     packageRootURL: layout.packageRootURL
                 )
@@ -978,42 +1038,60 @@ struct SingleFileToolGenerationRuntime {
         } catch {
             AgentDiagnosticsLog.append(
                 """
-                ContentView edit diff request failed.
+                ContentView edit patch request failed.
                 packageRoot: \(layout.packageRootURL.path)
                 mode: edit
                 error:
                 \(AgentDiagnosticsLog.renderError(error))
                 """
             )
-            try? trimPendingDiffDraftToLastValidPrefix(
-                layout: layout,
-                originalSource: existingSource,
-                maximumDiffHunks: maximumDiffHunks
-            )
             throw error
         }
 
-        let sanitizedDiff = ContentViewRepairSupport.sanitizedRepairDiffSummary(response)
+        let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(response)
         try Task.checkCancellation()
         AgentDiagnosticsLog.append(
             """
-            Model edit diff proposed.
+            Model edit patch proposed.
             packageRoot: \(layout.packageRootURL.path)
             rawCharacters: \(response.count)
-            sanitizedDiff:
-            \(AgentDiagnosticsLog.compactMultiline(sanitizedDiff, limit: AgentDiagnosticsLog.repairDiffLimit))
+            sanitizedPatch:
+            \(sanitizedPatch)
             """
         )
-        let editedSource = try ContentViewRepairSupport.applyValidatedDiff(
-            sanitizedDiff,
-            to: existingSource,
-            maximumHunks: maximumDiffHunks
-        )
+        let editedSource: String
+        do {
+            if context.pipelineConfiguration.profile == .largeModel {
+                let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
+                    sanitizedPatch,
+                    to: existingSource,
+                    maximumPatchBlocks: maximumPatchBlocks
+                )
+                editedSource = application.source
+                if !application.skippedBlocks.isEmpty {
+                    AgentDiagnosticsLog.append(
+                        """
+                        Model edit patch partially applied.
+                        packageRoot: \(layout.packageRootURL.path)
+                        \(application.logSummary)
+                        """
+                    )
+                }
+            } else {
+                editedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+                    sanitizedPatch,
+                    to: existingSource,
+                    maximumPatchBlocks: maximumPatchBlocks
+                )
+            }
+        } catch {
+            throw error
+        }
         AgentDiagnosticsLog.append(
             """
-            Model edit diff accepted.
+            Model edit patch accepted.
             packageRoot: \(layout.packageRootURL.path)
-            maxDiffHunks: \(maximumDiffHunks.map(String.init) ?? "unlimited")
+            maximumPatchBlocks: \(maximumPatchBlocks)
             """
         )
         try context.write(
@@ -1021,5 +1099,6 @@ struct SingleFileToolGenerationRuntime {
             to: contentViewPath,
             packageRootURL: layout.packageRootURL
         )
+        try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
     }
 }

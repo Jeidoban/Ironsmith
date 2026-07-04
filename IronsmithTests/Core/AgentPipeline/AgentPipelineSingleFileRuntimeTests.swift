@@ -47,7 +47,7 @@ extension AgentPipelineTests {
         let runtime = Self.makeRuntime(
             languageModel: StubAgentLanguageModel.fixed(contentViewSource),
             generationOptions: GenerationOptions(),
-            repairStrategy: .modelDiff(maxHunksPerTurn: 3),
+            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 3)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: appBundleClient,

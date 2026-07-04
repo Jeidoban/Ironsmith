@@ -748,8 +748,13 @@ extension ToolLibraryTests {
         let contentViewURL = layout.sourceDirectoryURL.appendingPathComponent(layout.defaultContentViewFileName)
         try FileManager.default.createDirectory(at: layout.sourceDirectoryURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: layout.packageMetadataDirectoryURL, withIntermediateDirectories: true)
-        try #"Text("last ready")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
-        try "partial diff".write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: layout.pendingContentViewVersionURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try #"Text("failed edit progress")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
+        try #"Text("last ready")"#.write(to: layout.pendingContentViewVersionURL, atomically: true, encoding: .utf8)
+        try "partial patch".write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
 
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
@@ -776,6 +781,7 @@ extension ToolLibraryTests {
         #expect(tool.generationErrorSummary == nil)
         #expect(FileManager.default.fileExists(atPath: packageRoot.path))
         #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
+        #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewVersionURL.path)))
         #expect(try String(contentsOf: contentViewURL, encoding: .utf8) == #"Text("last ready")"#)
         #expect(store.presentedErrorMessage == nil)
     }

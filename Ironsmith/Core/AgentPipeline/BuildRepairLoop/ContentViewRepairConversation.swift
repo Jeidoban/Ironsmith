@@ -12,7 +12,7 @@ final class ContentViewRepairConversation {
         makeSession = {
             LanguageModelSession(
                 model: context.languageModel,
-                instructions: ToolGenerationPrompts.diffRepairInstructions
+                instructions: ToolGenerationPrompts.searchReplaceRepairInstructions
             )
         }
         session = makeSession()
@@ -40,7 +40,7 @@ final class ContentViewRepairConversation {
         diagnostics: [SwiftCompilerDiagnostic],
         source: String,
         editableSnippets: [ContentViewRepairSnippet],
-        maximumDiffHunks: Int?
+        maximumPatchBlocks: Int
     ) -> String {
         let includeSource = !sourceIsCurrentInSession
         let prompt = ToolGenerationPrompts.conversationalRepairPrompt(
@@ -49,7 +49,7 @@ final class ContentViewRepairConversation {
             editableSnippets: editableSnippets,
             previousOutcome: previousOutcome,
             compactionSummary: includeSource ? compactionSummary : nil,
-            maximumDiffHunks: maximumDiffHunks
+            maximumPatchBlocks: maximumPatchBlocks
         )
         if includeSource {
             sourceIsCurrentInSession = true

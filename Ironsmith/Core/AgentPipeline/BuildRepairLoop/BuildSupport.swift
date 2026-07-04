@@ -8,6 +8,23 @@ extension ContentViewBuildRepairLoop {
         let previousContentViewErrorCount: Int
         let phase: String
         let rollbackSubject: String
+        let allowsIncreasedContentViewErrors: Bool
+
+        init(
+            source: String,
+            originalSource: String,
+            previousContentViewErrorCount: Int,
+            phase: String,
+            rollbackSubject: String,
+            allowsIncreasedContentViewErrors: Bool = false
+        ) {
+            self.source = source
+            self.originalSource = originalSource
+            self.previousContentViewErrorCount = previousContentViewErrorCount
+            self.phase = phase
+            self.rollbackSubject = rollbackSubject
+            self.allowsIncreasedContentViewErrors = allowsIncreasedContentViewErrors
+        }
     }
 
     func betterCandidate(
@@ -75,7 +92,15 @@ extension ContentViewBuildRepairLoop {
                     """
                 )
             }
-        case .restoreOriginalSource(let originalSource):
+        case .preserveCurrentSource:
+            AgentDiagnosticsLog.append(
+                """
+                Preserved current ContentView.swift after failed generation.
+                packageRoot: \(layout.packageRootURL.path)
+                """
+            )
+        case .restoreOriginalSource(let originalSource),
+             .restoreOriginalSourceAfterFailurePreservingInterruptedSource(let originalSource):
             try context.write(originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
             AgentDiagnosticsLog.append(
                 """
@@ -115,6 +140,13 @@ extension ContentViewBuildRepairLoop {
                     """
                 )
             }
+        case .preserveCurrentSource:
+            AgentDiagnosticsLog.append(
+                """
+                Preserved current ContentView.swift after interruption.
+                packageRoot: \(layout.packageRootURL.path)
+                """
+            )
         case .restoreOriginalSource(let originalSource):
             try context.write(originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
             AgentDiagnosticsLog.append(
@@ -123,17 +155,27 @@ extension ContentViewBuildRepairLoop {
                 packageRoot: \(layout.packageRootURL.path)
                 """
             )
+        case .restoreOriginalSourceAfterFailurePreservingInterruptedSource(_):
+            AgentDiagnosticsLog.append(
+                """
+                Preserved current ContentView.swift after interrupted edit.
+                packageRoot: \(layout.packageRootURL.path)
+                """
+            )
         }
     }
 
     static func isRetryableCandidateFailure(_ error: any Error) -> Bool {
+        if error is ContentViewRepairSupport.SearchReplacePatchValidationError {
+            return true
+        }
         guard let generationError = error as? ToolGenerationError else {
             return false
         }
         switch generationError {
         case .invalidRepairPatch, .noRepairPatchCandidate:
             return true
-        case .emptyPrompt, .compileFailed:
+        case .emptyPrompt, .compileFailed, .stoppedToSaveTokens:
             return false
         }
     }
@@ -153,7 +195,9 @@ extension ContentViewBuildRepairLoop {
             return .finished
         }
 
-        guard state.contentViewErrors.count <= request.previousContentViewErrorCount else {
+        guard request.allowsIncreasedContentViewErrors
+            || state.contentViewErrors.count <= request.previousContentViewErrorCount
+        else {
             AgentDiagnosticsLog.append(
                 """
                 \(request.rollbackSubject) rolled back.
@@ -170,6 +214,9 @@ extension ContentViewBuildRepairLoop {
     }
 
     func skippedRepairReason(for error: any Error) -> SkippedRepairReason? {
+        if error is ContentViewRepairSupport.SearchReplacePatchValidationError {
+            return .invalidRepairPatch
+        }
         guard let generationError = error as? ToolGenerationError else {
             return nil
         }
@@ -178,7 +225,7 @@ extension ContentViewBuildRepairLoop {
             return .invalidRepairPatch
         case .noRepairPatchCandidate:
             return .noDeterministicRepair
-        case .emptyPrompt, .compileFailed:
+        case .emptyPrompt, .compileFailed, .stoppedToSaveTokens:
             return nil
         }
     }

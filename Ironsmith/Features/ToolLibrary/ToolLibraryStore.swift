@@ -64,6 +64,8 @@ final class ToolLibraryStore {
     @ObservationIgnored private var nextGenerationSettings: ToolGenerationSettings?
     @ObservationIgnored private var hasCustomizedNextGenerationSettings = false
     @ObservationIgnored private var generationTask: Task<Void, Never>?
+    @ObservationIgnored private var generationStopWasRequested = false
+    @ObservationIgnored private var isPopoverVisible = false
     private let dependencies: ToolLibraryDependencies
 
     private struct RestoreAvailabilitySnapshot: Sendable {
@@ -244,6 +246,7 @@ final class ToolLibraryStore {
 
     func startPromptSubmission(modelContext: ModelContext, inferenceStore: InferenceStore) {
         guard canSubmitPrompt, generationTask == nil else { return }
+        generationStopWasRequested = false
         generationTask = Task { @MainActor in
             await submitPrompt(modelContext: modelContext, inferenceStore: inferenceStore)
             generationTask = nil
@@ -252,8 +255,13 @@ final class ToolLibraryStore {
 
     func cancelGeneration() {
         guard isGenerating else { return }
+        generationStopWasRequested = true
         clearPresentedErrorState()
         generationTask?.cancel()
+    }
+
+    func setPopoverVisible(_ isVisible: Bool) {
+        isPopoverVisible = isVisible
     }
 
     func continueGeneration(
@@ -267,6 +275,7 @@ final class ToolLibraryStore {
               rebuildingToolID == nil,
               restoringToolID == nil
         else { return }
+        generationStopWasRequested = false
         generationTask = Task { @MainActor in
             await resumeGeneration(tool, modelContext: modelContext, inferenceStore: inferenceStore)
             generationTask = nil
@@ -290,6 +299,21 @@ final class ToolLibraryStore {
                 try modelContext.save()
                 try removePackageIfExists(packageRootURL)
             case .edit:
+                do {
+                    let restoredSettings = try dependencies.versionBackupClient.restoreStagedVersion(
+                        packageRootURL,
+                        tool.contentViewSourcePath,
+                        tool.generationSettings(defaults: .default)
+                    )
+                    tool.applyGenerationSettings(restoredSettings)
+                    try dependencies.packageMaterializer.writeAppEntry(
+                        layout: tool.packageLayout,
+                        displayName: tool.name,
+                        settings: restoredSettings
+                    )
+                } catch ToolVersionBackupError.missingStagedVersion {
+                    // Older incomplete edits may not have a staged backup; leave the current package intact.
+                }
                 clearPendingGeneration(on: tool)
                 try modelContext.save()
             }
@@ -374,6 +398,7 @@ final class ToolLibraryStore {
         )
         var activeTool: Tool?
         isGenerating = true
+        generationStopWasRequested = false
         clearPresentedErrorState()
 
         do {
@@ -421,16 +446,35 @@ final class ToolLibraryStore {
                 prompt: trimmedPrompt
             )
             try modelContext.save()
+            if shouldNotifyGenerationTerminalEvent {
+                await notifyGenerationFinished(completedTool)
+            }
             prompt = Self.defaultPrompt
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
-                handleGenerationCancellation(activeTool, in: modelContext)
+                await handleGenerationCancellation(activeTool, in: modelContext)
+            } else if isResumableGenerationStop(error) {
+                await refreshIronsmithCreditsIfNeeded(inferenceStore)
+                if let activeTool {
+                    let message = generationErrorMessage(for: error)
+                    markToolStopped(activeTool, summary: message)
+                    try? modelContext.save()
+                    if shouldNotifyGenerationTerminalEvent {
+                        await notifyGenerationStopped(activeTool, detail: message)
+                    }
+                } else {
+                    modelContext.rollback()
+                }
+                presentGenerationError(error)
             } else {
                 await refreshIronsmithCreditsIfNeeded(inferenceStore)
                 if let activeTool {
                     markToolFailed(activeTool, error: error)
                     try? modelContext.save()
+                    if shouldNotifyGenerationTerminalEvent {
+                        await notifyGenerationStopped(activeTool, detail: generationErrorMessage(for: error))
+                    }
                 } else {
                     modelContext.rollback()
                 }
@@ -448,6 +492,7 @@ final class ToolLibraryStore {
         }
 
         isGenerating = false
+        generationStopWasRequested = false
     }
 
     private func refreshIronsmithCreditsIfNeeded(_ inferenceStore: InferenceStore) async {
@@ -640,6 +685,7 @@ final class ToolLibraryStore {
         }
 
         isGenerating = true
+        generationStopWasRequested = false
         clearPresentedErrorState()
         let activeToolBox = BindingBox<Tool?>(tool)
         let lifecycle = generationLifecycle(
@@ -672,22 +718,38 @@ final class ToolLibraryStore {
             )
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
             try modelContext.save()
+            if shouldNotifyGenerationTerminalEvent {
+                await notifyGenerationFinished(tool)
+            }
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
-                handleGenerationCancellation(tool, in: modelContext)
+                await handleGenerationCancellation(tool, in: modelContext)
+            } else if isResumableGenerationStop(error) {
+                await refreshIronsmithCreditsIfNeeded(inferenceStore)
+                let message = generationErrorMessage(for: error)
+                markToolStopped(tool, summary: message)
+                try? modelContext.save()
+                if shouldNotifyGenerationTerminalEvent {
+                    await notifyGenerationStopped(tool, detail: message)
+                }
+                presentGenerationError(error)
             } else {
                 await refreshIronsmithCreditsIfNeeded(inferenceStore)
                 markToolFailed(tool, error: error)
                 try? modelContext.save()
+                if shouldNotifyGenerationTerminalEvent {
+                    await notifyGenerationStopped(tool, detail: generationErrorMessage(for: error))
+                }
                 presentGenerationError(error)
             }
         }
 
         isGenerating = false
+        generationStopWasRequested = false
     }
 
-    private func handleGenerationCancellation(_ tool: Tool?, in modelContext: ModelContext) {
+    private func handleGenerationCancellation(_ tool: Tool?, in modelContext: ModelContext) async {
         if let tool {
             markToolStopped(tool)
             try? modelContext.save()
@@ -695,6 +757,10 @@ final class ToolLibraryStore {
             modelContext.rollback()
         }
         clearPresentedErrorState()
+    }
+
+    private func isResumableGenerationStop(_ error: Error) -> Bool {
+        (error as? ToolGenerationError)?.isResumableStop == true
     }
 
     private func generationLifecycle(
@@ -795,9 +861,9 @@ final class ToolLibraryStore {
         tool.updatedAt = .now
     }
 
-    private func markToolStopped(_ tool: Tool) {
+    private func markToolStopped(_ tool: Tool, summary: String? = nil) {
         tool.generationState = .stopped
-        tool.generationErrorSummary = nil
+        tool.generationErrorSummary = summary.map(Self.shortSummary(for:))
         tool.generationRepairErrorCount = nil
         tool.updatedAt = .now
     }
@@ -807,6 +873,30 @@ final class ToolLibraryStore {
         tool.generationErrorSummary = Self.shortSummary(for: generationErrorMessage(for: error))
         tool.generationRepairErrorCount = nil
         tool.updatedAt = .now
+    }
+
+    private func notifyGenerationFinished(_ tool: Tool) async {
+        await dependencies.notificationClient.notify(
+            ToolGenerationNotification(
+                kind: .finished,
+                toolName: tool.name,
+                detail: nil
+            )
+        )
+    }
+
+    private func notifyGenerationStopped(_ tool: Tool, detail: String? = nil) async {
+        await dependencies.notificationClient.notify(
+            ToolGenerationNotification(
+                kind: .stopped,
+                toolName: tool.name,
+                detail: detail.map(Self.shortSummary(for:))
+            )
+        )
+    }
+
+    private var shouldNotifyGenerationTerminalEvent: Bool {
+        !generationStopWasRequested && !Task.isCancelled && !isPopoverVisible
     }
 
     private func applyCompletedGenerationResult(
@@ -907,6 +997,7 @@ struct ToolLibraryDependencies {
     var versionBackupClient: ToolVersionBackupClient = .live
     var buildClient: ToolBuildClient = .live()
     var packageMaterializer: ToolPackageMaterializer = .live
+    var notificationClient: ToolGenerationNotificationClient = .disabled
 
     static let live = ToolLibraryDependencies(
         generationClient: .live(),
@@ -915,6 +1006,7 @@ struct ToolLibraryDependencies {
         finderClient: .live,
         versionBackupClient: .live,
         buildClient: .live(),
-        packageMaterializer: .live
+        packageMaterializer: .live,
+        notificationClient: .live
     )
 }

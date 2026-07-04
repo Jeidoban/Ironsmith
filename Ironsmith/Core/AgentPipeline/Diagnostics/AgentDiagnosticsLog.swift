@@ -7,7 +7,7 @@ enum AgentDiagnosticsLog {
     nonisolated static let deterministicEditSummaryFieldLimit = 140
     nonisolated static let deterministicEditDetailFieldLimit = 320
     nonisolated static let repairExcerptLimit = 1_200
-    nonisolated static let repairDiffLimit = 1_200
+    nonisolated static let repairPatchLimit = 1_200
 
     nonisolated static func append(
         _ message: String,

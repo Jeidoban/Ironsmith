@@ -63,6 +63,7 @@ struct ToolGenerationRuntimeContext {
     let languageModel: any LanguageModel
     let metadataLanguageModel: any LanguageModel
     let generationOptions: GenerationOptions
+    let pipelineConfiguration: ToolGenerationPipelineConfiguration
     let repairStrategy: ToolRepairStrategy
     let toolsDirectoryURL: URL
     let fileClient: AgentFileClient
@@ -83,6 +84,7 @@ struct ToolGenerationRuntimeContext {
         self.languageModel = languageModelContext.languageModel
         self.metadataLanguageModel = languageModelContext.metadataLanguageModel
         self.generationOptions = languageModelContext.options
+        self.pipelineConfiguration = languageModelContext.pipelineConfiguration
         self.repairStrategy = languageModelContext.repairStrategy
         self.toolsDirectoryURL = dependencies.toolsDirectoryURL
         self.fileClient = dependencies.fileClient
@@ -251,6 +253,7 @@ enum ToolGenerationError: LocalizedError, Equatable {
     case compileFailed(String)
     case invalidRepairPatch
     case noRepairPatchCandidate
+    case stoppedToSaveTokens(String)
 
     var errorDescription: String? {
         switch self {
@@ -262,6 +265,17 @@ enum ToolGenerationError: LocalizedError, Equatable {
             return "The repair model returned an invalid patch."
         case .noRepairPatchCandidate:
             return "No deterministic repair patch was available."
+        case .stoppedToSaveTokens(let message):
+            return message
+        }
+    }
+
+    var isResumableStop: Bool {
+        switch self {
+        case .stoppedToSaveTokens:
+            return true
+        case .emptyPrompt, .compileFailed, .invalidRepairPatch, .noRepairPatchCandidate:
+            return false
         }
     }
 
