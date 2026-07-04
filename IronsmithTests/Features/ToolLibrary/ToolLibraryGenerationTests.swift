@@ -80,6 +80,7 @@ extension ToolLibraryTests {
 
         let packageRoot = root.appendingPathComponent("LateCreate", isDirectory: true)
         let gate = LateGenerationCompletionGate()
+        let notificationCapture = ToolGenerationNotificationCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: ToolGenerationClient { request in
@@ -101,7 +102,10 @@ extension ToolLibraryTests {
                         packageRootURL: packageRoot
                     )
                 },
-                runnerClient: ToolRunnerClient { _ in }
+                runnerClient: ToolRunnerClient { _ in },
+                notificationClient: ToolGenerationNotificationClient { notification in
+                    await notificationCapture.record(notification)
+                }
             )
         )
         store.prompt = "Build a late finishing create"
@@ -118,6 +122,7 @@ extension ToolLibraryTests {
         #expect(tool.generationMode == nil)
         #expect(tool.pendingPrompt == nil)
         #expect(store.presentedErrorMessage == nil)
+        #expect(await notificationCapture.recorded().isEmpty)
     }
 
     @MainActor
@@ -332,6 +337,114 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func toolLibraryStoreNotifiesWhenGenerationFinishes() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        let packageRoot = root.appendingPathComponent("FinishedTool", isDirectory: true)
+        let notificationCapture = ToolGenerationNotificationCapture()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { request in
+                    try await request.lifecycle.prepareCreatedTool(
+                        ToolGenerationPreparedTool(
+                            name: "Finished Tool",
+                            executableName: "FinishedTool",
+                            bundleIdentifier: ToolBundleIdentifier.make(executableName: "FinishedTool"),
+                            settings: request.settings,
+                            packageRootURL: packageRoot
+                        ),
+                        request.prompt
+                    )
+                    return ToolGenerationResult(
+                        toolName: "Finished Tool",
+                        executableName: "FinishedTool",
+                        settings: request.settings,
+                        packageRootURL: packageRoot
+                    )
+                },
+                runnerClient: ToolRunnerClient { _ in },
+                notificationClient: ToolGenerationNotificationClient { notification in
+                    await notificationCapture.record(notification)
+                }
+            )
+        )
+        store.prompt = "Build a finished tool"
+
+        await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
+
+        let notifications = await notificationCapture.recorded()
+        #expect(
+            notifications == [
+                ToolGenerationNotification(
+                    kind: .finished,
+                    toolName: "Finished Tool",
+                    detail: nil
+                )
+            ]
+        )
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreDoesNotNotifyWhenGenerationFinishesWhilePopoverIsVisible() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        let packageRoot = root.appendingPathComponent("VisibleTool", isDirectory: true)
+        let notificationCapture = ToolGenerationNotificationCapture()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { request in
+                    try await request.lifecycle.prepareCreatedTool(
+                        ToolGenerationPreparedTool(
+                            name: "Visible Tool",
+                            executableName: "VisibleTool",
+                            bundleIdentifier: ToolBundleIdentifier.make(executableName: "VisibleTool"),
+                            settings: request.settings,
+                            packageRootURL: packageRoot
+                        ),
+                        request.prompt
+                    )
+                    return ToolGenerationResult(
+                        toolName: "Visible Tool",
+                        executableName: "VisibleTool",
+                        settings: request.settings,
+                        packageRootURL: packageRoot
+                    )
+                },
+                runnerClient: ToolRunnerClient { _ in },
+                notificationClient: ToolGenerationNotificationClient { notification in
+                    await notificationCapture.record(notification)
+                }
+            )
+        )
+        store.setPopoverVisible(true)
+        store.prompt = "Build a visible tool"
+
+        await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
+
+        #expect(await notificationCapture.recorded().isEmpty)
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStorePresentsMessageForResumableTokenStop() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -359,13 +472,17 @@ extension ToolLibraryTests {
         try context.save()
 
         let gate = LateGenerationCompletionGate()
+        let notificationCapture = ToolGenerationNotificationCapture()
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: ToolGenerationClient { _ in
                     await gate.startAndWaitForRelease()
                     throw ToolGenerationError.stoppedToSaveTokens(message)
                 },
-                runnerClient: ToolRunnerClient { _ in }
+                runnerClient: ToolRunnerClient { _ in },
+                notificationClient: ToolGenerationNotificationClient { notification in
+                    await notificationCapture.record(notification)
+                }
             )
         )
 
@@ -378,6 +495,27 @@ extension ToolLibraryTests {
         #expect(tool.generationErrorSummary == message)
         #expect(store.presentedErrorMessage == message)
         #expect(store.presentedErrorAction == nil)
+        #expect(
+            await notificationCapture.recorded() == [
+                ToolGenerationNotification(
+                    kind: .stopped,
+                    toolName: "Token Stop",
+                    detail: message
+                )
+            ]
+        )
+    }
+}
+
+private actor ToolGenerationNotificationCapture {
+    private var notifications: [ToolGenerationNotification] = []
+
+    func record(_ notification: ToolGenerationNotification) {
+        notifications.append(notification)
+    }
+
+    func recorded() -> [ToolGenerationNotification] {
+        notifications
     }
 }
 

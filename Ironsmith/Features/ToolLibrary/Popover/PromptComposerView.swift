@@ -26,19 +26,7 @@ struct PromptComposerView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            TextField(placeholder, text: $prompt, axis: .vertical)
-                .submitLabel(.send)
-                .onSubmit {
-                    guard isSubmitEnabled else { return }
-                    onSubmit()
-                }
-                .textFieldStyle(.plain)
-                .lineLimit(3...6)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
-                .focused(isPromptFocused)
-                .accessibilityIdentifier("tool-prompt-field")
+            promptEditor
 
             HStack {
                 generationSettingsMenu
@@ -78,12 +66,54 @@ struct PromptComposerView: View {
         }
     }
 
+    private var promptEditor: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $prompt)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, PromptEditorLayout.textEditorHorizontalPadding)
+                .padding(.vertical, PromptEditorLayout.textEditorVerticalPadding)
+                .focused(isPromptFocused)
+                .onKeyPress(.return, phases: .down) { keyPress in
+                    if keyPress.modifiers.contains(.shift) {
+                        return .ignored
+                    }
+                    guard isSubmitEnabled else {
+                        return .handled
+                    }
+                    onSubmit()
+                    return .handled
+                }
+                .accessibilityIdentifier("tool-prompt-field")
+
+            if prompt.isEmpty {
+                Text(placeholder)
+                    .font(.body)
+                    .foregroundStyle(.placeholder)
+                    .padding(.leading, PromptEditorLayout.placeholderLeadingPadding)
+                    .padding(.top, PromptEditorLayout.placeholderTopPadding)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(height: promptEditorHeight)
+        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var promptEditorHeight: CGFloat {
+        let visibleLines = min(max(prompt.components(separatedBy: .newlines).count, 3), 6)
+        return PromptEditorLayout.baseHeight
+            + CGFloat(visibleLines - 3) * PromptEditorLayout.lineHeightIncrement
+    }
+
     private var generationSettingsMenu: some View {
         Menu {
             Picker("App Type", selection: $appKind) {
                 ForEach(ToolAppKind.allCases, id: \.self) { kind in
-                    Label(kind.displayName, systemImage: kind == .menuBar ? "menubar.rectangle" : "macwindow")
-                        .tag(kind)
+                    Label(
+                        kind.displayName,
+                        systemImage: kind == .menuBar ? "menubar.rectangle" : "macwindow"
+                    )
+                    .tag(kind)
                 }
             }
 
@@ -99,7 +129,7 @@ struct PromptComposerView: View {
             if showsSandboxControl {
                 Divider()
                 Toggle("Sandbox Enabled", isOn: $sandboxEnabled)
-                .help(sandboxHelpText)
+                    .help(sandboxHelpText)
             }
 
             Divider()
@@ -107,13 +137,16 @@ struct PromptComposerView: View {
             Menu("Permissions") {
                 Section("General Access") {
                     ForEach(GeneratedAppResourcePermission.allCases) { permission in
-                        Toggle(permission.displayName, isOn: resourcePermissionBinding(for: permission))
+                        Toggle(
+                            permission.displayName, isOn: resourcePermissionBinding(for: permission)
+                        )
                     }
                 }
 
                 Section("Sandbox Access") {
                     ForEach(GeneratedAppSandboxPermission.allCases) { permission in
-                        Toggle(permission.displayName, isOn: sandboxPermissionBinding(for: permission))
+                        Toggle(
+                            permission.displayName, isOn: sandboxPermissionBinding(for: permission))
                     }
                 }
             }
@@ -184,7 +217,8 @@ struct PromptComposerView: View {
                 ? "Cancels the current app generation."
                 : "Starts generating an app from the prompt."
         )
-        .accessibilityIdentifier(isSubmitting ? "stop-generation-button" : "submit-generation-button")
+        .accessibilityIdentifier(
+            isSubmitting ? "stop-generation-button" : "submit-generation-button")
     }
 
     private var submitButtonForegroundStyle: some ShapeStyle {
@@ -203,7 +237,9 @@ struct PromptComposerView: View {
         "Controls whether generated apps include App Sandbox entitlements."
     }
 
-    private func resourcePermissionBinding(for permission: GeneratedAppResourcePermission) -> Binding<Bool> {
+    private func resourcePermissionBinding(for permission: GeneratedAppResourcePermission)
+        -> Binding<Bool>
+    {
         Binding(
             get: { currentResourcePermissions.contains(permission) },
             set: { isEnabled in
@@ -216,7 +252,9 @@ struct PromptComposerView: View {
         )
     }
 
-    private func sandboxPermissionBinding(for permission: GeneratedAppSandboxPermission) -> Binding<Bool> {
+    private func sandboxPermissionBinding(for permission: GeneratedAppSandboxPermission) -> Binding<
+        Bool
+    > {
         Binding(
             get: { currentSandboxPermissions.contains(permission) },
             set: { setSandboxPermission(permission, enabled: $0) }
@@ -231,7 +269,8 @@ struct PromptComposerView: View {
         sandboxPermissions
     }
 
-    private func setResourcePermission(_ permission: GeneratedAppResourcePermission, enabled: Bool) {
+    private func setResourcePermission(_ permission: GeneratedAppResourcePermission, enabled: Bool)
+    {
         var updated = resourcePermissions
         if enabled {
             updated.enabled.insert(permission)
@@ -250,6 +289,15 @@ struct PromptComposerView: View {
         }
         sandboxPermissions = updated
     }
+}
+
+private enum PromptEditorLayout {
+    static let baseHeight: CGFloat = 72
+    static let lineHeightIncrement: CGFloat = 16
+    static let textEditorHorizontalPadding: CGFloat = 8
+    static let textEditorVerticalPadding: CGFloat = 12
+    static let placeholderLeadingPadding: CGFloat = 13
+    static let placeholderTopPadding: CGFloat = 12
 }
 
 #Preview("Create Prompt") {

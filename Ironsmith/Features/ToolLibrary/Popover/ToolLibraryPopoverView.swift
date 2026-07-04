@@ -11,12 +11,14 @@ struct ToolLibraryPopoverView: View {
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
-    @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled) private var isStoreFeatureEnabled = false
+    @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled) private var isStoreFeatureEnabled =
+        false
     #if DEBUG
-    @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowWelcomeOnboarding)
-    private var debugAlwaysShowWelcomeOnboarding = false
-    @AppStorage(IronsmithPreferenceKeys.debugPopoverEmptyStateMode)
-    private var debugPopoverEmptyStateModeRawValue = ToolLibraryDebugPopoverEmptyStateMode.off.rawValue
+        @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowWelcomeOnboarding)
+        private var debugAlwaysShowWelcomeOnboarding = false
+        @AppStorage(IronsmithPreferenceKeys.debugPopoverEmptyStateMode)
+        private var debugPopoverEmptyStateModeRawValue = ToolLibraryDebugPopoverEmptyStateMode.off
+            .rawValue
     #endif
     let appUpdateStore: AppUpdateStore
     private let welcomeOnboardingStore: WelcomeOnboardingStore
@@ -123,7 +125,8 @@ struct ToolLibraryPopoverView: View {
                                 },
                                 onRevert: {
                                     Task {
-                                        await toolLibraryStore.restorePreviousVersion(tool, in: modelContext)
+                                        await toolLibraryStore.restorePreviousVersion(
+                                            tool, in: modelContext)
                                     }
                                 },
                                 onExport: {
@@ -217,19 +220,19 @@ struct ToolLibraryPopoverView: View {
             )
         }
         .padding(16)
-        .frame(width: 340, height: 520)
+        .frame(width: 340, height: 500)
         .accessibilityIdentifier("tool-library-root")
         .onAppear {
             handlePopoverAppear()
         }
         .onDisappear {
-            pauseWelcomeOnboardingPresentation()
+            handlePopoverClose()
         }
         .onChange(of: menuBarPopoverPresentationStore.showCount) { _, _ in
             handlePopoverShow()
         }
         .onChange(of: menuBarPopoverPresentationStore.closeCount) { _, _ in
-            pauseWelcomeOnboardingPresentation()
+            handlePopoverClose()
         }
         .task(id: selectedIronsmithRefreshID) {
             await refreshSelectedIronsmithAccountIfNeeded()
@@ -301,7 +304,9 @@ struct ToolLibraryPopoverView: View {
                 toolPendingDeletion = nil
             }
         } message: {
-            Text(toolPendingDeletion.map { "Delete \($0.name)? This can't be undone." } ?? "Delete this app? This can't be undone.")
+            Text(
+                toolPendingDeletion.map { "Delete \($0.name)? This can't be undone." }
+                    ?? "Delete this app? This can't be undone.")
         }
         .alert(
             "Rename App",
@@ -380,17 +385,24 @@ struct ToolLibraryPopoverView: View {
     }
 
     private func handlePopoverAppear() {
+        toolLibraryStore.setPopoverVisible(menuBarPopoverPresentationStore.isShown)
         toolLibraryStore.initializeNextGenerationSettingsIfNeeded(defaultGenerationSettings)
         presentWelcomeOnboardingIfNeeded()
         applyPendingToolLibraryRoute()
     }
 
     private func handlePopoverShow() {
+        toolLibraryStore.setPopoverVisible(true)
         if shouldAlwaysShowWelcomeOnboarding {
             hasCheckedWelcomeOnboarding = false
         }
         presentWelcomeOnboardingIfNeeded()
         applyPendingToolLibraryRoute()
+    }
+
+    private func handlePopoverClose() {
+        toolLibraryStore.setPopoverVisible(false)
+        pauseWelcomeOnboardingPresentation()
     }
 
     private var restoreAvailabilityRefreshID: [String] {
@@ -400,10 +412,11 @@ struct ToolLibraryPopoverView: View {
     private var publishedStoreLinkRefreshID: String {
         let session = inferenceStore.ironsmithSession == nil ? "signed-out" : "signed-in"
         let storeFeature = isStoreFeatureEnabled ? "store-on" : "store-off"
-        let links = tools
+        let links =
+            tools
             .compactMap { tool -> String? in
                 guard let storeId = tool.storeId,
-                      let storeAppId = tool.storeAppId
+                    let storeAppId = tool.storeAppId
                 else { return nil }
                 return "\(storeId):\(storeAppId)"
             }
@@ -417,7 +430,8 @@ struct ToolLibraryPopoverView: View {
     }
 
     private var canSubmitPrompt: Bool {
-        toolLibraryStore.canSubmitPrompt && inferenceStore.selectedModel != nil && !shouldForceNoModels
+        toolLibraryStore.canSubmitPrompt && inferenceStore.selectedModel != nil
+            && !shouldForceNoModels
     }
 
     private var composerModelPickerTitle: String {
@@ -638,29 +652,31 @@ struct ToolLibraryPopoverView: View {
     }
 
     private var shouldShowNoModelsEmptyState: Bool {
-        shouldForceNoModels || (inferenceStore.hasLoadedModels && inferenceStore.availableModels.isEmpty)
+        shouldForceNoModels
+            || (inferenceStore.hasLoadedModels && inferenceStore.availableModels.isEmpty)
     }
 
     private var shouldForceNoApps: Bool {
         #if DEBUG
-        debugPopoverEmptyStateMode.forcesNoApps
+            debugPopoverEmptyStateMode.forcesNoApps
         #else
-        false
+            false
         #endif
     }
 
     private var shouldForceNoModels: Bool {
         #if DEBUG
-        debugPopoverEmptyStateMode.forcesNoModels
+            debugPopoverEmptyStateMode.forcesNoModels
         #else
-        false
+            false
         #endif
     }
 
     #if DEBUG
-    private var debugPopoverEmptyStateMode: ToolLibraryDebugPopoverEmptyStateMode {
-        ToolLibraryDebugPopoverEmptyStateMode(rawValue: debugPopoverEmptyStateModeRawValue) ?? .off
-    }
+        private var debugPopoverEmptyStateMode: ToolLibraryDebugPopoverEmptyStateMode {
+            ToolLibraryDebugPopoverEmptyStateMode(rawValue: debugPopoverEmptyStateModeRawValue)
+                ?? .off
+        }
     #endif
 
     private func presentWelcomeOnboardingIfNeeded() {
@@ -669,16 +685,18 @@ struct ToolLibraryPopoverView: View {
         guard !isShowingWelcomeOnboarding else { return }
 
         hasCheckedWelcomeOnboarding = true
-        guard shouldAlwaysShowWelcomeOnboarding || !welcomeOnboardingStore.hasCompleted else { return }
+        guard shouldAlwaysShowWelcomeOnboarding || !welcomeOnboardingStore.hasCompleted else {
+            return
+        }
 
         isShowingWelcomeOnboarding = true
     }
 
     private var shouldAlwaysShowWelcomeOnboarding: Bool {
         #if DEBUG
-        debugAlwaysShowWelcomeOnboarding
+            debugAlwaysShowWelcomeOnboarding
         #else
-        false
+            false
         #endif
     }
 
