@@ -286,7 +286,79 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func cancelledEditPatchAppliesCompletedBlocksAndClearsDraft() async throws {
+    func resumePartialRepairPatchAppliesCompletedDraftBlocksBeforeBuilding() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let executableName = "ResumeRepair"
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                VStack {
+                    Text("old")
+                    Text("later")
+                }
+            }
+        }
+        """
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: executableName,
+            source: source
+        )
+        let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: executableName)
+        let partialPatch = """
+        <<<<<<< SEARCH
+                    Text("old")
+        =======
+                    Text("partial")
+        >>>>>>> REPLACE
+        <<<<<<< SEARCH
+                    Text("later")
+        =======
+                    Text("
+        """
+        try FileManager.default.createDirectory(at: layout.packageMetadataDirectoryURL, withIntermediateDirectories: true)
+        try partialPatch.write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
+        tool.generationState = .stopped
+        tool.generationPhase = .generatingRepairDiff
+        tool.generationMode = .edit
+        tool.pendingPrompt = "Repair the edit"
+
+        let promptCapture = PromptCapture()
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await promptCapture.record(prompt)
+                Issue.record("Resume from repair should build the salvaged source before asking for a model patch.")
+                return ""
+            },
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 2)),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            appBundleClient: .noOp(),
+            metadataClient: .fallback(),
+            versionBackupClient: .live
+        )
+
+        let result = try await runtime.generateTool(
+            for: "ignored because pending prompt is stored",
+            existingTool: tool,
+            settings: .default
+        )
+
+        let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        #expect(contentView.contains(#"Text("partial")"#))
+        #expect(contentView.contains(#"Text("later")"#))
+        #expect(!(contentView.contains(#"Text("old")"#)))
+        #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
+        #expect(await promptCapture.prompts.isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func cancelledEditPatchKeepsDraftForResume() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -353,10 +425,10 @@ extension AgentPipelineTests {
         }
 
         let contentView = try String(contentsOf: layout.sourceDirectoryURL.appendingPathComponent(layout.defaultContentViewFileName), encoding: .utf8)
-        #expect(contentView.contains(#"Text("partial")"#))
+        #expect(contentView.contains(#"Text("old")"#))
         #expect(contentView.contains(#"Text("later")"#))
-        #expect(!(contentView.contains(#"Text("old")"#)))
-        #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
+        #expect(!(contentView.contains(#"Text("partial")"#)))
+        #expect(try String(contentsOf: layout.pendingContentViewDraftURL, encoding: .utf8) == partialPatch)
     }
 
     @MainActor

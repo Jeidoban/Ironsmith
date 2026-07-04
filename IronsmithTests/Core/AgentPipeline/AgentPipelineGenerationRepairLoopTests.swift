@@ -564,7 +564,8 @@ extension AgentPipelineTests {
             )
             Issue.record("Expected large-model repair to stop at the safety limit.")
         } catch let error as ToolGenerationError {
-            #expect(error.localizedDescription.contains("ContentView.swift still has 1 compiler errors"))
+            #expect(error == .stoppedToSaveTokens("Stopped after \(ToolGenerationRepairPolicy.largeModelMaximumRepairAttempts) repair attempts preserve tokens. Continue to keep repairing from current source."))
+            #expect(error.localizedDescription.contains("Stopped after \(ToolGenerationRepairPolicy.largeModelMaximumRepairAttempts) repair attempts"))
         }
 
         let packageRoot = toolsDirectory.appendingPathComponent("build-safety-limit-repair", isDirectory: true)

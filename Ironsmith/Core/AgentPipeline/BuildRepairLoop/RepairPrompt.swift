@@ -122,7 +122,6 @@ extension ContentViewBuildRepairLoop {
             try Task.checkCancellation()
             patch = response
         } catch {
-            try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             AgentDiagnosticsLog.append(
                 """
                 Model repair request failed.
@@ -184,6 +183,7 @@ extension ContentViewBuildRepairLoop {
             )
             throw error
         }
+        try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
         AgentDiagnosticsLog.append(
             """
             Model repair patch accepted.

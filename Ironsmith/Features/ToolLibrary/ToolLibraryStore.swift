@@ -290,6 +290,21 @@ final class ToolLibraryStore {
                 try modelContext.save()
                 try removePackageIfExists(packageRootURL)
             case .edit:
+                do {
+                    let restoredSettings = try dependencies.versionBackupClient.restoreStagedVersion(
+                        packageRootURL,
+                        tool.contentViewSourcePath,
+                        tool.generationSettings(defaults: .default)
+                    )
+                    tool.applyGenerationSettings(restoredSettings)
+                    try dependencies.packageMaterializer.writeAppEntry(
+                        layout: tool.packageLayout,
+                        displayName: tool.name,
+                        settings: restoredSettings
+                    )
+                } catch ToolVersionBackupError.missingStagedVersion {
+                    // Older incomplete edits may not have a staged backup; leave the current package intact.
+                }
                 clearPendingGeneration(on: tool)
                 try modelContext.save()
             }
@@ -426,6 +441,15 @@ final class ToolLibraryStore {
         } catch {
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
                 handleGenerationCancellation(activeTool, in: modelContext)
+            } else if isResumableGenerationStop(error) {
+                await refreshIronsmithCreditsIfNeeded(inferenceStore)
+                if let activeTool {
+                    markToolStopped(activeTool, summary: generationErrorMessage(for: error))
+                    try? modelContext.save()
+                } else {
+                    modelContext.rollback()
+                }
+                presentGenerationError(error)
             } else {
                 await refreshIronsmithCreditsIfNeeded(inferenceStore)
                 if let activeTool {
@@ -676,6 +700,11 @@ final class ToolLibraryStore {
         } catch {
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
                 handleGenerationCancellation(tool, in: modelContext)
+            } else if isResumableGenerationStop(error) {
+                await refreshIronsmithCreditsIfNeeded(inferenceStore)
+                markToolStopped(tool, summary: generationErrorMessage(for: error))
+                try? modelContext.save()
+                presentGenerationError(error)
             } else {
                 await refreshIronsmithCreditsIfNeeded(inferenceStore)
                 markToolFailed(tool, error: error)
@@ -695,6 +724,10 @@ final class ToolLibraryStore {
             modelContext.rollback()
         }
         clearPresentedErrorState()
+    }
+
+    private func isResumableGenerationStop(_ error: Error) -> Bool {
+        (error as? ToolGenerationError)?.isResumableStop == true
     }
 
     private func generationLifecycle(
@@ -795,9 +828,9 @@ final class ToolLibraryStore {
         tool.updatedAt = .now
     }
 
-    private func markToolStopped(_ tool: Tool) {
+    private func markToolStopped(_ tool: Tool, summary: String? = nil) {
         tool.generationState = .stopped
-        tool.generationErrorSummary = nil
+        tool.generationErrorSummary = summary.map(Self.shortSummary(for:))
         tool.generationRepairErrorCount = nil
         tool.updatedAt = .now
     }

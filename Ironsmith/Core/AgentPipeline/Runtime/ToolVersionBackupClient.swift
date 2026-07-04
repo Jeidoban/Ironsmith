@@ -18,6 +18,11 @@ struct ToolVersionBackupClient {
     var promoteStagedVersion: (_ backup: ToolContentVersionBackup) throws -> Void
     var discardStagedVersion: (_ backup: ToolContentVersionBackup) throws -> Void
     var hasPreviousVersion: (_ packageRootURL: URL, _ contentViewPath: String) -> Bool
+    var restoreStagedVersion: (
+        _ packageRootURL: URL,
+        _ contentViewPath: String,
+        _ currentSettings: ToolGenerationSettings
+    ) throws -> ToolGenerationSettings
     var restorePreviousVersion: (
         _ packageRootURL: URL,
         _ contentViewPath: String,
@@ -38,8 +43,12 @@ struct ToolVersionBackupClient {
                 at: backup.pendingURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try source.write(to: backup.pendingURL, atomically: true, encoding: .utf8)
-            try settingsData.write(to: backup.pendingBuildSettingsURL, options: .atomic)
+            if !FileManager.default.fileExists(atPath: backup.pendingURL.path) {
+                try source.write(to: backup.pendingURL, atomically: true, encoding: .utf8)
+            }
+            if !FileManager.default.fileExists(atPath: backup.pendingBuildSettingsURL.path) {
+                try settingsData.write(to: backup.pendingBuildSettingsURL, options: .atomic)
+            }
             return backup
         },
         promoteStagedVersion: { backup in
@@ -73,6 +82,34 @@ struct ToolVersionBackupClient {
                 return false
             }
             return FileManager.default.fileExists(atPath: backup.previousURL.path)
+        },
+        restoreStagedVersion: { packageRootURL, contentViewPath, currentSettings in
+            let contentViewURL = try resolvedContentViewURL(
+                packageRootURL: packageRootURL,
+                contentViewPath: contentViewPath
+            )
+            let backup = try backupPaths(packageRootURL: packageRootURL, contentViewPath: contentViewPath)
+            guard FileManager.default.fileExists(atPath: backup.pendingURL.path) else {
+                throw ToolVersionBackupError.missingStagedVersion
+            }
+
+            let stagedSource = try String(contentsOf: backup.pendingURL, encoding: .utf8)
+            let stagedSettings = try readBuildSettings(
+                at: backup.pendingBuildSettingsURL,
+                fallback: currentSettings
+            )
+            try FileManager.default.createDirectory(
+                at: contentViewURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try stagedSource.write(to: contentViewURL, atomically: true, encoding: .utf8)
+            if FileManager.default.fileExists(atPath: backup.pendingURL.path) {
+                try FileManager.default.removeItem(at: backup.pendingURL)
+            }
+            if FileManager.default.fileExists(atPath: backup.pendingBuildSettingsURL.path) {
+                try FileManager.default.removeItem(at: backup.pendingBuildSettingsURL)
+            }
+            return stagedSettings
         },
         restorePreviousVersion: { packageRootURL, contentViewPath, currentSettings in
             let contentViewURL = try resolvedContentViewURL(

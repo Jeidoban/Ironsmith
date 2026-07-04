@@ -329,6 +329,56 @@ extension ToolLibraryTests {
         #expect(store.presentedErrorMessage == nil)
         #expect(!(store.isGenerating))
     }
+
+    @MainActor
+    @Test
+    func toolLibraryStorePresentsMessageForResumableTokenStop() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        let packageRoot = root.appendingPathComponent("TokenStop", isDirectory: true)
+        let message = "Stopped after 6 repair attempts preserve tokens. Continue to keep repairing from current source."
+        let tool = StoredTool(
+            name: "Token Stop",
+            executableName: "TokenStop",
+            packageRootPath: packageRoot.path,
+            generationState: .stopped,
+            generationPhase: .generatingRepairDiff,
+            generationMode: .edit,
+            pendingPrompt: "Continue repairing"
+        )
+        context.insert(tool)
+        try context.save()
+
+        let gate = LateGenerationCompletionGate()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { _ in
+                    await gate.startAndWaitForRelease()
+                    throw ToolGenerationError.stoppedToSaveTokens(message)
+                },
+                runnerClient: ToolRunnerClient { _ in }
+            )
+        )
+
+        store.continueGeneration(tool, modelContext: context, inferenceStore: inferenceStore)
+        await gate.waitForStart()
+        await gate.release()
+        await Self.waitForIdle(store)
+
+        #expect(tool.generationState == .stopped)
+        #expect(tool.generationErrorSummary == message)
+        #expect(store.presentedErrorMessage == message)
+        #expect(store.presentedErrorAction == nil)
+    }
 }
 
 private actor LateGenerationCompletionGate {

@@ -169,7 +169,9 @@ extension ContentViewBuildRepairLoop {
         if context.pipelineConfiguration.regeneratesAfterModelRepairStall {
             return .regenerate("model repair budget exhausted after \(repairBudget) attempts")
         }
-        return .failed(state)
+        throw ToolGenerationError.stoppedToSaveTokens(
+            "Stopped after \(repairBudget) repair attempts preserve tokens. Continue to keep repairing from current source."
+        )
     }
 
     func invalidRepairOutcome(for error: any Error) -> String {

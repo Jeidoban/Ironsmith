@@ -398,7 +398,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func deterministicOnlyEditRestoresOriginalAfterExhaustingCandidates() async throws {
+    func deterministicOnlyEditPreservesCurrentSourceAfterExhaustingCandidates() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -408,6 +408,7 @@ extension AgentPipelineTests {
             executableName: executableName,
             source: Self.originalEditableSource
         )
+        let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: executableName)
         let builds = UnsupportedModifierBuilds(executableName: executableName)
         let brokenSource = """
         import SwiftUI
@@ -457,8 +458,9 @@ extension AgentPipelineTests {
             encoding: .utf8
         )
         let previousURL = ToolPackageLayout.previousContentViewVersionURL(for: tool.packageRootURL)
-        #expect(contentView == Self.originalEditableSource)
+        #expect(contentView == brokenSource)
         #expect(!(FileManager.default.fileExists(atPath: previousURL.path)))
+        #expect(FileManager.default.fileExists(atPath: layout.pendingContentViewVersionURL.path))
         #expect(await responses.count == ToolGenerationRepairPolicy.maximumGenerationAttempts)
         #expect(await builds.count == ToolGenerationRepairPolicy.maximumGenerationAttempts)
     }
