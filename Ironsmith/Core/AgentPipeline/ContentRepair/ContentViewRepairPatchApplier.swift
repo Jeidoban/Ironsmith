@@ -193,14 +193,37 @@ extension ContentViewRepairSupport {
     }
 
     static func sanitizedSearchReplacePatchSummary(_ rawPatch: String) -> String {
-        stripVisibleThinking(from: rawPatch.trimmingCharacters(in: .whitespacesAndNewlines))
-            .components(separatedBy: .newlines)
-            .filter { line in
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                return !trimmed.hasPrefix("```")
-                    && !isPatchProseLine(trimmed)
-                    && !isApplyPatchEnvelopeLine(trimmed)
+        var sanitizedLines: [String] = []
+        var currentBlockKind: SearchReplaceBlock.Kind?
+
+        for line in stripVisibleThinking(from: rawPatch.trimmingCharacters(in: .whitespacesAndNewlines))
+            .components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if let blockKind = currentBlockKind {
+                sanitizedLines.append(line)
+                if trimmed == closingMarker(for: blockKind) {
+                    currentBlockKind = nil
+                }
+                continue
             }
+
+            if let blockKind = blockKind(forOpeningMarker: trimmed) {
+                currentBlockKind = blockKind
+                sanitizedLines.append(line)
+                continue
+            }
+
+            guard !trimmed.hasPrefix("```"),
+                  !isPatchProseLine(trimmed),
+                  !isApplyPatchEnvelopeLine(trimmed)
+            else {
+                continue
+            }
+            sanitizedLines.append(line)
+        }
+
+        return sanitizedLines
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }

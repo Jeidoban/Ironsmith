@@ -463,6 +463,44 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func applyValidatedSearchReplacePatchPreservesProseAndFencesInsideReplacement() throws {
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                Text("One")
+            }
+        }
+        """
+        let patch = #"""
+        Here is the patch:
+        <<<<<<< SEARCH
+                Text("One")
+        =======
+                Text("""
+                Note: keep this line
+                ```swift
+                let value = 1
+                ```
+                """)
+        >>>>>>> REPLACE
+        """#
+
+        let updated = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            patch,
+            to: source,
+            maximumPatchBlocks: 1
+        )
+
+        #expect(updated.contains("Note: keep this line"))
+        #expect(updated.contains("```swift"))
+        #expect(updated.contains("let value = 1"))
+        #expect(!(updated.contains("Here is the patch:")))
+        #expect(!(updated.contains("Text(\"One\")")))
+    }
+
+    @Test
     func applyValidatedSearchReplacePatchStripsMarkdownFenceAndVisibleThinking() throws {
         let source = """
         import SwiftUI
