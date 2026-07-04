@@ -22,7 +22,8 @@ extension AgentPipelineTests {
         #expect(layout.appEntrySourcePath == "Sources/DemoTool/DemoTool.swift")
         #expect(layout.sourcePath(for: "ContentView.swift") == "Sources/DemoTool/ContentView.swift")
         #expect(layout.contentViewSourcePath == "Sources/DemoTool/ContentView.swift")
-        #expect(layout.packageManifestContent().contains("swiftLanguageModes: [.v6]"))
+        #expect(layout.packageManifestContent().contains("swiftLanguageModes: [.v5]"))
+        #expect(!(layout.packageManifestContent().contains("swiftLanguageModes: [.v6]")))
         #expect(layout.fixedAppEntrySource().contains("ContentView()"))
     }
 

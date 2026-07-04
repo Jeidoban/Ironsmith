@@ -546,6 +546,10 @@ extension InferenceTests {
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
         #expect(context.pipelineConfiguration.profile == .largeModel)
-        #expect(context.repairStrategy == .modelSearchReplace(maxPatchBlocksPerTurn: 8))
+        #expect(
+            context.repairStrategy == .modelSearchReplace(
+                maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
+            )
+        )
     }
 }
