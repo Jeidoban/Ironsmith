@@ -71,6 +71,9 @@ extension ContentViewBuildRepairLoop {
                     throw error
                 }
 
+                repairConversation.keepAuthoritativeSourceInSession(
+                    outcome: invalidRepairOutcome(for: error)
+                )
                 logSkippedRepairAttempt(
                     reason: skippedRepairReason,
                     attempt: attempt,
@@ -167,5 +170,26 @@ extension ContentViewBuildRepairLoop {
             return .regenerate("model repair budget exhausted after \(repairBudget) attempts")
         }
         return .failed(state)
+    }
+
+    func invalidRepairOutcome(for error: any Error) -> String {
+        guard let validationError = error as? ContentViewRepairSupport.SearchReplacePatchValidationError else {
+            return """
+            The previous repair patch was invalid and was not applied.
+            Only patch code that exists in the current excerpts below.
+            """
+        }
+
+        if validationError.isStaleSearchFailure {
+            return """
+            The previous patch was invalid because a SEARCH block did not match the current ContentView.swift. Treat that block as stale; it may have already changed.
+            Only patch code that exists in the current excerpts below.
+            """
+        }
+
+        return """
+        The previous repair patch was invalid and was not applied: \(validationError.reason)
+        Only patch code that exists in the current excerpts below.
+        """
     }
 }

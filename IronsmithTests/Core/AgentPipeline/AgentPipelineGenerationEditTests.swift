@@ -147,6 +147,105 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func largeModelPatchEditRetriesOneUnappliablePatchCandidate() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: "LargeRetryEdit",
+            source: Self.originalEditableSource
+        )
+        let missingSearchPatch = """
+        <<<<<<< SEARCH
+                Text("missing")
+        =======
+                Text("new")
+        >>>>>>> REPLACE
+        """
+        let responses = LanguageModelResponseQueue([
+            missingSearchPatch,
+            Self.renameOldToNewPatch
+        ])
+        let promptCapture = PromptCapture()
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await promptCapture.record(prompt)
+                return try await responses.next()
+            },
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            metadataClient: .fallback()
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Change old to new",
+            existingTool: tool,
+            settings: .default
+        )
+
+        let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        #expect(contentView.contains(#"Text("new")"#))
+        let prompts = await promptCapture.prompts
+        #expect(prompts.count == 2)
+        #expect(prompts.allSatisfy { $0.contains("Edit ContentView.swift by returning search/replace patch blocks only.") })
+        #expect(prompts[1].contains("Previous patch attempt failed:"))
+        #expect(prompts[1].contains("Only patch the current authoritative source below."))
+        #expect(await responses.count == 2)
+    }
+
+    @MainActor
+    @Test
+    func largeModelPatchEditAppliesValidBlocksFromPartiallyInvalidPatch() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: "LargePartialEdit",
+            source: Self.originalEditableSource
+        )
+        let partialPatch = """
+        <<<<<<< SEARCH
+                Text("old")
+        =======
+                Text("new")
+        >>>>>>> REPLACE
+        <<<<<<< SEARCH
+                Text("missing")
+        =======
+                Text("unused")
+        >>>>>>> REPLACE
+        """
+        let responses = LanguageModelResponseQueue([partialPatch])
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { _, _ in
+                try await responses.next()
+            },
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            metadataClient: .fallback()
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Change old to new",
+            existingTool: tool,
+            settings: .default
+        )
+
+        let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        #expect(contentView.contains(#"Text("new")"#))
+        #expect(!(contentView.contains(#"Text("old")"#)))
+        #expect(!(contentView.contains(#"Text("unused")"#)))
+        #expect(await responses.count == 1)
+    }
+
+    @MainActor
+    @Test
     func smallModelPatchEditFallsBackToWholeFileEditAfterRepeatedInvalidInitialPatches() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
@@ -293,7 +392,7 @@ extension AgentPipelineTests {
         let prompts = await promptCapture.prompts
         #expect(prompts.count == 2)
         #expect(prompts[0].contains("Return at most 1 search/replace patch block(s)."))
-        #expect(prompts[1].contains("Return at most 8 search/replace patch block(s)."))
+        #expect(prompts[1].contains("Return at most \(ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn) search/replace patch block(s)."))
         #expect(await responses.count == 2)
     }
 

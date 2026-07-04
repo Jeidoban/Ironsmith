@@ -366,7 +366,8 @@ struct SingleFileToolGenerationRuntime {
                 layout: layout,
                 contentViewPath: contentViewPath,
                 generator: generator,
-                failureRecovery: .restoreOriginalSource(existingSource),
+                failureRecovery: .restoreOriginalSourceAfterFailurePreservingInterruptedSource(existingSource),
+                maximumGenerationAttempts: editGenerationAttempts(),
                 lifecycle: lifecycle
             )
             try Task.checkCancellation()
@@ -383,12 +384,16 @@ struct SingleFileToolGenerationRuntime {
             try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             try context.versionBackupClient.promoteStagedVersion(backup)
         } catch {
-            try? context.write(existingSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            let isCancellation = IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled
+            if !isCancellation {
+                try? context.write(existingSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            }
             try? context.write(existingAppEntrySource, to: layout.appEntrySourcePath, packageRootURL: layout.packageRootURL)
+            try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             try? context.versionBackupClient.discardStagedVersion(backup)
             AgentDiagnosticsLog.append(
                 """
-                Restored original ContentView.swift after edit failure.
+                \(isCancellation ? "Preserved current ContentView.swift after interrupted edit." : "Restored original ContentView.swift after edit failure.")
                 packageRoot: \(existingTool.packageRootURL.path)
                 error:
                 \(AgentDiagnosticsLog.renderError(error, limit: 800))
@@ -416,6 +421,7 @@ struct SingleFileToolGenerationRuntime {
         contentViewPath: String,
         generator: ContentViewCandidateGenerator,
         failureRecovery: ContentViewBuildRepairLoop.FailureRecovery = .restoreBestCandidate,
+        maximumGenerationAttempts: Int? = nil,
         lifecycle: ToolGenerationLifecycle
     ) async throws {
         try await lifecycle.updatePhase(.generating, .repairing, nil)
@@ -425,12 +431,14 @@ struct SingleFileToolGenerationRuntime {
             displayName: displayName,
             contentViewPath: contentViewPath,
             regenerationThreshold: ToolGenerationRepairPolicy.regenerationThreshold,
-            maximumGenerationAttempts: context.pipelineConfiguration.maximumGenerationAttempts,
+            maximumGenerationAttempts: maximumGenerationAttempts
+                ?? context.pipelineConfiguration.maximumGenerationAttempts,
             lifecycle: lifecycle
         )
         let effectiveFailureRecovery: ContentViewBuildRepairLoop.FailureRecovery
         switch failureRecovery {
-        case .restoreOriginalSource:
+        case .restoreOriginalSource,
+             .restoreOriginalSourceAfterFailurePreservingInterruptedSource:
             effectiveFailureRecovery = failureRecovery
         case .restoreBestCandidate, .preserveCurrentSource:
             effectiveFailureRecovery = context.pipelineConfiguration.restoresBestCandidateOnFailure
@@ -440,6 +448,16 @@ struct SingleFileToolGenerationRuntime {
         try await repairLoop.run(
             generator: generator,
             failureRecovery: effectiveFailureRecovery
+        )
+    }
+
+    private func editGenerationAttempts() -> Int {
+        guard context.repairStrategy.usesModelRepair else {
+            return context.pipelineConfiguration.maximumGenerationAttempts
+        }
+        return max(
+            context.pipelineConfiguration.maximumGenerationAttempts,
+            ToolGenerationRepairPolicy.minimumEditPatchGenerationAttempts
         )
     }
 
@@ -571,16 +589,12 @@ struct SingleFileToolGenerationRuntime {
             )
         }
 
-        var didAttemptContinuation = false
-        let originalPrompt = ToolGenerationPrompts.singleFileEditPatchPrompt(
-            userPrompt: userPrompt,
-            executableName: layout.executableName,
-            existingSource: existingSource,
-            maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn
-        )
+        var didApplyResumedPatchDraft = false
+        var currentExistingSource = existingSource
+        var previousPatchFailure: String?
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialPatch ? "continue edit patch" : "edit",
+            modeDescription: "edit",
             instructions: ToolGenerationPrompts.searchReplaceEditInstructions,
             retriesInvalidCandidates: true,
             invalidCandidateFallback: context.pipelineConfiguration
@@ -600,36 +614,42 @@ struct SingleFileToolGenerationRuntime {
                 }
                 : nil
         ) { session in
-            if resumePartialPatch && !didAttemptContinuation {
-                didAttemptContinuation = true
+            if resumePartialPatch && !didApplyResumedPatchDraft {
+                didApplyResumedPatchDraft = true
                 let partialPatch = try context.readIfPresent(
                     ToolPackageLayout.pendingContentViewDraftPath,
                     packageRootURL: layout.packageRootURL
                 )
                 if !partialPatch.isEmpty {
-                    try await continuePatchDraft(
-                        partialPatch: partialPatch,
-                        originalPrompt: originalPrompt,
-                        originalSource: existingSource,
-                        maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn,
+                    try? applyCompletedPendingPatchBlocksAndClearDraft(
                         layout: layout,
                         contentViewPath: contentViewPath,
-                        lifecycle: lifecycle,
-                        session: session
+                        originalSource: currentExistingSource,
+                        maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn
+                    )
+                    currentExistingSource = try context.readIfPresent(
+                        contentViewPath,
+                        packageRootURL: layout.packageRootURL
                     )
                 }
-                return
             }
 
-            try await regenerateEditedContentViewPatch(
-                userPrompt: userPrompt,
-                layout: layout,
-                contentViewPath: contentViewPath,
-                existingSource: existingSource,
-                maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn,
-                lifecycle: lifecycle,
-                session: session
-            )
+            do {
+                try await regenerateEditedContentViewPatch(
+                    userPrompt: userPrompt,
+                    layout: layout,
+                    contentViewPath: contentViewPath,
+                    existingSource: currentExistingSource,
+                    maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn,
+                    previousPatchFailure: previousPatchFailure,
+                    lifecycle: lifecycle,
+                    session: session
+                )
+                previousPatchFailure = nil
+            } catch {
+                previousPatchFailure = AgentDiagnosticsLog.renderError(error, limit: 800)
+                throw error
+            }
         }
     }
 
@@ -713,50 +733,6 @@ struct SingleFileToolGenerationRuntime {
         }
     }
 
-    private func continuePatchDraft(
-        partialPatch: String,
-        originalPrompt: String,
-        originalSource: String,
-        maximumPatchBlocks: Int,
-        layout: ToolPackageLayout,
-        contentViewPath: String,
-        lifecycle: ToolGenerationLifecycle,
-        session: LanguageModelSession
-    ) async throws {
-        let prompt = ToolGenerationPrompts.patchContinuationPrompt(
-            originalPrompt: originalPrompt,
-            partialPatch: partialPatch
-        )
-        do {
-            try await lifecycle.updatePhase(.generating, .generatingEditDiff, nil)
-            let continuation = try await context.streamText(in: session, to: prompt) { partialContinuation in
-                try context.write(
-                    partialPatch + partialContinuation,
-                    to: ToolPackageLayout.pendingContentViewDraftPath,
-                    packageRootURL: layout.packageRootURL
-                )
-            }
-            let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(partialPatch + continuation)
-            let editedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
-                sanitizedPatch,
-                to: originalSource,
-                maximumPatchBlocks: maximumPatchBlocks
-            )
-            try context.write(
-                editedSource,
-                to: contentViewPath,
-                packageRootURL: layout.packageRootURL
-            )
-        } catch {
-            try trimPendingPatchDraftToLastValidPrefix(
-                layout: layout,
-                originalSource: originalSource,
-                maximumPatchBlocks: maximumPatchBlocks
-            )
-            throw error
-        }
-    }
-
     private func packageTool(
         displayName: String,
         executableName: String,
@@ -835,36 +811,57 @@ struct SingleFileToolGenerationRuntime {
         return false
     }
 
-    private func trimPendingPatchDraftToLastValidPrefix(
+    private func applyCompletedPendingPatchBlocksAndClearDraft(
         layout: ToolPackageLayout,
+        contentViewPath: String,
         originalSource: String,
         maximumPatchBlocks: Int
     ) throws {
+        defer {
+            try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
+        }
         let draft = try context.readIfPresent(
             ToolPackageLayout.pendingContentViewDraftPath,
             packageRootURL: layout.packageRootURL
         )
         guard !draft.isEmpty else { return }
-        let lines = draft.components(separatedBy: .newlines)
-        for endIndex in stride(from: lines.count, through: 0, by: -1) {
-            let candidate = lines.prefix(endIndex).joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard candidate.contains("<<<<<<< SEARCH") else { continue }
-            let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(candidate)
-            if (try? ContentViewRepairSupport.applyValidatedSearchReplacePatch(
-                sanitizedPatch,
+        if context.pipelineConfiguration.profile == .largeModel {
+            let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
+                draft,
                 to: originalSource,
                 maximumPatchBlocks: maximumPatchBlocks
-            )) != nil {
-                try context.write(
-                    candidate,
-                    to: ToolPackageLayout.pendingContentViewDraftPath,
-                    packageRootURL: layout.packageRootURL
+            )
+            try context.write(application.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            AgentDiagnosticsLog.append(
+                """
+                Applied completed edit patch blocks from interrupted draft.
+                packageRoot: \(layout.packageRootURL.path)
+                \(application.logSummary)
+                """
+            )
+        } else {
+            guard let application = try ContentViewRepairSupport.applyCompletedSearchReplacePatchBlocks(
+                draft,
+                to: originalSource,
+                maximumPatchBlocks: maximumPatchBlocks
+            ) else {
+                AgentDiagnosticsLog.append(
+                    """
+                    Cleared interrupted edit patch draft with no completed patch blocks.
+                    packageRoot: \(layout.packageRootURL.path)
+                    """
                 )
                 return
             }
+            try context.write(application.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            AgentDiagnosticsLog.append(
+                """
+                Applied completed edit patch blocks from interrupted draft.
+                packageRoot: \(layout.packageRootURL.path)
+                appliedBlockCount: \(application.appliedBlockCount)
+                """
+            )
         }
-        try context.write("", to: ToolPackageLayout.pendingContentViewDraftPath, packageRootURL: layout.packageRootURL)
     }
 
     private func regenerateCreatedContentView(
@@ -965,6 +962,7 @@ struct SingleFileToolGenerationRuntime {
         contentViewPath: String,
         existingSource: String,
         maximumPatchBlocks: Int,
+        previousPatchFailure: String?,
         lifecycle: ToolGenerationLifecycle,
         session: LanguageModelSession
     ) async throws {
@@ -972,7 +970,8 @@ struct SingleFileToolGenerationRuntime {
             userPrompt: userPrompt,
             executableName: layout.executableName,
             existingSource: existingSource,
-            maximumPatchBlocks: maximumPatchBlocks
+            maximumPatchBlocks: maximumPatchBlocks,
+            previousPatchFailure: previousPatchFailure
         )
         let draftPath = ToolPackageLayout.pendingContentViewDraftPath
         let response: String
@@ -997,11 +996,16 @@ struct SingleFileToolGenerationRuntime {
                 \(AgentDiagnosticsLog.renderError(error))
                 """
             )
-            try? trimPendingPatchDraftToLastValidPrefix(
-                layout: layout,
-                originalSource: existingSource,
-                maximumPatchBlocks: maximumPatchBlocks
-            )
+            if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
+                try? applyCompletedPendingPatchBlocksAndClearDraft(
+                    layout: layout,
+                    contentViewPath: contentViewPath,
+                    originalSource: existingSource,
+                    maximumPatchBlocks: maximumPatchBlocks
+                )
+            } else {
+                try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
+            }
             throw error
         }
 
@@ -1013,14 +1017,38 @@ struct SingleFileToolGenerationRuntime {
             packageRoot: \(layout.packageRootURL.path)
             rawCharacters: \(response.count)
             sanitizedPatch:
-            \(AgentDiagnosticsLog.compactMultiline(sanitizedPatch, limit: AgentDiagnosticsLog.repairPatchLimit))
+            \(sanitizedPatch)
             """
         )
-        let editedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
-            sanitizedPatch,
-            to: existingSource,
-            maximumPatchBlocks: maximumPatchBlocks
-        )
+        let editedSource: String
+        do {
+            if context.pipelineConfiguration.profile == .largeModel {
+                let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
+                    sanitizedPatch,
+                    to: existingSource,
+                    maximumPatchBlocks: maximumPatchBlocks
+                )
+                editedSource = application.source
+                if !application.skippedBlocks.isEmpty {
+                    AgentDiagnosticsLog.append(
+                        """
+                        Model edit patch partially applied.
+                        packageRoot: \(layout.packageRootURL.path)
+                        \(application.logSummary)
+                        """
+                    )
+                }
+            } else {
+                editedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+                    sanitizedPatch,
+                    to: existingSource,
+                    maximumPatchBlocks: maximumPatchBlocks
+                )
+            }
+        } catch {
+            try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
+            throw error
+        }
         AgentDiagnosticsLog.append(
             """
             Model edit patch accepted.

@@ -74,6 +74,7 @@ struct ContentViewBuildRepairLoop {
         case restoreBestCandidate
         case preserveCurrentSource
         case restoreOriginalSource(String)
+        case restoreOriginalSourceAfterFailurePreservingInterruptedSource(String)
     }
 
     func run(

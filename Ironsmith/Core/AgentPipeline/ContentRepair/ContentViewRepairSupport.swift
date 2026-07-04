@@ -2,7 +2,9 @@ import Foundation
 
 enum ContentViewRepairSupport {
     static let snippetRadius = 8
+    static let typeCheckTimeoutSnippetRadius = 48
     static let maximumTargetLength = 1_200
+    static let maximumTypeCheckTimeoutTargetLength = 6_000
     static let maximumReplacementLength = 1_200
     static let defaultDeterministicEditOperationsPerBatch = ToolGenerationRepairPolicy.defaultDeterministicEditOperationsPerBatch
 
@@ -88,7 +90,11 @@ enum ContentViewRepairSupport {
         for diagnostic in diagnostics {
             let diagnosticIndex = diagnostic.line - 1
             guard lines.indices.contains(diagnosticIndex),
-                  let range = enclosingEditableBlockRange(in: lines, containing: diagnosticIndex)
+                  let range = enclosingEditableBlockRange(
+                    in: lines,
+                    containing: diagnosticIndex,
+                    isTypeCheckTimeout: isTypeCheckTimeout(diagnostic)
+                  )
             else {
                 continue
             }
@@ -280,7 +286,25 @@ enum ContentViewRepairSupport {
 
     private static func enclosingEditableBlockRange(
         in lines: [String],
-        containing diagnosticIndex: Int
+        containing diagnosticIndex: Int,
+        isTypeCheckTimeout: Bool = false
+    ) -> ClosedRange<Int>? {
+        if isTypeCheckTimeout,
+           let range = typeCheckTimeoutContextRange(in: lines, containing: diagnosticIndex) {
+            return range
+        }
+
+        return enclosingEditableBlockRange(
+            in: lines,
+            containing: diagnosticIndex,
+            maximumLength: maximumTargetLength
+        )
+    }
+
+    private static func enclosingEditableBlockRange(
+        in lines: [String],
+        containing diagnosticIndex: Int,
+        maximumLength: Int
     ) -> ClosedRange<Int>? {
         var fallback: ClosedRange<Int>?
         var preferred: ClosedRange<Int>?
@@ -296,7 +320,7 @@ enum ContentViewRepairSupport {
 
             let range = startIndex...endIndex
             let text = lines[range].joined(separator: "\n")
-            guard text.count <= maximumTargetLength else {
+            guard text.count <= maximumLength else {
                 continue
             }
 
@@ -308,6 +332,67 @@ enum ContentViewRepairSupport {
         }
 
         return preferred ?? fallback
+    }
+
+    private static func typeCheckTimeoutContextRange(
+        in lines: [String],
+        containing diagnosticIndex: Int
+    ) -> ClosedRange<Int>? {
+        if let viewBuilderRange = enclosingViewBuilderRange(in: lines, containing: diagnosticIndex),
+           lines[viewBuilderRange].joined(separator: "\n").count <= maximumTypeCheckTimeoutTargetLength {
+            return viewBuilderRange
+        }
+
+        if let largerBlockRange = enclosingEditableBlockRange(
+            in: lines,
+            containing: diagnosticIndex,
+            maximumLength: maximumTypeCheckTimeoutTargetLength
+        ) {
+            return largerBlockRange
+        }
+
+        return expandedSnippetRange(
+            in: lines,
+            containing: diagnosticIndex,
+            radius: typeCheckTimeoutSnippetRadius
+        )
+    }
+
+    private static func enclosingViewBuilderRange(
+        in lines: [String],
+        containing diagnosticIndex: Int
+    ) -> ClosedRange<Int>? {
+        for startIndex in stride(from: diagnosticIndex, through: lines.startIndex, by: -1) {
+            let trimmed = lines[startIndex].trimmingCharacters(in: .whitespaces)
+            guard isViewBuilderDeclarationStart(trimmed) else {
+                continue
+            }
+
+            let endIndex = endOfBraceBlock(in: lines, startingAt: startIndex)
+            guard endIndex >= diagnosticIndex else {
+                continue
+            }
+            return startIndex...endIndex
+        }
+        return nil
+    }
+
+    private static func expandedSnippetRange(
+        in lines: [String],
+        containing diagnosticIndex: Int,
+        radius: Int
+    ) -> ClosedRange<Int>? {
+        guard !lines.isEmpty else { return nil }
+        let startIndex = max(lines.startIndex, diagnosticIndex - radius)
+        let endIndex = min(lines.index(before: lines.endIndex), diagnosticIndex + radius)
+        return startIndex...endIndex
+    }
+
+    private static func isViewBuilderDeclarationStart(_ line: String) -> Bool {
+        line.range(of: #"^(?:@\w+\s+)*(?:private\s+)?(?:var\s+\w+\s*:\s*some\s+View|func\s+\w+[^{]*->\s*some\s+View)\s*\{"#, options: .regularExpression) != nil
+            || line == "var body: some View {"
+            || line == "public var body: some View {"
+            || line == "private var body: some View {"
     }
 
     private static func isControlFlowBlockStart(_ line: String) -> Bool {

@@ -99,7 +99,8 @@ extension ContentViewBuildRepairLoop {
                 packageRoot: \(layout.packageRootURL.path)
                 """
             )
-        case .restoreOriginalSource(let originalSource):
+        case .restoreOriginalSource(let originalSource),
+             .restoreOriginalSourceAfterFailurePreservingInterruptedSource(let originalSource):
             try context.write(originalSource, to: contentViewPath, packageRootURL: layout.packageRootURL)
             AgentDiagnosticsLog.append(
                 """
@@ -154,10 +155,20 @@ extension ContentViewBuildRepairLoop {
                 packageRoot: \(layout.packageRootURL.path)
                 """
             )
+        case .restoreOriginalSourceAfterFailurePreservingInterruptedSource(_):
+            AgentDiagnosticsLog.append(
+                """
+                Preserved current ContentView.swift after interrupted edit.
+                packageRoot: \(layout.packageRootURL.path)
+                """
+            )
         }
     }
 
     static func isRetryableCandidateFailure(_ error: any Error) -> Bool {
+        if error is ContentViewRepairSupport.SearchReplacePatchValidationError {
+            return true
+        }
         guard let generationError = error as? ToolGenerationError else {
             return false
         }
@@ -203,6 +214,9 @@ extension ContentViewBuildRepairLoop {
     }
 
     func skippedRepairReason(for error: any Error) -> SkippedRepairReason? {
+        if error is ContentViewRepairSupport.SearchReplacePatchValidationError {
+            return .invalidRepairPatch
+        }
         guard let generationError = error as? ToolGenerationError else {
             return nil
         }

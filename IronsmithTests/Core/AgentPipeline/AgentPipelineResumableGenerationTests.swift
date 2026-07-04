@@ -197,26 +197,46 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func resumePartialEditPatchContinuesDraftAndAppliesCombinedPatch() async throws {
+    func resumePartialEditPatchAppliesCompletedDraftBlocksThenRequestsFreshPatch() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
         let executableName = "ResumeEdit"
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                VStack {
+                    Text("old")
+                    Text("later")
+                }
+            }
+        }
+        """
         let tool = try Self.makeExistingTool(
             toolsDirectory: toolsDirectory,
             executableName: executableName,
-            source: Self.originalEditableSource
+            source: source
         )
         let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: executableName)
         let contentViewURL = layout.sourceDirectoryURL.appendingPathComponent(layout.defaultContentViewFileName)
         let partialPatch = """
         <<<<<<< SEARCH
-                Text("old")
+                    Text("old")
         =======
-                Text("
+                    Text("partial")
+        >>>>>>> REPLACE
+        <<<<<<< SEARCH
+                    Text("later")
+        =======
+                    Text("
         """
-        let continuation = """
-        new")
+        let freshPatch = """
+        <<<<<<< SEARCH
+                    Text("later")
+        =======
+                    Text("fresh")
         >>>>>>> REPLACE
         """
         try FileManager.default.createDirectory(at: layout.packageMetadataDirectoryURL, withIntermediateDirectories: true)
@@ -233,7 +253,7 @@ extension AgentPipelineTests {
         let runtime = Self.makeRuntime(
             languageModel: StubAgentLanguageModel { prompt, _ in
                 await promptCapture.record(prompt)
-                return continuation
+                return freshPatch
             },
             pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
@@ -253,14 +273,90 @@ extension AgentPipelineTests {
             contentsOf: layout.previousContentViewVersionURL,
             encoding: .utf8
         )
-        #expect(contentView.contains(#"Text("new")"#))
+        #expect(contentView.contains(#"Text("partial")"#))
+        #expect(contentView.contains(#"Text("fresh")"#))
         #expect(!(contentView.contains(#"Text("old")"#)))
         #expect(previousSource.contains(#"Text("old")"#))
         #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
         let prompts = await promptCapture.prompts
         #expect(prompts.count == 1)
-        #expect(prompts.first?.contains("Continue the exact search/replace patch response") == true)
-        #expect(prompts.first?.contains(partialPatch) == true)
+        #expect(prompts.first?.contains("Edit ContentView.swift by returning search/replace patch blocks only.") == true)
+        #expect(prompts.first?.contains(#"Text("partial")"#) == true)
+    }
+
+    @MainActor
+    @Test
+    func cancelledEditPatchAppliesCompletedBlocksAndClearsDraft() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let executableName = "CancelEdit"
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                VStack {
+                    Text("old")
+                    Text("later")
+                }
+            }
+        }
+        """
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: executableName,
+            source: source
+        )
+        let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: executableName)
+        let partialPatch = """
+        <<<<<<< SEARCH
+                    Text("old")
+        =======
+                    Text("partial")
+        >>>>>>> REPLACE
+        <<<<<<< SEARCH
+                    Text("later")
+        =======
+                    Text("
+        """
+        let probe = StreamingResponseProbe()
+        let runtime = Self.makeRuntime(
+            languageModel: PartialThenSuspendingLanguageModel(
+                partialResponse: partialPatch,
+                probe: probe
+            ),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 2)),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            appBundleClient: .noOp(),
+            metadataClient: .fallback()
+        )
+
+        let task = Task {
+            try await runtime.generateTool(
+                for: "Change old to partial and later to fresh",
+                existingTool: tool,
+                settings: .default
+            )
+        }
+        await Self.eventually {
+            (try? String(contentsOf: layout.pendingContentViewDraftURL, encoding: .utf8)) == partialPatch
+        }
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            Issue.record("Expected edit cancellation to throw.")
+        } catch is CancellationError {
+            // Expected.
+        }
+
+        let contentView = try String(contentsOf: layout.sourceDirectoryURL.appendingPathComponent(layout.defaultContentViewFileName), encoding: .utf8)
+        #expect(contentView.contains(#"Text("partial")"#))
+        #expect(contentView.contains(#"Text("later")"#))
+        #expect(!(contentView.contains(#"Text("old")"#)))
+        #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
     }
 
     @MainActor

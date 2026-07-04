@@ -7,9 +7,9 @@ enum ToolGenerationPrompts {
         Return only Swift source code.
         Do not add comments except for MARK.
         Do not add introductions, explanations, or labels like "Here is the fixed ContentView.swift file:".
-        Define exactly one View-conforming type: struct ContentView: View.
+        Define ContentView as the root View; same-file helper View types are allowed for complex UI.
         Helper types are allowed, but helper types must not conform to App.
-        Keep state directly inside ContentView with @State properties.
+        Keep simple UI state directly inside ContentView with @State properties; helper models/classes are allowed for platform APIs, async work, timers, audio, and files.
         Do not create preview providers or #Preview blocks.
         Do not create Package.swift, AppDelegate, or SceneDelegate.
         Do NOT append @main to any struct. This entry point already exists and already calls ContentView
@@ -27,6 +27,7 @@ enum ToolGenerationPrompts {
         Avoid mutating let constants. Assign calculation results directly to @State properties when possible.
         Avoid checking isEmpty on numeric values. Compare numbers to 0 instead.
         Don't make anything overly complex. The code needs to fit in a single file.
+        Break complex SwiftUI bodies into small same-file helper views/properties to avoid type-checker timeouts.
         If what the user asks is too complicated, simplify it so it fits in the ContentView.
         Prefer Apple platform frameworks and native APIs when they fit the request, such as Vision for OCR, PDFKit for PDFs, AVFoundation for media etc.
         Use these stable sections when possible:
@@ -121,13 +122,15 @@ enum ToolGenerationPrompts {
         userPrompt: String,
         executableName: String,
         existingSource: String,
-        maximumPatchBlocks: Int
+        maximumPatchBlocks: Int,
+        previousPatchFailure: String? = nil
     ) -> String {
         """
         User request: \(userPrompt)
         Fixed package and target name: \(executableName).
         Edit ContentView.swift by returning search/replace patch blocks only.
         \(patchTurnReminder(maximumPatchBlocks))
+        \(previousPatchFailureSection(previousPatchFailure))
         Current authoritative ContentView.swift:
         ```swift
         \(existingSource)
@@ -151,26 +154,6 @@ enum ToolGenerationPrompts {
         Partial ContentView.swift already generated that needs to be completed:
         ```swift
         \(partialSource)
-        ```
-        """
-    }
-
-    static func patchContinuationPrompt(
-        originalPrompt: String,
-        partialPatch: String
-    ) -> String {
-        """
-        Continue the exact search/replace patch response that was interrupted.
-        Return only the next characters of the patch.
-        Do not repeat any text from the partial patch.
-        Do not include markdown fences, explanations, or labels.
-
-        Original request context:
-        \(originalPrompt)
-
-        Partial search/replace patch already generated that needs to be completed:
-        ```text
-        \(partialPatch)
         ```
         """
     }
@@ -204,6 +187,12 @@ enum ToolGenerationPrompts {
                 Compacted repair summary:
                 \(compactionSummary)
                 """
+            )
+        }
+
+        if diagnostics.contains(where: ContentViewRepairSupport.isTypeCheckTimeout) {
+            sections.append(
+                "SwiftUI type-checker note: the reported line is often only where inference gave up; prefer extracting named same-file helper views/properties over local modifier tweaks."
             )
         }
 
@@ -250,9 +239,10 @@ enum ToolGenerationPrompts {
         =======
         replacement code
         >>>>>>> REPLACE
+        To insert without replacing, use <<<<<<< INSERT_BEFORE or <<<<<<< INSERT_AFTER with a unique existing anchor, then =======, inserted code, and >>>>>>> INSERT.
         SEARCH text must be non-empty.
-        SEARCH text must be copied exactly from the current ContentView.swift and must match one unique region.
-        Include enough surrounding code in SEARCH to make it unique.
+        SEARCH/insert anchor text must be copied exactly from the current ContentView.swift and match one unique region.
+        Include enough surrounding code to make it unique.
         Empty REPLACE is allowed only when deleting code.
         Do not include apply-patch markers.
         Do not include prose, markdown fences, JSON, explanations, file paths, or unrelated rewrites.
@@ -263,6 +253,19 @@ enum ToolGenerationPrompts {
         """
         Return at most \(max(1, maximumPatchBlocks)) search/replace patch block(s).
         Follow the search/replace patch output contract from your instructions.
+        """
+    }
+
+    private static func previousPatchFailureSection(_ failure: String?) -> String {
+        guard let failure = failure?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !failure.isEmpty
+        else {
+            return ""
+        }
+        return """
+        Previous patch attempt failed:
+        \(failure)
+        Only patch the current authoritative source below.
         """
     }
 

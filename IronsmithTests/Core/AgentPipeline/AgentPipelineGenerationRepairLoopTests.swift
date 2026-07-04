@@ -440,6 +440,72 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func largeModelRepairPromptCapsCatastrophicDiagnosticStorms() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let brokenLines = (1...250)
+            .map { #"                    Text("Broken \#($0)").missing\#($0)()"# }
+            .joined(separator: "\n")
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                VStack {
+        \(brokenLines)
+                }
+            }
+        }
+        """
+        let diagnostics = (1...250).map { index in
+            SwiftCompilerDiagnostic(
+                relativePath: "Sources/GeneratedTool/ContentView.swift",
+                line: index + 5,
+                column: 43,
+                severity: .error,
+                message: "value of type 'Text' has no member 'missing\(index)'",
+                supportingLines: []
+            )
+        }
+        let languageModelContext = AgentLanguageModelContext(
+            languageModel: EmptyLanguageModel(),
+            options: GenerationOptions(),
+            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn))
+        )
+        let dependencies = ToolGenerationRuntimeDependencies(
+            toolsDirectoryURL: toolsDirectory,
+            fileClient: .live,
+            processClient: .live,
+            appBundleClient: .noOp(),
+            versionBackupClient: .live
+        )
+        let runtimeContext = ToolGenerationRuntimeContext(
+            languageModelContext: languageModelContext,
+            dependencies: dependencies
+        )
+        let packageRoot = toolsDirectory.appendingPathComponent("PromptCap", isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "PromptCap")
+        let loop = ContentViewBuildRepairLoop(
+            context: runtimeContext,
+            layout: layout,
+            displayName: "Prompt Cap",
+            contentViewPath: layout.contentViewSourcePath,
+            regenerationThreshold: ToolGenerationRepairPolicy.regenerationThreshold,
+            maximumGenerationAttempts: 1,
+            lifecycle: .noop
+        )
+
+        let plan = loop.makeRepairPromptPlan(source: source, diagnostics: diagnostics)
+
+        #expect(plan.targetDiagnostics.count == ToolGenerationRepairPolicy.largeModelMaximumRepairDiagnostics)
+        #expect(plan.snippets.count == ToolGenerationRepairPolicy.largeModelMaximumRepairDiagnostics)
+        #expect(plan.targetDiagnostics.first?.line == 6)
+        #expect(plan.targetDiagnostics.last?.line == 205)
+    }
+
+    @MainActor
+    @Test
     func largeModelSafetyLimitPreservesLatestAcceptedSource() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
@@ -504,7 +570,7 @@ extension AgentPipelineTests {
         let packageRoot = toolsDirectory.appendingPathComponent("build-safety-limit-repair", isDirectory: true)
         let contentViewURL = try #require(Self.generatedContentViewURL(in: packageRoot))
         let contentView = try String(contentsOf: contentViewURL, encoding: .utf8)
-        #expect(contentView.contains("missing5"))
+        #expect(contentView.contains("missing\(ToolGenerationRepairPolicy.largeModelMaximumRepairAttempts + 1)"))
         #expect(await responses.count == ToolGenerationRepairPolicy.largeModelMaximumRepairAttempts + 1)
     }
 

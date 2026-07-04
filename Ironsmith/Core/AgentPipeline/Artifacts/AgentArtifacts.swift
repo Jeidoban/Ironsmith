@@ -22,7 +22,8 @@ nonisolated struct AgentLanguageModelContext {
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
         self.languageModel = languageModel
-        self.metadataLanguageModel = metadataLanguageModel ?? AnyLanguageModel.SystemLanguageModel.default
+        self.metadataLanguageModel =
+            metadataLanguageModel ?? AnyLanguageModel.SystemLanguageModel.default
         self.options = options
         self.pipelineConfiguration = pipelineConfiguration
         self.promptRefinementEnabled = promptRefinementEnabled
@@ -101,7 +102,7 @@ enum ToolMenuBarSymbol {
 
     nonisolated static func validated(_ symbol: String?) -> String {
         guard let symbol = symbol?.trimmingCharacters(in: .whitespacesAndNewlines),
-              allowedSymbols.contains(symbol)
+            allowedSymbols.contains(symbol)
         else {
             return fallback
         }
@@ -185,7 +186,8 @@ struct ToolGenerationResult: Equatable, Sendable {
     ) {
         self.toolName = toolName
         self.executableName = executableName
-        self.bundleIdentifier = bundleIdentifier ?? ToolBundleIdentifier.make(executableName: executableName)
+        self.bundleIdentifier =
+            bundleIdentifier ?? ToolBundleIdentifier.make(executableName: executableName)
         self.settings = settings
         self.packageRootURL = packageRootURL
     }
@@ -193,7 +195,8 @@ struct ToolGenerationResult: Equatable, Sendable {
 
 enum ToolNameSanitizer {
     nonisolated static func displayName(fromPrompt prompt: String) -> String {
-        let cleaned = prompt
+        let cleaned =
+            prompt
             .replacingOccurrences(of: "\n", with: " ")
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
@@ -204,11 +207,13 @@ enum ToolNameSanitizer {
     }
 
     nonisolated static func executableName(from displayName: String) -> String {
-        let parts = displayName
+        let parts =
+            displayName
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
 
-        var name = parts
+        var name =
+            parts
             .map { part in
                 let lowercased = part.lowercased()
                 return lowercased.prefix(1).uppercased() + lowercased.dropFirst()
@@ -227,7 +232,8 @@ enum ToolNameSanitizer {
     }
 
     nonisolated static func slug(from displayName: String) -> String {
-        let words = displayName
+        let words =
+            displayName
             .lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
@@ -239,7 +245,8 @@ enum ToolNameSanitizer {
         let invalidCharacters = CharacterSet(charactersIn: "/:")
             .union(.newlines)
             .union(.controlCharacters)
-        let name = displayName
+        let name =
+            displayName
             .components(separatedBy: invalidCharacters)
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -251,7 +258,8 @@ struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let packageMetadataDirectoryName = ".ironsmith"
     nonisolated static let versionsDirectoryName = "versions"
     nonisolated static let pendingContentViewDraftFilename = "pending-ContentView.swift"
-    nonisolated static let pendingContentViewDraftPath = "\(packageMetadataDirectoryName)/\(pendingContentViewDraftFilename)"
+    nonisolated static let pendingContentViewDraftPath =
+        "\(packageMetadataDirectoryName)/\(pendingContentViewDraftFilename)"
     nonisolated static let pendingContentViewVersionFilename = "pending-ContentView.swift"
     nonisolated static let previousContentViewVersionFilename = "previous-ContentView.swift"
     nonisolated static let pendingBuildSettingsVersionFilename = "pending-build-settings.json"
@@ -349,7 +357,8 @@ struct ToolPackageLayout: Equatable, Sendable {
         }
 
         let root = packageRootURL.standardizedFileURL
-        let candidate = trimmedPath.hasPrefix("/")
+        let candidate =
+            trimmedPath.hasPrefix("/")
             ? URL(fileURLWithPath: trimmedPath)
             : root.appendingPathComponent(trimmedPath)
         let resolved = candidate.standardizedFileURL
@@ -412,7 +421,7 @@ struct ToolPackageLayout: Equatable, Sendable {
                     name: "\(executableName)"
                 ),
             ],
-            swiftLanguageModes: [.v6]
+            swiftLanguageModes: [.v5]
         )
         """
     }

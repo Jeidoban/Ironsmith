@@ -18,13 +18,19 @@ enum ToolGenerationRepairPolicy {
     static let smallModelPatchBlocksPerTurn = 3
 
     // Larger remote-capable models can usually coordinate a broader patch without requiring regeneration.
-    static let largeModelPatchBlocksPerTurn = 8
+    static let largeModelPatchBlocksPerTurn = 24
+
+    // Catastrophic compiler cascades are usually one root issue repeated many times; keep prompts bounded.
+    static let largeModelMaximumRepairDiagnostics = 200
+
+    // Large-model edit patches get one fresh retry after an invalid/unappliable patch.
+    static let minimumEditPatchGenerationAttempts = 2
 
     // Hard cap on search/replace patch response size before validation.
-    static let maximumPatchCharacters = 32_000
+    static let maximumPatchCharacters = 128_000
 
     // Paid-call safety limit for the large-model profile.
-    static let largeModelMaximumRepairAttempts = 4
+    static let largeModelMaximumRepairAttempts = 6
 
     // Number of invalid model repairs for the same target before trying regeneration.
     static let invalidPatchAttemptsBeforeStall = 2

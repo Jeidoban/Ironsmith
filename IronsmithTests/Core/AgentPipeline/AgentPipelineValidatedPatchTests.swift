@@ -109,6 +109,111 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func applyValidatedSearchReplacePatchAllowsInsertBefore() throws {
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                VStack {
+                    Text("Second")
+                }
+            }
+        }
+        """
+        let patch = """
+        <<<<<<< INSERT_BEFORE
+                    Text("Second")
+        =======
+                    Text("First")
+        >>>>>>> INSERT
+        """
+
+        let updated = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            patch,
+            to: source,
+            maximumPatchBlocks: 1
+        )
+
+        #expect(updated.contains("Text(\"First\")\n            Text(\"Second\")"))
+    }
+
+    @Test
+    func applyValidatedSearchReplacePatchAllowsInsertAfter() throws {
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                VStack {
+                    Text("First")
+                }
+            }
+        }
+        """
+        let patch = """
+        <<<<<<< INSERT_AFTER
+                    Text("First")
+        =======
+                    Text("Second")
+        >>>>>>> INSERT
+        """
+
+        let updated = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            patch,
+            to: source,
+            maximumPatchBlocks: 1
+        )
+
+        #expect(updated.contains("Text(\"First\")\n            Text(\"Second\")"))
+    }
+
+    @Test
+    func applySearchReplacePatchBestEffortAppliesValidBlocksAndSkipsInvalidBlocks() throws {
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                VStack {
+                    Text("Old")
+                    Text("Keep")
+                }
+            }
+        }
+        """
+        let patch = """
+        <<<<<<< SEARCH
+                    Text("Old")
+        =======
+                    Text("New")
+        >>>>>>> REPLACE
+        <<<<<<< SEARCH
+                    Text("Missing")
+        =======
+                    Text("Never")
+        >>>>>>> REPLACE
+        <<<<<<< SEARCH
+        =======
+                    Text("Empty")
+        >>>>>>> REPLACE
+        """
+
+        let result = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
+            patch,
+            to: source,
+            maximumPatchBlocks: 3
+        )
+
+        #expect(result.appliedBlockCount == 1)
+        #expect(result.skippedBlocks.count == 2)
+        #expect(result.source.contains("Text(\"New\")"))
+        #expect(result.source.contains("Text(\"Keep\")"))
+        #expect(!(result.source.contains("Text(\"Old\")")))
+        #expect(!(result.source.contains("Text(\"Never\")")))
+    }
+
+    @Test
     func applyValidatedSearchReplacePatchUsesWhitespaceNormalizedLineBlockMatch() throws {
         let source = """
         import SwiftUI
@@ -145,6 +250,92 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func applyValidatedSearchReplacePatchUsesUniqueNearNormalizedLineBlockMatch() throws {
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            @State private var recordedNotes: [RecordedNote] = []
+            @State private var recordStartDate: Date?
+            @State private var activeRecordingNoteIDs: [Int: UUID] = [:]
+            @State private var playbackTasks: [DispatchWorkItem] = []
+        }
+        """
+        let patch = """
+        <<<<<<< SEARCH
+            @State private var recordedNotes: [RecordedNote] = []
+            @State private var recordStartDate: Date?
+            @State private var activeRecordingStarts: [Int: TimeInterval] = [:]
+            @State private var playbackTasks: [DispatchWorkItem] = []
+        =======
+            @State private var recordedNotes: [RecordedNote] = []
+            @State private var recordStartDate: Date?
+            @State private var activeRecordingNoteIDs: [Int: UUID] = [:]
+            @State private var heldNotes: Set<Int> = []
+            @State private var playbackTasks: [DispatchWorkItem] = []
+        >>>>>>> REPLACE
+        """
+
+        let updated = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            patch,
+            to: source,
+            maximumPatchBlocks: 1
+        )
+
+        #expect(updated.contains("heldNotes"))
+        #expect(updated.contains("activeRecordingNoteIDs"))
+        #expect(!(updated.contains("activeRecordingStarts")))
+    }
+
+    @Test
+    func applyValidatedSearchReplacePatchAllowsBroadLargeModelPatchWithinCharacterCap() throws {
+        let source = (1...16)
+            .map { #"Text("Old \#($0)")"# }
+            .joined(separator: "\n")
+        let patch = (1...16)
+            .map { index in
+                """
+                <<<<<<< SEARCH
+                Text("Old \(index)")
+                =======
+                Text("New \(index)")
+                >>>>>>> REPLACE
+                """
+            }
+            .joined(separator: "\n")
+
+        let updated = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            patch,
+            to: source,
+            maximumPatchBlocks: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
+        )
+
+        #expect(updated.contains(#"Text("New 16")"#))
+        #expect(!(updated.contains(#"Text("Old 16")"#)))
+    }
+
+    @Test
+    func applyValidatedSearchReplacePatchAllowsPatchAboveOldCharacterCap() throws {
+        let longText = String(repeating: "a", count: 40_000)
+        let source = "Text(\"\(longText)\")"
+        let patch = """
+        <<<<<<< SEARCH
+        \(source)
+        =======
+        Text("Updated")
+        >>>>>>> REPLACE
+        """
+
+        let updated = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            patch,
+            to: source,
+            maximumPatchBlocks: 1
+        )
+
+        #expect(updated == #"Text("Updated")"#)
+    }
+
+    @Test
     func applyValidatedSearchReplacePatchRejectsAmbiguousDuplicateSearch() {
         let source = """
         import SwiftUI
@@ -166,7 +357,7 @@ extension AgentPipelineTests {
         >>>>>>> REPLACE
         """
 
-        #expect(throws: ToolGenerationError.invalidRepairPatch) {
+        #expect(throws: ContentViewRepairSupport.SearchReplacePatchValidationError.self) {
             try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
                 patch,
                 to: source,
@@ -185,7 +376,7 @@ extension AgentPipelineTests {
         >>>>>>> REPLACE
         """
 
-        #expect(throws: ToolGenerationError.invalidRepairPatch) {
+        #expect(throws: ContentViewRepairSupport.SearchReplacePatchValidationError.self) {
             try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
                 patch,
                 to: source,
@@ -213,7 +404,7 @@ extension AgentPipelineTests {
         >>>>>>> REPLACE
         """
 
-        #expect(throws: ToolGenerationError.invalidRepairPatch) {
+        #expect(throws: ContentViewRepairSupport.SearchReplacePatchValidationError.self) {
             try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
                 patch,
                 to: source,
@@ -234,13 +425,41 @@ extension AgentPipelineTests {
         >>>>>>> REPLACE
         """
 
-        #expect(throws: ToolGenerationError.invalidRepairPatch) {
+        #expect(throws: ContentViewRepairSupport.SearchReplacePatchValidationError.self) {
             try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
                 patch,
                 to: source,
                 maximumPatchBlocks: 1
             )
         }
+    }
+
+    @Test
+    func applyValidatedSearchReplacePatchAllowsMarkerTextInReplacement() throws {
+        let source = """
+        import SwiftUI
+
+        struct ContentView: View {
+            var body: some View {
+                Text("One")
+            }
+        }
+        """
+        let patch = """
+        <<<<<<< SEARCH
+                Text("One")
+        =======
+                ======= Text("Two")
+        >>>>>>> REPLACE
+        """
+
+        let updated = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            patch,
+            to: source,
+            maximumPatchBlocks: 1
+        )
+
+        #expect(updated.contains("======= Text(\"Two\")"))
     }
 
     @Test

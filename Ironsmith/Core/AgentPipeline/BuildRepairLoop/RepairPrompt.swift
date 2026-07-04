@@ -7,12 +7,13 @@ extension ContentViewBuildRepairLoop {
         diagnostics: [SwiftCompilerDiagnostic]
     ) -> RepairPromptPlan {
         let maximumPatchBlocks = context.repairStrategy.maxPatchBlocksPerTurn
+        let diagnosticLimit = repairDiagnosticBatchLimit(for: diagnostics)
         let targetDiagnostics = context.pipelineConfiguration.batchesRepairDiagnostics
             ? ContentViewRepairSupport.selectedDiagnosticGroup(
                 from: diagnostics,
-                maximumCount: repairDiagnosticBatchLimit(for: diagnostics)
+                maximumCount: diagnosticLimit
             )
-            : diagnostics
+            : Array(diagnostics.prefix(diagnosticLimit))
         let immediateSnippets = ContentViewRepairSupport.snippets(
             from: source,
             diagnostics: targetDiagnostics
@@ -27,11 +28,14 @@ extension ContentViewBuildRepairLoop {
             diagnostics: targetDiagnostics,
             excluding: immediateSnippets + blockSnippets
         )
-        let extraEditableSnippets = blockSnippets + relatedSnippets
+        let allSnippets = immediateSnippets + blockSnippets + relatedSnippets
+        let snippets = context.pipelineConfiguration.batchesRepairDiagnostics
+            ? allSnippets
+            : Array(allSnippets.prefix(ToolGenerationRepairPolicy.largeModelMaximumRepairDiagnostics))
         return RepairPromptPlan(
             maximumPatchBlocks: maximumPatchBlocks,
             targetDiagnostics: targetDiagnostics,
-            snippets: immediateSnippets + extraEditableSnippets
+            snippets: snippets
         )
     }
 
@@ -138,16 +142,34 @@ extension ContentViewBuildRepairLoop {
             packageRoot: \(layout.packageRootURL.path)
             rawCharacters: \(patch.count)
             sanitizedPatch:
-            \(AgentDiagnosticsLog.compactMultiline(sanitizedPatch, limit: AgentDiagnosticsLog.repairPatchLimit))
+            \(sanitizedPatch)
             """
         )
         let repairedSource: String
         do {
-            repairedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
-                sanitizedPatch,
-                to: originalSource,
-                maximumPatchBlocks: maximumPatchBlocks
-            )
+            if context.pipelineConfiguration.profile == .largeModel {
+                let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
+                    sanitizedPatch,
+                    to: originalSource,
+                    maximumPatchBlocks: maximumPatchBlocks
+                )
+                repairedSource = application.source
+                if !application.skippedBlocks.isEmpty {
+                    AgentDiagnosticsLog.append(
+                        """
+                        Model repair patch partially applied.
+                        packageRoot: \(layout.packageRootURL.path)
+                        \(application.logSummary)
+                        """
+                    )
+                }
+            } else {
+                repairedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+                    sanitizedPatch,
+                    to: originalSource,
+                    maximumPatchBlocks: maximumPatchBlocks
+                )
+            }
         } catch {
             AgentDiagnosticsLog.append(
                 """
@@ -157,7 +179,7 @@ extension ContentViewBuildRepairLoop {
                 error:
                 \(AgentDiagnosticsLog.renderError(error, limit: 800))
                 sanitizedPatch:
-                \(AgentDiagnosticsLog.compactMultiline(sanitizedPatch, limit: AgentDiagnosticsLog.repairPatchLimit))
+                \(sanitizedPatch)
                 """
             )
             throw error
@@ -187,7 +209,10 @@ extension ContentViewBuildRepairLoop {
 
     func repairDiagnosticBatchLimit(for diagnostics: [SwiftCompilerDiagnostic]) -> Int {
         guard context.pipelineConfiguration.batchesRepairDiagnostics else {
-            return max(1, diagnostics.count)
+            return min(
+                max(1, diagnostics.count),
+                ToolGenerationRepairPolicy.largeModelMaximumRepairDiagnostics
+            )
         }
         return context.repairStrategy.maxPatchBlocksPerTurn
     }
