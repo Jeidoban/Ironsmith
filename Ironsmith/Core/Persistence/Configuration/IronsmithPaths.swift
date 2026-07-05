@@ -1,6 +1,6 @@
 import Foundation
 
-enum IronsmithPaths {
+nonisolated enum IronsmithPaths {
     static let databaseFileName = "ironsmith.sqlite"
 
     static var rootDirectory: URL {
@@ -28,6 +28,14 @@ enum IronsmithPaths {
         rootDirectory.appendingPathComponent("tools", isDirectory: true)
     }
 
+    static var codexHomeDirectory: URL {
+        rootDirectory.appendingPathComponent(".codex", isDirectory: true)
+    }
+
+    static var codexAuthFileURL: URL {
+        codexHomeDirectory.appendingPathComponent("auth.json")
+    }
+
     static var agentDiagnosticsLogURL: URL {
         rootDirectory.appendingPathComponent("agent-diagnostics.log")
     }
@@ -38,6 +46,7 @@ enum IronsmithPaths {
             databaseBackupsDirectory,
             modelsDirectory,
             toolsDirectory,
+            codexHomeDirectory,
         ] {
             try FileManager.default.createDirectory(
                 at: directory,

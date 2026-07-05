@@ -33,7 +33,7 @@ extension InferenceDependencies {
         let credentialClient = CredentialClient.live
         let localModelClient = LocalModelClient.live
         let accountClient = IronsmithAccountClient.live
-        let openAICodexAuthClient = OpenAICodexAuthClient.live(credentialClient: credentialClient)
+        let openAICodexAuthClient = OpenAICodexAuthClient.live()
         return Self(
             credentialClient: credentialClient,
             accountClient: accountClient,

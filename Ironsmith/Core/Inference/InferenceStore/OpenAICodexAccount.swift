@@ -14,11 +14,9 @@ extension InferenceStore {
         }
     }
 
-    func signInToOpenAIChatGPT(
-        launchFlow: @escaping OpenAICodexOAuthLaunchFlow
-    ) async -> Bool {
+    func signInToOpenAIChatGPT() async -> Bool {
         do {
-            openAICodexCredential = try await dependencies.openAICodexAuthClient.signIn(launchFlow)
+            openAICodexCredential = try await dependencies.openAICodexAuthClient.signIn()
             if let provider = providers.first(where: { $0.kind == .openAI }) {
                 await refreshDiscoveredModels(for: provider)
                 reconcileSelectedModel()
@@ -33,9 +31,9 @@ extension InferenceStore {
         }
     }
 
-    func signOutOpenAIChatGPT(provider: ProviderConfig? = nil) -> Bool {
+    func signOutOpenAIChatGPT(provider: ProviderConfig? = nil) async -> Bool {
         do {
-            try dependencies.openAICodexAuthClient.signOut()
+            try await dependencies.openAICodexAuthClient.signOut()
             openAICodexCredential = nil
             if let provider {
                 remoteModels.removeAll {
@@ -50,4 +48,3 @@ extension InferenceStore {
         }
     }
 }
-

@@ -1,34 +1,51 @@
-import CryptoKit
 import Foundation
-@preconcurrency import Network
 
-typealias OpenAICodexOAuthLaunchFlow = @MainActor @Sendable (_ url: URL) async throws -> Void
+/*
+ Legacy PKCE OAuth dependencies, commented out for reference only. Codex CLI now owns
+ ChatGPT browser login and writes auth.json under Ironsmith's CODEX_HOME.
+
+ import CryptoKit
+ @preconcurrency import Network
+
+ private typealias OpenAICodexOAuthLaunchFlow = @MainActor @Sendable (_ url: URL) async throws -> Void
+ */
 
 nonisolated struct OpenAICodexAuthClient {
     static let refreshWindow: TimeInterval = 5 * 60
 
     var credential: @Sendable () throws -> OpenAICodexCredential?
-    var signIn: @Sendable (_ launchFlow: @escaping OpenAICodexOAuthLaunchFlow) async throws -> OpenAICodexCredential
-    var signOut: @Sendable () throws -> Void
+    var signIn: @Sendable () async throws -> OpenAICodexCredential
+    var signOut: @Sendable () async throws -> Void
     var validCredential: @Sendable () async throws -> OpenAICodexCredential
     var discoverModels: @Sendable () async throws -> [OpenAICodexModel]
 }
 
 extension OpenAICodexAuthClient {
-    static func live(credentialClient: CredentialClient) -> Self {
-        let tokenStore = OpenAICodexTokenStore(credentialClient: credentialClient)
+    nonisolated static func live(
+        codexCLIClient: CodexCLIClient = .live(),
+        authFileClient: CodexAuthFileClient = .live(),
+        refreshCredential: @escaping @Sendable (OpenAICodexCredential) async throws -> OpenAICodexCredential = { credential in
+            try await Self.refreshCredential(credential)
+        }
+    ) -> Self {
+        let tokenStore = OpenAICodexTokenStore(
+            authFileClient: authFileClient,
+            refreshCredential: refreshCredential
+        )
 
         return Self(
             credential: {
-                try credentialClient.loadOpenAICodexCredential()
+                try authFileClient.credential()
             },
-            signIn: { launchFlow in
-                let credential = try await Self.performBrowserSignIn(launchFlow: launchFlow)
-                try credentialClient.saveOpenAICodexCredential(credential)
+            signIn: {
+                try await codexCLIClient.signIn()
+                guard let credential = try authFileClient.credential() else {
+                    throw OpenAICodexAuthClientError.missingCredential
+                }
                 return credential
             },
             signOut: {
-                try credentialClient.deleteOpenAICodexCredential()
+                try await codexCLIClient.signOut()
             },
             validCredential: {
                 try await tokenStore.validCredential()
@@ -40,17 +57,21 @@ extension OpenAICodexAuthClient {
         )
     }
 
-    static var unconfigured: Self {
+    nonisolated static var unconfigured: Self {
         Self(
             credential: { nil },
-            signIn: { _ in throw OpenAICodexAuthClientError.missingCredential },
+            signIn: { throw OpenAICodexAuthClientError.missingCredential },
             signOut: {},
             validCredential: { throw OpenAICodexAuthClientError.missingCredential },
             discoverModels: { throw OpenAICodexAuthClientError.missingCredential }
         )
     }
 
-    private static func performBrowserSignIn(
+    /*
+    Legacy PKCE OAuth implementation, commented out for reference only. The live path
+    invokes Codex CLI login/logout and reads auth.json.
+
+    nonisolated private static func performBrowserSignIn(
         launchFlow: @escaping OpenAICodexOAuthLaunchFlow
     ) async throws -> OpenAICodexCredential {
         let pkce = try OpenAICodexPKCE()
@@ -69,7 +90,7 @@ extension OpenAICodexAuthClient {
         return credential(from: tokenResponse)
     }
 
-    private static func authorizationURL(pkce: OpenAICodexPKCE, state: String) throws -> URL {
+    nonisolated private static func authorizationURL(pkce: OpenAICodexPKCE, state: String) throws -> URL {
         var components = URLComponents(url: OpenAICodexBackend.authorizeURL, resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
@@ -89,7 +110,7 @@ extension OpenAICodexAuthClient {
         return url
     }
 
-    private static func exchangeCodeForTokens(
+    nonisolated private static func exchangeCodeForTokens(
         code: String,
         verifier: String
     ) async throws -> OpenAICodexTokenResponse {
@@ -103,8 +124,9 @@ extension OpenAICodexAuthClient {
             ]
         )
     }
+    */
 
-    static func refreshCredential(
+    nonisolated static func refreshCredential(
         _ credential: OpenAICodexCredential
     ) async throws -> OpenAICodexCredential {
         guard let refreshToken = credential.refreshToken, !refreshToken.isEmpty else {
@@ -135,7 +157,7 @@ extension OpenAICodexAuthClient {
         return refreshed
     }
 
-    private static func tokenRequest<T: Decodable>(
+    nonisolated private static func tokenRequest<T: Decodable>(
         form: [String: String]
     ) async throws -> T {
         var request = URLRequest(url: OpenAICodexBackend.tokenURL)
@@ -156,7 +178,7 @@ extension OpenAICodexAuthClient {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private static func fetchModels(credential: OpenAICodexCredential) async throws -> [OpenAICodexModel] {
+    nonisolated private static func fetchModels(credential: OpenAICodexCredential) async throws -> [OpenAICodexModel] {
         var components = URLComponents(url: OpenAICodexBackend.modelsURL, resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "client_version", value: OpenAICodexBackend.modelCatalogClientVersion)
@@ -187,7 +209,7 @@ extension OpenAICodexAuthClient {
         return try decodeModels(data)
     }
 
-    static func decodeModels(_ data: Data) throws -> [OpenAICodexModel] {
+    nonisolated static func decodeModels(_ data: Data) throws -> [OpenAICodexModel] {
         let root = try JSONSerialization.jsonObject(with: data)
         let entries = modelEntries(from: root)
         var seen = Set<String>()
@@ -203,7 +225,7 @@ extension OpenAICodexAuthClient {
         .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
-    private static func modelEntries(from value: Any) -> [OpenAICodexModel] {
+    nonisolated private static func modelEntries(from value: Any) -> [OpenAICodexModel] {
         if let array = value as? [Any] {
             return array.flatMap(modelEntries(from:))
         }
@@ -229,7 +251,7 @@ extension OpenAICodexAuthClient {
         return [OpenAICodexModel(identifier: identifier, displayName: displayName)]
     }
 
-    private static func stringValue(in object: [String: Any], keys: [String]) -> String? {
+    nonisolated private static func stringValue(in object: [String: Any], keys: [String]) -> String? {
         for key in keys {
             if let value = object[key] as? String,
                !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -239,7 +261,7 @@ extension OpenAICodexAuthClient {
         return nil
     }
 
-    private static func isSupportedCodexModel(_ identifier: String) -> Bool {
+    nonisolated private static func isSupportedCodexModel(_ identifier: String) -> Bool {
         let excludedTerms = [
             "audio",
             "dall-e",
@@ -261,12 +283,13 @@ extension OpenAICodexAuthClient {
             || identifier.hasPrefix("o")
     }
 
-    private static func credential(from response: OpenAICodexTokenResponse) -> OpenAICodexCredential {
+    nonisolated private static func credential(from response: OpenAICodexTokenResponse) -> OpenAICodexCredential {
         let claims = OpenAICodexJWTClaims.bestClaims(
             idToken: response.idToken,
             accessToken: response.accessToken
         )
         let expiresAt = response.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
+            ?? claims.expiresAt
         return OpenAICodexCredential(
             accessToken: response.accessToken,
             refreshToken: response.refreshToken,
@@ -277,7 +300,7 @@ extension OpenAICodexAuthClient {
         )
     }
 
-    private static func formURLEncodedBody(_ values: [String: String]) -> Data {
+    nonisolated private static func formURLEncodedBody(_ values: [String: String]) -> Data {
         var components = URLComponents()
         components.queryItems = values.map { URLQueryItem(name: $0.key, value: $0.value) }
             .sorted { $0.name < $1.name }
@@ -286,14 +309,19 @@ extension OpenAICodexAuthClient {
 }
 
 private actor OpenAICodexTokenStore {
-    private let credentialClient: CredentialClient
+    private let authFileClient: CodexAuthFileClient
+    private let refreshCredential: @Sendable (OpenAICodexCredential) async throws -> OpenAICodexCredential
 
-    init(credentialClient: CredentialClient) {
-        self.credentialClient = credentialClient
+    init(
+        authFileClient: CodexAuthFileClient,
+        refreshCredential: @escaping @Sendable (OpenAICodexCredential) async throws -> OpenAICodexCredential
+    ) {
+        self.authFileClient = authFileClient
+        self.refreshCredential = refreshCredential
     }
 
     func validCredential() async throws -> OpenAICodexCredential {
-        guard let credential = try credentialClient.loadOpenAICodexCredential() else {
+        guard let credential = try authFileClient.credential() else {
             throw OpenAICodexAuthClientError.missingCredential
         }
 
@@ -302,8 +330,8 @@ private actor OpenAICodexTokenStore {
             return credential
         }
 
-        let refreshed = try await OpenAICodexAuthClient.refreshCredential(credential)
-        try credentialClient.saveOpenAICodexCredential(refreshed)
+        let refreshed = try await refreshCredential(credential)
+        try authFileClient.saveCredential(refreshed)
         return refreshed
     }
 }
@@ -322,7 +350,10 @@ nonisolated struct OpenAICodexTokenResponse: Decodable {
     }
 }
 
-private struct OpenAICodexPKCE {
+/*
+Legacy PKCE OAuth helpers, commented out for reference only.
+
+nonisolated private struct OpenAICodexPKCE {
     let verifier: String
     let challenge: String
 
@@ -333,8 +364,8 @@ private struct OpenAICodexPKCE {
     }
 }
 
-private enum OpenAICodexRandom {
-    static func base64URLString(byteCount: Int) -> String {
+nonisolated private enum OpenAICodexRandom {
+    nonisolated static func base64URLString(byteCount: Int) -> String {
         var data = Data(count: byteCount)
         _ = data.withUnsafeMutableBytes {
             SecRandomCopyBytes(kSecRandomDefault, byteCount, $0.baseAddress!)
@@ -344,20 +375,28 @@ private enum OpenAICodexRandom {
 }
 
 private extension Data {
-    func openAICodexBase64URLEncodedString() -> String {
+    nonisolated func openAICodexBase64URLEncodedString() -> String {
         base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
     }
 }
+*/
 
-private struct OpenAICodexJWTClaims {
+nonisolated struct OpenAICodexJWTClaims {
     var accountID: String?
     var email: String?
+    var expiresAt: Date?
 
     static func bestClaims(idToken: String?, accessToken: String) -> Self {
-        decode(token: idToken) ?? decode(token: accessToken) ?? Self()
+        let idClaims = decode(token: idToken)
+        let accessClaims = decode(token: accessToken)
+        return Self(
+            accountID: idClaims?.accountID ?? accessClaims?.accountID,
+            email: idClaims?.email ?? accessClaims?.email,
+            expiresAt: accessClaims?.expiresAt ?? idClaims?.expiresAt
+        )
     }
 
     private static func decode(token: String?) -> Self? {
@@ -385,48 +424,75 @@ private struct OpenAICodexJWTClaims {
             ?? (object["organizations"] as? [[String: Any]])?.first?["id"] as? String
         return Self(
             accountID: accountID,
-            email: object["email"] as? String
+            email: object["email"] as? String,
+            expiresAt: unixTimestamp(from: object["exp"])
         )
+    }
+
+    private static func unixTimestamp(from value: Any?) -> Date? {
+        guard let number = value as? NSNumber else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: number.doubleValue)
     }
 }
 
 nonisolated enum OpenAICodexAuthClientError: LocalizedError, Equatable {
-    case browserLaunchFailed
-    case callbackTimedOut
-    case invalidAuthorizationURL
-    case invalidCallback
+    case invalidAuthFile
     case invalidModelURL
     case invalidResponse
+    case missingCodexBinary(String)
     case missingCredential
     case missingRefreshToken
-    case oauthFailed(String)
+    case codexCommandFailed(String)
     case requestFailed(statusCode: Int, message: String)
-    case stateMismatch
+
+    /*
+     Legacy PKCE OAuth error cases, commented out for reference only.
+
+     case browserLaunchFailed
+     case callbackTimedOut
+     case invalidAuthorizationURL
+     case invalidCallback
+     case oauthFailed(String)
+     case stateMismatch
+     */
 
     var errorDescription: String? {
         switch self {
-        case .browserLaunchFailed:
-            return "Could not open the ChatGPT sign-in page."
-        case .callbackTimedOut:
-            return "ChatGPT sign-in timed out."
-        case .invalidAuthorizationURL:
-            return "Could not create the ChatGPT sign-in URL."
-        case .invalidCallback:
-            return "ChatGPT returned an invalid sign-in callback."
+        case .invalidAuthFile:
+            return "Codex sign-in data is invalid. Sign in with ChatGPT again."
         case .invalidModelURL:
             return "Could not create the ChatGPT model list URL."
         case .invalidResponse:
             return "ChatGPT returned an invalid response."
+        case .missingCodexBinary(let message):
+            return message
         case .missingCredential:
             return "Sign in with ChatGPT before using Codex models."
         case .missingRefreshToken:
             return "Sign in with ChatGPT again before using Codex models."
-        case .oauthFailed(let message):
-            return "ChatGPT sign-in failed: \(message)"
+        case .codexCommandFailed(let message):
+            return message.isEmpty ? "Codex command failed." : message
         case .requestFailed(let statusCode, let message):
             return "ChatGPT returned HTTP \(statusCode): \(message)"
-        case .stateMismatch:
-            return "ChatGPT sign-in returned an unexpected state."
         }
     }
+
+    /*
+     Legacy PKCE OAuth error descriptions, commented out for reference only.
+
+     case .browserLaunchFailed:
+         return "Could not open the ChatGPT sign-in page."
+     case .callbackTimedOut:
+         return "ChatGPT sign-in timed out."
+     case .invalidAuthorizationURL:
+         return "Could not create the ChatGPT sign-in URL."
+     case .invalidCallback:
+         return "ChatGPT returned an invalid sign-in callback."
+     case .oauthFailed(let message):
+         return "ChatGPT sign-in failed: \(message)"
+     case .stateMismatch:
+         return "ChatGPT sign-in returned an unexpected state."
+     */
 }

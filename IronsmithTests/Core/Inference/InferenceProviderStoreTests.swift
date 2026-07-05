@@ -181,7 +181,7 @@ extension InferenceTests {
         #expect(didSave)
         #expect(savedProvider.identifier == provider.identifier)
 
-        inferenceStore.removeProvider(provider)
+        await inferenceStore.removeProvider(provider)
 
         #expect(!(inferenceStore.providers.contains { $0.kind == .anthropic }))
         #expect(inferenceStore.remoteModels.isEmpty)

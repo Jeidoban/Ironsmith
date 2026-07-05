@@ -22,10 +22,15 @@ struct GeneratedToolMetadata {
     @Guide(description: "A snappy one or two word macOS playful and fun app name in Title Case")
     let displayName: String
 
-    @Guide(description: "A tiny app icon concept phrase for an image generator, two to five words. Do not write a sentence.")
+    @Guide(
+        description:
+            "A tiny app icon concept phrase for an image generator, two to five words. Do not write a sentence."
+    )
     let iconPrompt: String
 
-    @Guide(description: "One SF Symbol name chosen exactly from Ironsmith's allowed menuBarSystemImage list.")
+    @Guide(
+        description:
+            "One SF Symbol name chosen exactly from Ironsmith's allowed menuBarSystemImage list.")
     let menuBarSystemImage: String
 }
 
@@ -46,9 +51,13 @@ struct ToolMetadataRequest: Sendable {
 }
 
 struct ToolMetadataClient: Sendable {
-    private var suggestMetadataForRequest: @Sendable (_ request: ToolMetadataRequest) async -> ToolMetadataSuggestion
+    private var suggestMetadataForRequest:
+        @Sendable (_ request: ToolMetadataRequest) async -> ToolMetadataSuggestion
 
-    init(_ suggestMetadata: @escaping @Sendable (_ userPrompt: String) async -> ToolMetadataSuggestion) {
+    init(
+        _ suggestMetadata:
+            @escaping @Sendable (_ userPrompt: String) async -> ToolMetadataSuggestion
+    ) {
         self.suggestMetadataForRequest = { request in
             await suggestMetadata(request.userPrompt)
         }
@@ -56,7 +65,8 @@ struct ToolMetadataClient: Sendable {
 
     private init(
         requestBased: Void,
-        suggestMetadataForRequest: @escaping @Sendable (_ request: ToolMetadataRequest) async -> ToolMetadataSuggestion
+        suggestMetadataForRequest:
+            @escaping @Sendable (_ request: ToolMetadataRequest) async -> ToolMetadataSuggestion
     ) {
         self.suggestMetadataForRequest = suggestMetadataForRequest
     }
@@ -82,29 +92,31 @@ struct ToolMetadataClient: Sendable {
     }
 
     static func live() -> Self {
-        Self(requestBased: (), suggestMetadataForRequest: { request in
-            let userPrompt = request.userPrompt
-            let fallback = ToolMetadataSuggestion.fallback(for: userPrompt)
+        Self(
+            requestBased: (),
+            suggestMetadataForRequest: { request in
+                let userPrompt = request.userPrompt
+                let fallback = ToolMetadataSuggestion.fallback(for: userPrompt)
 
-            do {
-                return try await Self.generateMetadata(
-                    userPrompt: userPrompt,
-                    languageModel: request.languageModel,
-                    generationOptions: request.generationOptions,
-                    fallback: fallback
-                )
-            } catch {
-                AgentDiagnosticsLog.append(
-                    """
-                    Tool metadata generation failed; using fallback tool metadata.
-                    prompt: \(AgentDiagnosticsLog.compact(userPrompt, limit: 240))
-                    error:
-                    \(AgentDiagnosticsLog.renderError(error, limit: 500))
-                    """
-                )
-                return fallback
-            }
-        })
+                do {
+                    return try await Self.generateMetadata(
+                        userPrompt: userPrompt,
+                        languageModel: request.languageModel,
+                        generationOptions: request.generationOptions,
+                        fallback: fallback
+                    )
+                } catch {
+                    AgentDiagnosticsLog.append(
+                        """
+                        Tool metadata generation failed; using fallback tool metadata.
+                        prompt: \(AgentDiagnosticsLog.compact(userPrompt, limit: 240))
+                        error:
+                        \(AgentDiagnosticsLog.renderError(error, limit: 500))
+                        """
+                    )
+                    return fallback
+                }
+            })
     }
 
     private static func generateMetadata(
@@ -120,7 +132,10 @@ struct ToolMetadataClient: Sendable {
         let response = try await session.respond(
             to: Self.metadataPrompt(for: userPrompt),
             generating: GeneratedToolMetadata.self,
-            options: generationOptions
+            options: OpenAICodexGenerationOptions.sanitized(
+                generationOptions,
+                for: languageModel
+            )
         )
         return Self.metadataSuggestion(response.content, fallback: fallback)
     }
@@ -183,7 +198,8 @@ struct ToolPromptRefinementRequest: Sendable {
 struct ToolPromptRefinementClient: Sendable {
     nonisolated private static let maximumResponseTokens = 1000
 
-    private var refinePromptForRequest: @Sendable (_ request: ToolPromptRefinementRequest) async -> String?
+    private var refinePromptForRequest:
+        @Sendable (_ request: ToolPromptRefinementRequest) async -> String?
 
     init(_ refinePrompt: @escaping @Sendable (_ userPrompt: String) async -> String?) {
         self.refinePromptForRequest = { request in
@@ -193,7 +209,8 @@ struct ToolPromptRefinementClient: Sendable {
 
     private init(
         requestBased: Void,
-        refinePromptForRequest: @escaping @Sendable (_ request: ToolPromptRefinementRequest) async -> String?
+        refinePromptForRequest:
+            @escaping @Sendable (_ request: ToolPromptRefinementRequest) async -> String?
     ) {
         self.refinePromptForRequest = refinePromptForRequest
     }
@@ -221,52 +238,74 @@ struct ToolPromptRefinementClient: Sendable {
     }
 
     static func live() -> Self {
-        Self(requestBased: (), refinePromptForRequest: { request in
-            do {
-                let session = LanguageModelSession(
-                    model: request.languageModel,
-                    instructions: promptRefinementInstructions
-                )
-                let response: LanguageModelSession.Response<String> = try await session.respond(
-                    to: Self.promptRefinementPrompt(
-                        for: request.userPrompt,
-                        appKind: request.appKind,
-                        sandboxEnabled: request.sandboxEnabled
-                    ),
-                    options: Self.promptRefinementOptions(from: request.generationOptions)
-                )
-                let prompt = cleanedRefinedPrompt(response.content)
-                if prompt.isEmpty {
+        Self(
+            requestBased: (),
+            refinePromptForRequest: { request in
+                do {
+                    let session = LanguageModelSession(
+                        model: request.languageModel,
+                        instructions: promptRefinementInstructions
+                    )
+                    let response = try await Self.streamPromptRefinement(
+                        in: session,
+                        prompt: Self.promptRefinementPrompt(
+                            for: request.userPrompt,
+                            appKind: request.appKind,
+                            sandboxEnabled: request.sandboxEnabled
+                        ),
+                        options: Self.promptRefinementOptions(
+                            from: request.generationOptions,
+                            for: request.languageModel
+                        )
+                    )
+                    let prompt = cleanedRefinedPrompt(response)
+                    if prompt.isEmpty {
+                        AgentDiagnosticsLog.append(
+                            """
+                            Tool prompt refinement returned empty prompt; using original prompt.
+                            prompt: \(AgentDiagnosticsLog.compact(request.userPrompt, limit: 240))
+                            rawCharacters: \(response.count)
+                            """
+                        )
+                        return nil
+                    }
+
                     AgentDiagnosticsLog.append(
                         """
-                        Tool prompt refinement returned empty prompt; using original prompt.
+                        Tool prompt refinement generated.
                         prompt: \(AgentDiagnosticsLog.compact(request.userPrompt, limit: 240))
-                        rawCharacters: \(response.content.count)
+                        refinedPrompt: \(AgentDiagnosticsLog.compact(prompt, limit: 1_500))
+                        """
+                    )
+                    return prompt
+                } catch {
+                    AgentDiagnosticsLog.append(
+                        """
+                        Tool prompt refinement failed; using original prompt.
+                        prompt: \(AgentDiagnosticsLog.compact(request.userPrompt, limit: 240))
+                        error:
+                        \(AgentDiagnosticsLog.renderError(error, limit: 500))
                         """
                     )
                     return nil
                 }
+            })
+    }
 
-                AgentDiagnosticsLog.append(
-                    """
-                    Tool prompt refinement generated.
-                    prompt: \(AgentDiagnosticsLog.compact(request.userPrompt, limit: 240))
-                    refinedPrompt: \(AgentDiagnosticsLog.compact(prompt, limit: 1_500))
-                    """
-                )
-                return prompt
-            } catch {
-                AgentDiagnosticsLog.append(
-                    """
-                    Tool prompt refinement failed; using original prompt.
-                    prompt: \(AgentDiagnosticsLog.compact(request.userPrompt, limit: 240))
-                    error:
-                    \(AgentDiagnosticsLog.renderError(error, limit: 500))
-                    """
-                )
-                return nil
-            }
-        })
+    private static func streamPromptRefinement(
+        in session: LanguageModelSession,
+        prompt: String,
+        options: GenerationOptions
+    ) async throws -> String {
+        var latest = ""
+        let stream = session.streamResponse(
+            to: prompt,
+            options: options
+        )
+        for try await snapshot in stream {
+            latest = snapshot.content
+        }
+        return latest
     }
 
     nonisolated private static func promptRefinementPrompt(
@@ -286,10 +325,13 @@ struct ToolPromptRefinementClient: Sendable {
         """
     }
 
-    nonisolated private static func promptRefinementOptions(from generationOptions: GenerationOptions) -> GenerationOptions {
+    nonisolated private static func promptRefinementOptions(
+        from generationOptions: GenerationOptions,
+        for languageModel: any LanguageModel
+    ) -> GenerationOptions {
         var options = generationOptions
         options.maximumResponseTokens = maximumResponseTokens
-        return options
+        return OpenAICodexGenerationOptions.sanitized(options, for: languageModel)
     }
 
     nonisolated private static let promptRefinementInstructions = """

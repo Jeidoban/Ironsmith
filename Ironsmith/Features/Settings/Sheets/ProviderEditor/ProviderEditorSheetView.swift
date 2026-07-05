@@ -1,5 +1,4 @@
 import Supabase
-import AppKit
 import SwiftUI
 
 struct ProviderEditorSheetView: View {
@@ -207,8 +206,12 @@ struct ProviderEditorSheetView: View {
             isPresented: $isConfirmingDelete
         ) {
             Button("Delete Provider", role: .destructive) {
-                inferenceStore.removeProvider(provider)
-                dismiss()
+                Task {
+                    await inferenceStore.removeProvider(provider)
+                    await MainActor.run {
+                        dismiss()
+                    }
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -360,11 +363,7 @@ struct ProviderEditorSheetView: View {
 
         isSigningInToChatGPT = true
         Task {
-            let didSignIn = await inferenceStore.signInToOpenAIChatGPT { @MainActor url in
-                guard NSWorkspace.shared.open(url) else {
-                    throw OpenAICodexAuthClientError.browserLaunchFailed
-                }
-            }
+            let didSignIn = await inferenceStore.signInToOpenAIChatGPT()
 
             await MainActor.run {
                 isSigningInToChatGPT = false
@@ -380,9 +379,7 @@ struct ProviderEditorSheetView: View {
 
         isSigningOutOfChatGPT = true
         Task {
-            let didSignOut = await MainActor.run {
-                inferenceStore.signOutOpenAIChatGPT(provider: provider)
-            }
+            let didSignOut = await inferenceStore.signOutOpenAIChatGPT(provider: provider)
             await MainActor.run {
                 isSigningOutOfChatGPT = false
                 if didSignOut {

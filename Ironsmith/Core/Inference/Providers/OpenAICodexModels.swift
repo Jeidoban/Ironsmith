@@ -2,16 +2,24 @@ import Foundation
 
 nonisolated enum OpenAICodexBackend {
     static let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
-    static let issuerURL = URL(string: "https://auth.openai.com")!
     static let tokenURL = URL(string: "https://auth.openai.com/oauth/token")!
-    static let authorizeURL = URL(string: "https://auth.openai.com/oauth/authorize")!
     static let backendBaseURL = URL(string: "https://chatgpt.com/backend-api/codex/")!
     static let modelsURL = URL(string: "https://chatgpt.com/backend-api/codex/models")!
-    static let modelCatalogClientVersion = "0.142.5"
-    static let redirectURI = "http://localhost:1455/auth/callback"
-    static let redirectPort: UInt16 = 1455
-    static let redirectPath = "/auth/callback"
+    static var modelCatalogClientVersion: String {
+        CodexCLIClient.bundledVersion() ?? "0.142.5"
+    }
     static let modelIdentifierPrefix = "codex:"
+
+    /*
+     Legacy PKCE OAuth constants, commented out for reference only. Codex CLI now owns
+     browser login and writes auth.json under Ironsmith's CODEX_HOME.
+
+     static let issuerURL = URL(string: "https://auth.openai.com")!
+     static let authorizeURL = URL(string: "https://auth.openai.com/oauth/authorize")!
+     static let redirectURI = "http://localhost:1455/auth/callback"
+     static let redirectPort: UInt16 = 1455
+     static let redirectPath = "/auth/callback"
+     */
 
     static func codexModelIdentifier(for rawIdentifier: String) -> String {
         "\(modelIdentifierPrefix)\(rawIdentifier)"

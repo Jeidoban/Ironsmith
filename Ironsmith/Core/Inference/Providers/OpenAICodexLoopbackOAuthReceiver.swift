@@ -1,6 +1,14 @@
+/*
+ Legacy PKCE loopback OAuth receiver, commented out for reference only. The live
+ ChatGPT/Codex sign-in path invokes Codex CLI and reads auth.json from
+ Ironsmith's CODEX_HOME.
+
 import Foundation
 @preconcurrency import Network
 
+// Commented-out legacy implementation: Codex CLI now owns ChatGPT browser login and
+// writes auth.json under Ironsmith's CODEX_HOME. This receiver is not used by
+// the live OpenAICodexAuthClient path.
 nonisolated final class OpenAICodexLoopbackOAuthReceiver {
     private let port: UInt16
     private let path: String
@@ -257,3 +265,4 @@ private actor OpenAICodexListenerReadiness {
         continuation = nil
     }
 }
+*/

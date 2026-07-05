@@ -5,7 +5,7 @@ struct RemoteModelClient {
 }
 
 extension RemoteModelClient {
-    static let discoveryTimeout: TimeInterval = 10
+    nonisolated static let discoveryTimeout: TimeInterval = 10
 
     static func live(
         accountClient: IronsmithAccountClient = .unconfigured,

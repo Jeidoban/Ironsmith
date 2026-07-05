@@ -108,6 +108,20 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func livePromptRefinementClientStreamsPlainTextResponse() async throws {
+        let refinedPrompt = "Build a mortgage calculator with purchase price, down payment, interest, taxes, insurance, and a clear monthly payment summary."
+        let refined = await ToolPromptRefinementClient.live().refinePrompt(
+            userPrompt: "Make a mortgage calculator",
+            languageModel: StreamOnlyPromptRefinementLanguageModel(response: refinedPrompt),
+            generationOptions: GenerationOptions(maximumResponseTokens: 4096),
+            sandboxEnabled: true
+        )
+
+        #expect(refined == refinedPrompt)
+    }
+
+    @MainActor
+    @Test
     func livePromptRefinementClientIncludesMenuBarAppTypeContext() async throws {
         let promptCapture = PromptCapture()
         let refinedPrompt = "Build a compact menu bar timer with start, pause, reset, and a current-session summary."
@@ -270,5 +284,34 @@ extension AgentPipelineTests {
         #expect(!(prompts.first?.contains("Rewrite the whole app with unrelated features.") ?? false))
         #expect(await metadataCapture.count == 0)
         #expect(await promptRefinementCapture.count == 0)
+    }
+}
+
+private struct StreamOnlyPromptRefinementLanguageModel: LanguageModel {
+    typealias UnavailableReason = Never
+
+    let response: String
+
+    func respond<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        throw FakeAgentError.expected
+    }
+
+    func streamResponse<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
+        LanguageModelSession.ResponseStream(
+            content: response as! Content,
+            rawContent: GeneratedContent(response)
+        )
     }
 }

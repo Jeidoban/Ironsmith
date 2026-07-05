@@ -400,7 +400,7 @@ extension InferenceTests {
             credential: {
                 OpenAICodexCredential(accessToken: "access-token")
             },
-            signIn: { _ in
+            signIn: {
                 OpenAICodexCredential(accessToken: "access-token")
             },
             signOut: {},

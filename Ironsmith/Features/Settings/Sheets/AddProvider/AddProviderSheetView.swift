@@ -1,5 +1,4 @@
 import AuthenticationServices
-import AppKit
 import SwiftUI
 
 struct AddProviderSheetView: View {
@@ -281,11 +280,7 @@ struct AddProviderSheetView: View {
         isSigningInToChatGPT = true
 
         Task {
-            let didSignIn = await inferenceStore.signInToOpenAIChatGPT { @MainActor url in
-                guard NSWorkspace.shared.open(url) else {
-                    throw OpenAICodexAuthClientError.browserLaunchFailed
-                }
-            }
+            let didSignIn = await inferenceStore.signInToOpenAIChatGPT()
 
             if didSignIn {
                 await MainActor.run {

@@ -83,7 +83,10 @@ struct ToolGenerationRuntimeContext {
     ) {
         self.languageModel = languageModelContext.languageModel
         self.metadataLanguageModel = languageModelContext.metadataLanguageModel
-        self.generationOptions = languageModelContext.options
+        self.generationOptions = OpenAICodexGenerationOptions.sanitized(
+            languageModelContext.options,
+            for: languageModelContext.languageModel
+        )
         self.pipelineConfiguration = languageModelContext.pipelineConfiguration
         self.repairStrategy = languageModelContext.repairStrategy
         self.toolsDirectoryURL = dependencies.toolsDirectoryURL

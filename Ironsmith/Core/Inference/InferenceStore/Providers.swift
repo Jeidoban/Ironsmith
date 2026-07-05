@@ -140,7 +140,7 @@ extension InferenceStore {
         }
     }
 
-    func removeProvider(_ provider: ProviderConfig) {
+    func removeProvider(_ provider: ProviderConfig) async {
         guard let repository else { return }
         guard provider.isRemovable else { return }
 
@@ -155,7 +155,7 @@ extension InferenceStore {
         }
         if provider.kind == .openAI {
             do {
-                try dependencies.openAICodexAuthClient.signOut()
+                try await dependencies.openAICodexAuthClient.signOut()
                 openAICodexCredential = nil
             } catch {
                 presentError(error)

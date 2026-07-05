@@ -22,6 +22,7 @@ Builds the SwiftPM executable and stages dist/debug/Ironsmith.app or dist/releas
 
 Environment:
   Build-time backend values are read from Config/.env by default.
+  IRONSMITH_CODEX_VERSION pins the bundled Codex version. Defaults to latest.
 
 Options:
   --release                     Build with SwiftPM release configuration and Developer ID signing
@@ -123,6 +124,10 @@ RESOURCES_URL="$CONTENTS_URL/Resources"
 INFO_PLIST_URL="$CONTENTS_URL/Info.plist"
 ASSET_INFO_PLIST_URL="$RESOURCES_URL/asset-info.plist"
 APP_RESOURCES_SOURCE_URL="$REPO_ROOT/Ironsmith/Resources"
+CODEX_CACHE_ROOT="$REPO_ROOT/.build/ironsmith-codex"
+CODEX_VENDOR_RESOURCE_URL="$RESOURCES_URL/Codex/vendor"
+CODEX_ARM64_TRIPLE="aarch64-apple-darwin"
+CODEX_X64_TRIPLE="x86_64-apple-darwin"
 
 source_env_file() {
   local file="$1"
@@ -138,6 +143,7 @@ HAS_ENV_IRONSMITH_SUPABASE_URL=false
 HAS_ENV_IRONSMITH_SUPABASE_PUBLISHABLE_KEY=false
 HAS_ENV_IRONSMITH_API_BASE_URL=false
 HAS_ENV_IRONSMITH_DEV_SIGN_IDENTITY=false
+HAS_ENV_IRONSMITH_CODEX_VERSION=false
 
 if [[ "${IRONSMITH_SUPABASE_URL+x}" == x ]]; then
   HAS_ENV_IRONSMITH_SUPABASE_URL=true
@@ -159,6 +165,11 @@ if [[ "${IRONSMITH_DEV_SIGN_IDENTITY+x}" == x ]]; then
   ENV_IRONSMITH_DEV_SIGN_IDENTITY="$IRONSMITH_DEV_SIGN_IDENTITY"
 fi
 
+if [[ "${IRONSMITH_CODEX_VERSION+x}" == x ]]; then
+  HAS_ENV_IRONSMITH_CODEX_VERSION=true
+  ENV_IRONSMITH_CODEX_VERSION="$IRONSMITH_CODEX_VERSION"
+fi
+
 source_env_file "$CONFIG_DIR/.env"
 
 if [[ "$HAS_ENV_IRONSMITH_SUPABASE_URL" == true ]]; then
@@ -177,10 +188,15 @@ if [[ "$HAS_ENV_IRONSMITH_DEV_SIGN_IDENTITY" == true ]]; then
   IRONSMITH_DEV_SIGN_IDENTITY="$ENV_IRONSMITH_DEV_SIGN_IDENTITY"
 fi
 
+if [[ "$HAS_ENV_IRONSMITH_CODEX_VERSION" == true ]]; then
+  IRONSMITH_CODEX_VERSION="$ENV_IRONSMITH_CODEX_VERSION"
+fi
+
 IRONSMITH_SUPABASE_URL="${IRONSMITH_SUPABASE_URL:-}"
 IRONSMITH_SUPABASE_PUBLISHABLE_KEY="${IRONSMITH_SUPABASE_PUBLISHABLE_KEY:-}"
 IRONSMITH_API_BASE_URL="${IRONSMITH_API_BASE_URL:-}"
 IRONSMITH_DEV_SIGN_IDENTITY="${IRONSMITH_DEV_SIGN_IDENTITY:--}"
+IRONSMITH_CODEX_VERSION="${IRONSMITH_CODEX_VERSION:-latest}"
 
 if [[ -n "$SUPABASE_URL_OVERRIDE" ]]; then
   IRONSMITH_SUPABASE_URL="$SUPABASE_URL_OVERRIDE"
@@ -236,6 +252,114 @@ require_executable() {
     echo "Missing executable at $executable_url" >&2
     exit 1
   fi
+}
+
+require_command() {
+  local command_name="$1"
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "Missing required command: $command_name" >&2
+    exit 1
+  fi
+}
+
+resolve_codex_version() {
+  require_command npm
+
+  local resolved_version
+  resolved_version="$(npm view "@openai/codex@$IRONSMITH_CODEX_VERSION" version --silent)"
+  if [[ -z "$resolved_version" ]]; then
+    echo "Could not resolve @openai/codex@$IRONSMITH_CODEX_VERSION." >&2
+    exit 1
+  fi
+
+  printf '%s' "$resolved_version"
+}
+
+codex_vendor_has_binary() {
+  local vendor_dir="$1"
+  [[ -x "$vendor_dir/codex" || -x "$vendor_dir/bin/codex" ]]
+}
+
+download_codex_vendor() {
+  local resolved_version="$1"
+  local platform_suffix="$2"
+  local triple="$3"
+  local cache_dir="$CODEX_CACHE_ROOT/$resolved_version/$triple"
+
+  if codex_vendor_has_binary "$cache_dir"; then
+    echo "Using cached Codex $resolved_version ($triple)"
+    return 0
+  fi
+
+  local package_spec="@openai/codex@${resolved_version}-${platform_suffix}"
+  local tmp_dir="$CODEX_CACHE_ROOT/.tmp-$resolved_version-$platform_suffix-$$"
+  local tarball=""
+  local vendor_dir=""
+
+  echo "Downloading $package_spec"
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  tarball="$(cd "$tmp_dir" && npm pack "$package_spec" --silent)"
+  tar -xzf "$tmp_dir/$tarball" -C "$tmp_dir"
+  vendor_dir="$(find "$tmp_dir/package" -type d -path "*/vendor/$triple" -print -quit)"
+
+  if [[ -z "$vendor_dir" || ! -d "$vendor_dir" ]]; then
+    echo "Package $package_spec did not contain vendor/$triple." >&2
+    exit 1
+  fi
+
+  if ! codex_vendor_has_binary "$vendor_dir"; then
+    echo "Package $package_spec did not contain an executable Codex binary." >&2
+    exit 1
+  fi
+
+  mkdir -p "$CODEX_CACHE_ROOT/$resolved_version"
+  rm -rf "$cache_dir"
+  cp -R "$vendor_dir" "$cache_dir"
+  rm -rf "$tmp_dir"
+}
+
+stage_codex_resources() {
+  local resolved_version
+  resolved_version="$(resolve_codex_version)"
+
+  echo "Bundling Codex $resolved_version"
+  download_codex_vendor "$resolved_version" "darwin-arm64" "$CODEX_ARM64_TRIPLE"
+  download_codex_vendor "$resolved_version" "darwin-x64" "$CODEX_X64_TRIPLE"
+
+  mkdir -p "$RESOURCES_URL/Codex"
+  printf '%s\n' "$resolved_version" > "$RESOURCES_URL/Codex/version.txt"
+  mkdir -p "$CODEX_VENDOR_RESOURCE_URL"
+  rm -rf "$CODEX_VENDOR_RESOURCE_URL/$CODEX_ARM64_TRIPLE"
+  rm -rf "$CODEX_VENDOR_RESOURCE_URL/$CODEX_X64_TRIPLE"
+  cp -R "$CODEX_CACHE_ROOT/$resolved_version/$CODEX_ARM64_TRIPLE" "$CODEX_VENDOR_RESOURCE_URL/$CODEX_ARM64_TRIPLE"
+  cp -R "$CODEX_CACHE_ROOT/$resolved_version/$CODEX_X64_TRIPLE" "$CODEX_VENDOR_RESOURCE_URL/$CODEX_X64_TRIPLE"
+}
+
+codesign_file() {
+  local file_url="$1"
+  if [[ "$RELEASE_BUILD" == true ]]; then
+    /usr/bin/codesign \
+      --force \
+      --sign "$SIGN_IDENTITY" \
+      --options runtime \
+      --timestamp \
+      "$file_url" >/dev/null
+  else
+    /usr/bin/codesign --force --sign "$SIGN_IDENTITY" "$file_url" >/dev/null
+  fi
+}
+
+sign_codex_vendor_executables() {
+  if [[ ! -d "$CODEX_VENDOR_RESOURCE_URL" ]]; then
+    return 0
+  fi
+
+  local executable_url
+  while IFS= read -r executable_url; do
+    echo "Signing Codex executable $executable_url"
+    codesign_file "$executable_url"
+  done < <(find "$CODEX_VENDOR_RESOURCE_URL" -type f -perm -u+x)
 }
 
 build_native_executable() {
@@ -338,6 +462,9 @@ find "$RESOURCE_BUNDLE_BIN_DIR" \
   -name "*.bundle" \
   ! -name "${APP_NAME}_${APP_NAME}.bundle" \
   -exec cp -R {} "$RESOURCES_URL" \;
+
+stage_codex_resources
+sign_codex_vendor_executables
 
 if [[ "$RELEASE_BUILD" == true ]]; then
   /usr/bin/codesign \
