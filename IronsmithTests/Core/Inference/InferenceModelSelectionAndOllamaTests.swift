@@ -134,6 +134,112 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func languageModelClientBuildsOpenAICodexLanguageModel() async throws {
+        let provider = ProviderCatalog.makeProvider(for: .openAI)!
+        let model = ModelConfig(
+            identifier: "codex:gpt-5.5",
+            displayName: "GPT-5.5 (Codex)",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let authClient = OpenAICodexAuthClient(
+            credential: {
+                OpenAICodexCredential(accessToken: "codex-token", accountID: "account-id")
+            },
+            signIn: {
+                OpenAICodexCredential(accessToken: "codex-token", accountID: "account-id")
+            },
+            signOut: {},
+            validCredential: {
+                OpenAICodexCredential(accessToken: "codex-token", accountID: "account-id")
+            },
+            discoverModels: { [] }
+        )
+        let client = LanguageModelClient.live(
+            credentialClient: CredentialClient(
+                loadAPIKey: { _ in nil },
+                saveAPIKey: { _, _ in },
+                deleteAPIKey: { _ in }
+            ),
+            localModelClient: Self.fakeLocalModelClient(),
+            openAICodexAuthClient: authClient
+        )
+
+        let languageModel = try await client.makeLanguageModel(model, provider)
+        let openAIModel = try #require(languageModel as? OpenAILanguageModel)
+
+        #expect(openAIModel.model == "gpt-5.5")
+        #expect(openAIModel.baseURL == OpenAICodexBackend.backendBaseURL)
+    }
+
+    @MainActor
+    @Test
+    func openAICodexGenerationOptionsOmitMaxTokensAndDisableStorage() {
+        let model = ModelConfig(
+            identifier: "codex:gpt-5.5",
+            displayName: "GPT-5.5 (Codex)",
+            providerIdentifier: ProviderKind.openAI.rawValue,
+            source: .remote,
+            installState: .installed
+        )
+
+        let options = model.generationOptions(preferences: Self.generationPreferences())
+        let openAIOptions = options[custom: OpenAILanguageModel.self]
+
+        #expect(options.maximumResponseTokens == nil)
+        #expect(openAIOptions?.store == false)
+
+        let customPreferences = Self.generationPreferences()
+        customPreferences.customOptionsEnabled = true
+        customPreferences.maximumResponseTokens = 8192
+
+        let customOptions = model.generationOptions(preferences: customPreferences)
+        #expect(customOptions.maximumResponseTokens == nil)
+    }
+
+    @MainActor
+    @Test
+    func openAICodexGenerationOptionsSanitizerRemovesUnsupportedParameters() {
+        let languageModel = OpenAILanguageModel(
+            baseURL: OpenAICodexBackend.backendBaseURL,
+            apiKey: "token",
+            model: "gpt-5.5",
+            apiVariant: .responses
+        )
+        var options = GenerationOptions(maximumResponseTokens: 8192)
+        var openAIOptions = OpenAILanguageModel.CustomGenerationOptions()
+        openAIOptions.store = true
+        options[custom: OpenAILanguageModel.self] = openAIOptions
+
+        let sanitized = OpenAICodexGenerationOptions.sanitized(options, for: languageModel)
+
+        #expect(sanitized.maximumResponseTokens == nil)
+        #expect(sanitized[custom: OpenAILanguageModel.self]?.store == false)
+    }
+
+    @MainActor
+    @Test
+    func openAICodexGenerationOptionsSanitizerLeavesNormalOpenAIOptionsUnchanged() {
+        let languageModel = OpenAILanguageModel(
+            baseURL: OpenAILanguageModel.defaultBaseURL,
+            apiKey: "token",
+            model: "gpt-5.5",
+            apiVariant: .responses
+        )
+        var options = GenerationOptions(maximumResponseTokens: 8192)
+        var openAIOptions = OpenAILanguageModel.CustomGenerationOptions()
+        openAIOptions.store = true
+        options[custom: OpenAILanguageModel.self] = openAIOptions
+
+        let sanitized = OpenAICodexGenerationOptions.sanitized(options, for: languageModel)
+
+        #expect(sanitized.maximumResponseTokens == 8192)
+        #expect(sanitized[custom: OpenAILanguageModel.self]?.store == true)
+    }
+
+    @MainActor
+    @Test
     func selectionIdentifierWorksForPersistedAndTransientModels() {
         let localModel = ModelConfig(
             identifier: ModelConfig.appleFoundationIdentifier,

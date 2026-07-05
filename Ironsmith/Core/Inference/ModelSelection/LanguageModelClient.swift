@@ -12,7 +12,8 @@ extension LanguageModelClient {
     static func live(
         credentialClient: CredentialClient,
         localModelClient: LocalModelClient,
-        accountClient: IronsmithAccountClient = .unconfigured
+        accountClient: IronsmithAccountClient = .unconfigured,
+        openAICodexAuthClient: OpenAICodexAuthClient = .unconfigured
     ) -> Self {
         Self(
             makeLanguageModel: { model, provider in
@@ -21,7 +22,8 @@ extension LanguageModelClient {
                     provider: provider,
                     credentialClient: credentialClient,
                     localModelClient: localModelClient,
-                    accountClient: accountClient
+                    accountClient: accountClient,
+                    openAICodexAuthClient: openAICodexAuthClient
                 )
             }
         )
@@ -32,7 +34,8 @@ extension LanguageModelClient {
         provider: ProviderConfig?,
         credentialClient: CredentialClient,
         localModelClient: LocalModelClient,
-        accountClient: IronsmithAccountClient
+        accountClient: IronsmithAccountClient,
+        openAICodexAuthClient: OpenAICodexAuthClient
     ) async throws -> any LanguageModel {
         switch model.source {
         case .appleFoundation:
@@ -69,6 +72,24 @@ extension LanguageModelClient {
                 )
 
             case .openAI:
+                if let codexModelIdentifier = model.openAICodexRawIdentifier {
+                    let credential = try await openAICodexAuthClient.validCredential()
+                    var headers: [String: String] = [:]
+                    if let accountID = credential.accountID, !accountID.isEmpty {
+                        headers["ChatGPT-Account-Id"] = accountID
+                    }
+                    return OpenAILanguageModel(
+                        baseURL: OpenAICodexBackend.backendBaseURL,
+                        apiKey: credential.accessToken,
+                        model: codexModelIdentifier,
+                        apiVariant: .responses,
+                        session: remoteGenerationSession(
+                            for: OpenAICodexBackend.backendBaseURL,
+                            headers: headers
+                        )
+                    )
+                }
+
                 let token = try apiKey(for: provider, credentialClient: credentialClient)
                 let baseURL = try providerBaseURL(provider)
                 return OpenAILanguageModel(

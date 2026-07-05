@@ -94,7 +94,7 @@ extension InferenceStore {
             ironsmithAccountSummary = nil
             ironsmithCreditPacks = []
             pendingIronsmithAccountRefreshAfterCheckout = false
-            removeProvider(provider)
+            await removeProvider(provider)
             return true
         } catch {
             presentError(error)
@@ -110,7 +110,7 @@ extension InferenceStore {
             ironsmithAccountSummary = nil
             ironsmithCreditPacks = []
             pendingIronsmithAccountRefreshAfterCheckout = false
-            removeProvider(provider)
+            await removeProvider(provider)
             return true
         } catch {
             presentError(error)

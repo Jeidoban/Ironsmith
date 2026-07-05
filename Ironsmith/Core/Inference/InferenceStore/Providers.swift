@@ -140,9 +140,22 @@ extension InferenceStore {
         }
     }
 
-    func removeProvider(_ provider: ProviderConfig) {
+    func removeProvider(_ provider: ProviderConfig) async {
         guard let repository else { return }
         guard provider.isRemovable else { return }
+
+        if provider.kind == .openAI {
+            do {
+                let codexCredential = try dependencies.openAICodexAuthClient.credential()
+                if codexCredential != nil {
+                    try await dependencies.openAICodexAuthClient.signOut()
+                }
+                openAICodexCredential = nil
+            } catch {
+                presentError(error)
+                return
+            }
+        }
 
         let identifier = provider.identifier
         if let reference = provider.apiKeyReference {
@@ -281,7 +294,8 @@ extension InferenceStore {
         }
 
         if provider.authMode == .apiKey,
-            apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            !(provider.kind == .openAI && hasOpenAICodexCredential)
         {
             throw ProviderCreationError.missingAPIKey
         }
