@@ -11,27 +11,17 @@ struct LocalModelManagementView: View {
         @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowAppleFoundationModelWarning)
         private var debugAlwaysShowAppleFoundationModelWarning = false
     #endif
-    @State private var modelPendingDeletion: ModelConfig?
     @State private var isShowingAppleFoundationModelWarning = false
 
     @MainActor
     private var rows: [LocalModelRow] {
         let localModels = inferenceStore.persistedModels
             .filter { $0.providerIdentifier == provider.identifier }
-        let modelRows =
-            localModels
+        return localModels
             .filter {
                 $0.installState == .installed || $0.installState == .builtIn
-                    || $0.installState == .downloading
             }
             .map { LocalModelRow(model: $0, isAppleFoundationEnabled: appleFoundationModelEnabled) }
-
-        let knownIdentifiers = Set(modelRows.map(\.identifier))
-        let catalogRows = MLXModelCatalog.all
-            .filter { !knownIdentifiers.contains($0.identifier) }
-            .map(LocalModelRow.init(entry:))
-
-        return (modelRows + catalogRows)
             .sorted {
                 if $0.isInstalled != $1.isInstalled {
                     return $0.isInstalled
@@ -84,23 +74,6 @@ struct LocalModelManagementView: View {
                         Text("Built in")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    case .installed(let model):
-                        Button("Delete", role: .destructive) {
-                            modelPendingDeletion = model
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
-                        .controlSize(.small)
-                    case .downloading(let progress):
-                        ProgressView(value: progress)
-                            .frame(width: 92)
-                            .accessibilityLabel("Downloading \(row.displayName)")
-                    case .available(let entry):
-                        Button("Download") {
-                            inferenceStore.downloadFromCatalog(entry)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
                     }
                 }
                 .padding(10)
@@ -114,30 +87,12 @@ struct LocalModelManagementView: View {
             }
 
             Text(
-                "More directly downloadable local AI models are coming soon. For now, use Ollama and the recommended AI models."
+                "For local open-weight models, use Ollama and the recommended AI models."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, 4)
-        }
-        .confirmationDialog(
-            "Delete Local AI Model?",
-            isPresented: deleteConfirmationBinding
-        ) {
-            Button("Delete AI Model", role: .destructive) {
-                if let modelPendingDeletion {
-                    inferenceStore.deleteLocalModel(modelPendingDeletion)
-                }
-                modelPendingDeletion = nil
-            }
-            Button("Cancel", role: .cancel) {
-                modelPendingDeletion = nil
-            }
-        } message: {
-            Text(
-                modelPendingDeletion?.displayName
-                    ?? "This AI model will be removed from local storage.")
         }
         .alert(
             "Foundation Model Information",
@@ -181,17 +136,6 @@ struct LocalModelManagementView: View {
 
         return !hasPresentedAppleFoundationModelWarning
     }
-
-    private var deleteConfirmationBinding: Binding<Bool> {
-        Binding(
-            get: { modelPendingDeletion != nil },
-            set: { isPresented in
-                if !isPresented {
-                    modelPendingDeletion = nil
-                }
-            }
-        )
-    }
 }
 
 private struct LocalModelRow: Identifiable {
@@ -206,10 +150,8 @@ private struct LocalModelRow: Identifiable {
         switch state {
         case .appleFoundation(let isEnabled):
             isEnabled
-        case .builtIn, .installed:
+        case .builtIn:
             true
-        case .downloading, .available:
-            false
         }
     }
 
@@ -224,29 +166,13 @@ private struct LocalModelRow: Identifiable {
         }
 
         switch model.installState {
-        case .builtIn:
-            state = .builtIn
-        case .installed:
-            state = model.source == .mlx ? .installed(model) : .builtIn
-        case .downloading:
-            state = .downloading(model.downloadProgress ?? 0)
-        case .downloadable, .failed:
+        case .builtIn, .installed, .downloading, .downloadable, .failed:
             state = .builtIn
         }
-    }
-
-    init(entry: MLXModelCatalog.Entry) {
-        identifier = entry.identifier
-        displayName = entry.displayName
-        detailText = entry.identifier
-        state = .available(entry)
     }
 
     enum State {
         case appleFoundation(isEnabled: Bool)
         case builtIn
-        case installed(ModelConfig)
-        case downloading(Double)
-        case available(MLXModelCatalog.Entry)
     }
 }

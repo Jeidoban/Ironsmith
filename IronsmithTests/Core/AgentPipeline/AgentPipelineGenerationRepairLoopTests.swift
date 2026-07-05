@@ -406,7 +406,7 @@ extension AgentPipelineTests {
         ]
         let languageModelContext = AgentLanguageModelContext(
             languageModel: EmptyLanguageModel(),
-            options: GenerationOptions(),
+            generationOptions: GenerationOptions(),
             pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn))
         )
         let dependencies = ToolGenerationRuntimeDependencies(
@@ -470,7 +470,7 @@ extension AgentPipelineTests {
         }
         let languageModelContext = AgentLanguageModelContext(
             languageModel: EmptyLanguageModel(),
-            options: GenerationOptions(),
+            generationOptions: GenerationOptions(),
             pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn))
         )
         let dependencies = ToolGenerationRuntimeDependencies(

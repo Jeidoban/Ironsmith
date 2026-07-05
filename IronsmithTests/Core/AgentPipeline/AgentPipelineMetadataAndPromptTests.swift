@@ -93,7 +93,9 @@ extension AgentPipelineTests {
                 await optionsCapture.record(options)
                 return refinedPrompt
             },
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096),
+            generationOptions: GenerationOptions(
+                maximumResponseTokens: ToolGenerationOptionsResolver.promptRefinementMaximumResponseTokens
+            ),
             sandboxEnabled: false
         )
 
@@ -103,7 +105,10 @@ extension AgentPipelineTests {
         #expect(prompt.contains("App sandbox: disabled."))
         #expect(prompt.contains("must not make changes to the user's system unless the user asks"))
         #expect(prompt.contains("Return a plain text prompt"))
-        #expect(await optionsCapture.options.first?.maximumResponseTokens == 1000)
+        #expect(
+            await optionsCapture.options.first?.maximumResponseTokens
+                == ToolGenerationOptionsResolver.promptRefinementMaximumResponseTokens
+        )
     }
 
     @MainActor
@@ -284,6 +289,166 @@ extension AgentPipelineTests {
         #expect(!(prompts.first?.contains("Rewrite the whole app with unrelated features.") ?? false))
         #expect(await metadataCapture.count == 0)
         #expect(await promptRefinementCapture.count == 0)
+    }
+
+    @MainActor
+    @Test
+    func languageModelResponderStreamsByDefaultAndRunsSuccessHookOnce() async throws {
+        let modeCapture = InvocationModeCapture()
+        let invocationCapture = InvocationCapture()
+        let model = InvocationModeLanguageModel(
+            modeCapture: modeCapture,
+            respondResult: .success("responded"),
+            streamResult: .success("streamed")
+        )
+        let session = LanguageModelSession(model: model)
+
+        let response = try await ToolLanguageModelResponder(
+            afterLanguageModelInvocation: {
+                await invocationCapture.record()
+            }
+        ).respond(
+            stage: .codingAgent,
+            in: session,
+            to: "Build a timer",
+            generating: String.self,
+            options: GenerationOptions()
+        )
+
+        #expect(response == "streamed")
+        #expect(await modeCapture.modes == [.stream])
+        #expect(await invocationCapture.count == 1)
+    }
+
+    @MainActor
+    @Test
+    func languageModelResponderSupportsExplicitNonStreamingOverride() async throws {
+        let modeCapture = InvocationModeCapture()
+        let model = InvocationModeLanguageModel(
+            modeCapture: modeCapture,
+            respondResult: .success("responded"),
+            streamResult: .success("streamed")
+        )
+        let session = LanguageModelSession(model: model)
+
+        let response = try await ToolLanguageModelResponder().respond(
+            stage: .codingAgent,
+            in: session,
+            to: "Build a timer",
+            generating: String.self,
+            options: GenerationOptions(),
+            streaming: false
+        )
+
+        #expect(response == "responded")
+        #expect(await modeCapture.modes == [.respond])
+    }
+
+    @MainActor
+    @Test
+    func languageModelResponderRunsFailureHookOnce() async throws {
+        let modeCapture = InvocationModeCapture()
+        let invocationCapture = InvocationCapture()
+        let model = InvocationModeLanguageModel(
+            modeCapture: modeCapture,
+            respondResult: .success("responded"),
+            streamResult: .failure(FakeAgentError.expected)
+        )
+        let session = LanguageModelSession(model: model)
+
+        do {
+            _ = try await ToolLanguageModelResponder(
+                afterLanguageModelInvocation: {
+                    await invocationCapture.record()
+                }
+            ).respond(
+                stage: .codingAgent,
+                in: session,
+                to: "Build a timer",
+                generating: String.self,
+                options: GenerationOptions()
+            )
+            Issue.record("Expected responder to throw.")
+        } catch {
+            #expect(error as? FakeAgentError == .expected)
+        }
+
+        #expect(await modeCapture.modes == [.stream])
+        #expect(await invocationCapture.count == 1)
+    }
+}
+
+private enum InvocationMode: Equatable {
+    case respond
+    case stream
+}
+
+private actor InvocationModeCapture {
+    private(set) var modes: [InvocationMode] = []
+
+    func record(_ mode: InvocationMode) {
+        modes.append(mode)
+    }
+}
+
+private struct InvocationModeLanguageModel: LanguageModel {
+    typealias UnavailableReason = Never
+
+    let modeCapture: InvocationModeCapture
+    let respondResult: Result<String, any Error>
+    let streamResult: Result<String, any Error>
+
+    func respond<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        await modeCapture.record(.respond)
+        guard type == String.self else {
+            throw FakeAgentError.unsupportedStructuredGeneration
+        }
+        let response = try respondResult.get()
+        return LanguageModelSession.Response(
+            content: response as! Content,
+            rawContent: GeneratedContent(response),
+            transcriptEntries: []
+        )
+    }
+
+    func streamResponse<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
+        let modeCapture = modeCapture
+        let streamResult = streamResult
+        return LanguageModelSession.ResponseStream(
+            stream: AsyncThrowingStream { continuation in
+                Task {
+                    await modeCapture.record(.stream)
+                    guard type == String.self else {
+                        continuation.finish(throwing: FakeAgentError.unsupportedStructuredGeneration)
+                        return
+                    }
+                    do {
+                        let response = try streamResult.get()
+                        continuation.yield(
+                            .init(
+                                content: (response as! Content).asPartiallyGenerated(),
+                                rawContent: GeneratedContent(response)
+                            )
+                        )
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+            }
+        )
     }
 }
 

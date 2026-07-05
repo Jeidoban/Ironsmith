@@ -105,7 +105,7 @@ struct SettingsModelPresentationTests {
         )
         #expect(
             SettingsBrandMarkStyle.modelColorHex(
-                forIdentifier: "mlx-community/gemma-4",
+                forIdentifier: "google/gemma-4",
                 displayName: "Gemma 4"
             ) == SettingsBrandMarkStyle.gemmaPurpleHex
         )
@@ -117,7 +117,7 @@ struct SettingsModelPresentationTests {
         )
         #expect(
             SettingsBrandMarkStyle.modelColorHex(
-                forIdentifier: "mlx-community/Qwen3.5",
+                forIdentifier: "qwen/qwen3.5",
                 displayName: "Qwen 3.5"
             ) == SettingsBrandMarkStyle.qwenIndigoHex
         )

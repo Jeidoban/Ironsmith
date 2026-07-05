@@ -87,8 +87,10 @@ extension InferenceStore {
     }
 
     var enabledPersistedModels: [ModelConfig] {
-        persistedModels.filter {
+        persistedModels
+            .filter(\.isPersistedLocalModel)
+            .filter {
             isAppleFoundationModelEnabled || $0.source != .appleFoundation
-        }
+            }
     }
 }

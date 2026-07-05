@@ -169,8 +169,10 @@ struct SingleFileToolGenerationRuntime {
             try Task.checkCancellation()
             let metadata = await context.metadataClient.suggestMetadata(
                 userPrompt: prompt,
-                languageModel: context.metadataLanguageModel,
-                generationOptions: context.generationOptions
+                languageModel: context.metadata.languageModel,
+                generationOptions: context.metadata.generationOptions,
+                streaming: context.metadata.streaming,
+                afterLanguageModelInvocation: context.afterLanguageModelInvocation
             )
             try Task.checkCancellation()
             setup = try await prepareNewCreateSetup(
@@ -282,10 +284,12 @@ struct SingleFileToolGenerationRuntime {
 
         let refinedPrompt = await context.promptRefinementClient.refinePrompt(
             userPrompt: prompt,
-            languageModel: context.languageModel,
-            generationOptions: context.generationOptions,
+            languageModel: context.promptRefinement.languageModel,
+            generationOptions: context.promptRefinement.generationOptions,
             appKind: appKind,
-            sandboxEnabled: sandboxEnabled
+            sandboxEnabled: sandboxEnabled,
+            streaming: context.promptRefinement.streaming,
+            afterLanguageModelInvocation: context.afterLanguageModelInvocation
         )
         try Task.checkCancellation()
         guard let refinedPrompt else {

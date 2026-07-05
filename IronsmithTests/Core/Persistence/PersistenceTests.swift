@@ -6,7 +6,7 @@ import Testing
 struct PersistenceTests {
     @MainActor
     @Test
-    func inMemoryModelContainerSupportsPhaseTwoSchema() throws {
+    func inMemoryModelContainerSupportsCurrentSchema() throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
 
@@ -79,14 +79,14 @@ struct PersistenceTests {
             #expect(tool.generationPhase == ToolGenerationPhase.generatingSource)
             #expect(tool.generationMode == ToolGenerationMode.create)
             #expect(tool.pendingPrompt == "Build a resumable app")
-            #expect(container.schema.version == IronsmithSchemaV2.versionIdentifier)
+            #expect(container.schema.version == IronsmithSchemaV3.versionIdentifier)
             #expect(container.migrationPlan != nil)
         }
     }
 
     @MainActor
     @Test
-    func v1StoreMigratesToV2EnumFieldsAndStoreLinkageDefaults() throws {
+    func v1StoreMigratesToCurrentSchemaAndDeletesLegacyLocalModels() throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let storeURL = root.appendingPathComponent("ironsmith.sqlite")
@@ -138,9 +138,9 @@ struct PersistenceTests {
         let container = try IronsmithModelContainerFactory.make(configuration: config)
         let context = ModelContext(container)
         let tool = try #require(try context.fetch(FetchDescriptor<Tool>()).first)
-        let model = try #require(try context.fetch(FetchDescriptor<ModelConfig>()).first)
+        let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV2.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV3.versionIdentifier)
         #expect(tool.id == toolID)
         #expect(tool.appKind == .menuBar)
         #expect(tool.generationState == .stopped)
@@ -156,8 +156,61 @@ struct PersistenceTests {
         #expect(tool.storeSourceSha256 == nil)
         #expect(tool.storeImportedAt == nil)
         #expect(tool.storeRemixedFromVersionId == nil)
-        #expect(model.id == modelID)
-        #expect(model.installState == .installed)
+        #expect(!(models.contains { $0.id == modelID }))
+    }
+
+    @MainActor
+    @Test
+    func v2StoreMigratesToV3ByDeletingLegacyLocalModels() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appendingPathComponent("ironsmith.sqlite")
+        let config = ModelConfiguration(url: storeURL)
+        let legacyModelID = UUID()
+        let foundationModelID = UUID()
+
+        do {
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: IronsmithSchemaV2.self),
+                configurations: config
+            )
+            let context = ModelContext(container)
+            let provider = IronsmithSchemaV2.ProviderConfig(
+                identifier: ProviderConfig.localProviderIdentifier,
+                displayName: "Local",
+                baseURLString: "",
+                authMode: .none,
+                origin: .builtIn
+            )
+            let legacyModel = IronsmithSchemaV2.ModelConfig(
+                id: legacyModelID,
+                identifier: "legacy.local",
+                displayName: "Legacy Local",
+                providerIdentifier: provider.identifier,
+                source: .mlx,
+                installState: .installed
+            )
+            let foundationModel = IronsmithSchemaV2.ModelConfig(
+                id: foundationModelID,
+                identifier: ModelConfig.appleFoundationIdentifier,
+                displayName: "Apple Foundation Model",
+                providerIdentifier: provider.identifier,
+                source: .appleFoundation,
+                installState: .builtIn
+            )
+            context.insert(provider)
+            context.insert(legacyModel)
+            context.insert(foundationModel)
+            try context.save()
+        }
+
+        let container = try IronsmithModelContainerFactory.make(configuration: config)
+        let context = ModelContext(container)
+        let models = try context.fetch(FetchDescriptor<ModelConfig>())
+
+        #expect(container.schema.version == IronsmithSchemaV3.versionIdentifier)
+        #expect(!(models.contains { $0.id == legacyModelID }))
+        #expect(models.contains { $0.id == foundationModelID })
     }
 
     @MainActor

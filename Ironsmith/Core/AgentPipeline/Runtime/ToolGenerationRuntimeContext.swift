@@ -1,6 +1,98 @@
 import AnyLanguageModel
 import Foundation
 
+enum ToolLanguageModelResponderError: LocalizedError {
+    case emptyStream(ToolGenerationStage)
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyStream:
+            return "The AI model returned an empty stream."
+        }
+    }
+}
+
+struct ToolLanguageModelResponder {
+    let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
+
+    init(afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}) {
+        self.afterLanguageModelInvocation = afterLanguageModelInvocation
+    }
+
+    func respond<Content, PromptContent>(
+        stage: ToolGenerationStage,
+        in session: LanguageModelSession,
+        to prompt: PromptContent,
+        generating type: Content.Type = Content.self,
+        options: GenerationOptions,
+        streaming: Bool = ToolGenerationOptionsResolver.defaultStreaming,
+        onSnapshot: (@MainActor (Content.PartiallyGenerated) throws -> Void)? = nil
+    ) async throws -> Content
+    where Content: Generable, Content.PartiallyGenerated: Sendable, PromptContent: PromptRepresentable {
+        do {
+            let content: Content
+            if streaming {
+                content = try await streamResponse(
+                    stage: stage,
+                    in: session,
+                    to: prompt,
+                    generating: type,
+                    options: options,
+                    onSnapshot: onSnapshot
+                )
+            } else {
+                let response = try await session.respond(
+                    to: Prompt(prompt),
+                    generating: type,
+                    options: options
+                )
+                content = response.content
+                if let onSnapshot {
+                    try await MainActor.run {
+                        try onSnapshot(content.asPartiallyGenerated())
+                    }
+                }
+            }
+
+            await afterLanguageModelInvocation()
+            return content
+        } catch {
+            await afterLanguageModelInvocation()
+            throw error
+        }
+    }
+
+    private func streamResponse<Content, PromptContent>(
+        stage: ToolGenerationStage,
+        in session: LanguageModelSession,
+        to prompt: PromptContent,
+        generating type: Content.Type,
+        options: GenerationOptions,
+        onSnapshot: (@MainActor (Content.PartiallyGenerated) throws -> Void)?
+    ) async throws -> Content
+    where Content: Generable, Content.PartiallyGenerated: Sendable, PromptContent: PromptRepresentable {
+        var latestRawContent: GeneratedContent?
+        let stream = session.streamResponse(
+            to: Prompt(prompt),
+            generating: type,
+            options: options
+        )
+        for try await snapshot in stream {
+            latestRawContent = snapshot.rawContent
+            if let onSnapshot {
+                try await MainActor.run {
+                    try onSnapshot(snapshot.content)
+                }
+            }
+        }
+
+        guard let latestRawContent else {
+            throw ToolLanguageModelResponderError.emptyStream(stage)
+        }
+        return try Content(latestRawContent)
+    }
+}
+
 struct ToolGenerationRuntimeDependencies {
     let toolsDirectoryURL: URL
     let fileClient: AgentFileClient
@@ -60,9 +152,9 @@ struct ToolGenerationRuntimeDependencies {
 }
 
 struct ToolGenerationRuntimeContext {
-    let languageModel: any LanguageModel
-    let metadataLanguageModel: any LanguageModel
-    let generationOptions: GenerationOptions
+    let codingAgent: ToolGenerationStageConfiguration
+    let promptRefinement: ToolGenerationStageConfiguration
+    let metadata: ToolGenerationStageConfiguration
     let pipelineConfiguration: ToolGenerationPipelineConfiguration
     let repairStrategy: ToolRepairStrategy
     let toolsDirectoryURL: URL
@@ -77,16 +169,17 @@ struct ToolGenerationRuntimeContext {
     let packageMaterializer: ToolPackageMaterializer
     let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
 
+    var languageModel: any LanguageModel {
+        codingAgent.languageModel
+    }
+
     init(
         languageModelContext: AgentLanguageModelContext,
         dependencies: ToolGenerationRuntimeDependencies
     ) {
-        self.languageModel = languageModelContext.languageModel
-        self.metadataLanguageModel = languageModelContext.metadataLanguageModel
-        self.generationOptions = OpenAICodexGenerationOptions.sanitized(
-            languageModelContext.options,
-            for: languageModelContext.languageModel
-        )
+        self.codingAgent = languageModelContext.codingAgent
+        self.promptRefinement = languageModelContext.promptRefinement
+        self.metadata = languageModelContext.metadata
         self.pipelineConfiguration = languageModelContext.pipelineConfiguration
         self.repairStrategy = languageModelContext.repairStrategy
         self.toolsDirectoryURL = dependencies.toolsDirectoryURL
@@ -103,48 +196,51 @@ struct ToolGenerationRuntimeContext {
     }
 
     func respond<Content, PromptContent>(
+        stage: ToolGenerationStage = .codingAgent,
         in session: LanguageModelSession,
         to prompt: PromptContent,
-        generating type: Content.Type = Content.self
-    ) async throws -> LanguageModelSession.Response<Content>
-    where Content: Generable, PromptContent: PromptRepresentable {
-        do {
-            let response = try await session.respond(
-                to: Prompt(prompt),
-                generating: type,
-                options: generationOptions
-            )
-            await afterLanguageModelInvocation()
-            return response
-        } catch {
-            await afterLanguageModelInvocation()
-            throw error
-        }
+        generating type: Content.Type = Content.self,
+        streaming: Bool? = nil,
+        onSnapshot: (@MainActor (Content.PartiallyGenerated) throws -> Void)? = nil
+    ) async throws -> Content
+    where Content: Generable, Content.PartiallyGenerated: Sendable, PromptContent: PromptRepresentable {
+        let configuration = configuration(for: stage)
+        return try await ToolLanguageModelResponder(
+            afterLanguageModelInvocation: afterLanguageModelInvocation
+        ).respond(
+            stage: stage,
+            in: session,
+            to: prompt,
+            generating: type,
+            options: configuration.generationOptions,
+            streaming: streaming ?? configuration.streaming,
+            onSnapshot: onSnapshot
+        )
     }
 
     func streamText<PromptContent>(
+        stage: ToolGenerationStage = .codingAgent,
         in session: LanguageModelSession,
         to prompt: PromptContent,
         onSnapshot: @escaping @MainActor (String) throws -> Void
     ) async throws -> String where PromptContent: PromptRepresentable {
-        var latest = ""
-        do {
-            let stream = session.streamResponse(
-                to: Prompt(prompt),
-                generating: String.self,
-                options: generationOptions
-            )
-            for try await snapshot in stream {
-                latest = snapshot.content
-                try await MainActor.run {
-                    try onSnapshot(latest)
-                }
-            }
-            await afterLanguageModelInvocation()
-            return latest
-        } catch {
-            await afterLanguageModelInvocation()
-            throw error
+        try await respond(
+            stage: stage,
+            in: session,
+            to: prompt,
+            generating: String.self,
+            onSnapshot: onSnapshot
+        )
+    }
+
+    func configuration(for stage: ToolGenerationStage) -> ToolGenerationStageConfiguration {
+        switch stage {
+        case .codingAgent:
+            codingAgent
+        case .promptRefinement:
+            promptRefinement
+        case .metadata:
+            metadata
         }
     }
 

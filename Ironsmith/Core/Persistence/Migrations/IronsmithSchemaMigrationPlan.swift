@@ -23,6 +23,7 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
         [
             IronsmithSchemaV1.self,
             IronsmithSchemaV2.self,
+            IronsmithSchemaV3.self,
         ]
     }
 
@@ -83,6 +84,22 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
                                 .flatMap(ModelInstallState.init(rawValue:))
                                 ?? .downloadable
                         }
+                    }
+
+                    try context.save()
+                }
+            ),
+            .custom(
+                fromVersion: IronsmithSchemaV2.self,
+                toVersion: IronsmithSchemaV3.self,
+                willMigrate: nil,
+                didMigrate: { context in
+                    let models = try context.fetch(FetchDescriptor<IronsmithSchemaV3.ModelConfig>())
+                    for model in models where model.source == .mlx {
+                        context.delete(model)
+                    }
+                    for model in models where model.source != .mlx {
+                        model.legacyLocalModelCleanupCompleted = true
                     }
 
                     try context.save()

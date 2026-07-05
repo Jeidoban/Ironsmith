@@ -16,8 +16,6 @@ struct SettingsModelSelectionSectionView: View {
     var body: some View {
         Section {
             selectedModelRow
-
-            // GenerationSettingsView()
         } header: {
             Text("AI Model")
         }
@@ -276,7 +274,7 @@ extension ModelConfig {
     fileprivate func sourceLabel(provider: ProviderConfig?) -> String {
         switch source {
         case .appleFoundation: "Local"
-        case .mlx: "MLX"
+        case .mlx: "Unsupported"
         case .remote: provider?.kind == .ollama ? "Local" : "Remote"
         }
     }

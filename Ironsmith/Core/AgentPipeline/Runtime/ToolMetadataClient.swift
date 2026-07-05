@@ -48,6 +48,8 @@ struct ToolMetadataRequest: Sendable {
     let userPrompt: String
     let languageModel: any LanguageModel
     let generationOptions: GenerationOptions
+    let streaming: Bool
+    let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
 }
 
 struct ToolMetadataClient: Sendable {
@@ -74,13 +76,17 @@ struct ToolMetadataClient: Sendable {
     func suggestMetadata(
         userPrompt: String,
         languageModel: any LanguageModel,
-        generationOptions: GenerationOptions
+        generationOptions: GenerationOptions,
+        streaming: Bool = ToolGenerationOptionsResolver.defaultStreaming,
+        afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) async -> ToolMetadataSuggestion {
         await suggestMetadataForRequest(
             ToolMetadataRequest(
                 userPrompt: userPrompt,
                 languageModel: languageModel,
-                generationOptions: generationOptions
+                generationOptions: generationOptions,
+                streaming: streaming,
+                afterLanguageModelInvocation: afterLanguageModelInvocation
             )
         )
     }
@@ -103,6 +109,8 @@ struct ToolMetadataClient: Sendable {
                         userPrompt: userPrompt,
                         languageModel: request.languageModel,
                         generationOptions: request.generationOptions,
+                        streaming: request.streaming,
+                        afterLanguageModelInvocation: request.afterLanguageModelInvocation,
                         fallback: fallback
                     )
                 } catch {
@@ -123,21 +131,25 @@ struct ToolMetadataClient: Sendable {
         userPrompt: String,
         languageModel: any LanguageModel,
         generationOptions: GenerationOptions,
+        streaming: Bool,
+        afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void,
         fallback: ToolMetadataSuggestion
     ) async throws -> ToolMetadataSuggestion {
         let session = LanguageModelSession(
             model: languageModel,
             instructions: metadataInstructions
         )
-        let response = try await session.respond(
+        let response = try await ToolLanguageModelResponder(
+            afterLanguageModelInvocation: afterLanguageModelInvocation
+        ).respond(
+            stage: .metadata,
+            in: session,
             to: Self.metadataPrompt(for: userPrompt),
             generating: GeneratedToolMetadata.self,
-            options: OpenAICodexGenerationOptions.sanitized(
-                generationOptions,
-                for: languageModel
-            )
+            options: generationOptions,
+            streaming: streaming
         )
-        return Self.metadataSuggestion(response.content, fallback: fallback)
+        return Self.metadataSuggestion(response, fallback: fallback)
     }
 
     nonisolated private static func metadataPrompt(for userPrompt: String) -> String {
@@ -193,11 +205,11 @@ struct ToolPromptRefinementRequest: Sendable {
     let sandboxEnabled: Bool
     let languageModel: any LanguageModel
     let generationOptions: GenerationOptions
+    let streaming: Bool
+    let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
 }
 
 struct ToolPromptRefinementClient: Sendable {
-    nonisolated private static let maximumResponseTokens = 1000
-
     private var refinePromptForRequest:
         @Sendable (_ request: ToolPromptRefinementRequest) async -> String?
 
@@ -220,7 +232,9 @@ struct ToolPromptRefinementClient: Sendable {
         languageModel: any LanguageModel,
         generationOptions: GenerationOptions,
         appKind: ToolAppKind = .window,
-        sandboxEnabled: Bool = true
+        sandboxEnabled: Bool = true,
+        streaming: Bool = ToolGenerationOptionsResolver.defaultStreaming,
+        afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) async -> String? {
         await refinePromptForRequest(
             ToolPromptRefinementRequest(
@@ -228,7 +242,9 @@ struct ToolPromptRefinementClient: Sendable {
                 appKind: appKind,
                 sandboxEnabled: sandboxEnabled,
                 languageModel: languageModel,
-                generationOptions: generationOptions
+                generationOptions: generationOptions,
+                streaming: streaming,
+                afterLanguageModelInvocation: afterLanguageModelInvocation
             )
         )
     }
@@ -246,17 +262,19 @@ struct ToolPromptRefinementClient: Sendable {
                         model: request.languageModel,
                         instructions: promptRefinementInstructions
                     )
-                    let response = try await Self.streamPromptRefinement(
+                    let response = try await ToolLanguageModelResponder(
+                        afterLanguageModelInvocation: request.afterLanguageModelInvocation
+                    ).respond(
+                        stage: .promptRefinement,
                         in: session,
-                        prompt: Self.promptRefinementPrompt(
+                        to: Self.promptRefinementPrompt(
                             for: request.userPrompt,
                             appKind: request.appKind,
                             sandboxEnabled: request.sandboxEnabled
                         ),
-                        options: Self.promptRefinementOptions(
-                            from: request.generationOptions,
-                            for: request.languageModel
-                        )
+                        generating: String.self,
+                        options: request.generationOptions,
+                        streaming: request.streaming
                     )
                     let prompt = cleanedRefinedPrompt(response)
                     if prompt.isEmpty {
@@ -292,22 +310,6 @@ struct ToolPromptRefinementClient: Sendable {
             })
     }
 
-    private static func streamPromptRefinement(
-        in session: LanguageModelSession,
-        prompt: String,
-        options: GenerationOptions
-    ) async throws -> String {
-        var latest = ""
-        let stream = session.streamResponse(
-            to: prompt,
-            options: options
-        )
-        for try await snapshot in stream {
-            latest = snapshot.content
-        }
-        return latest
-    }
-
     nonisolated private static func promptRefinementPrompt(
         for userPrompt: String,
         appKind: ToolAppKind,
@@ -323,15 +325,6 @@ struct ToolPromptRefinementClient: Sendable {
         User request:
         \(userPrompt)
         """
-    }
-
-    nonisolated private static func promptRefinementOptions(
-        from generationOptions: GenerationOptions,
-        for languageModel: any LanguageModel
-    ) -> GenerationOptions {
-        var options = generationOptions
-        options.maximumResponseTokens = maximumResponseTokens
-        return OpenAICodexGenerationOptions.sanitized(options, for: languageModel)
     }
 
     nonisolated private static let promptRefinementInstructions = """

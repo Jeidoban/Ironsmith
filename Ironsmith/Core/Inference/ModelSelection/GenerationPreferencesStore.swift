@@ -4,22 +4,11 @@ import Observation
 @MainActor
 @Observable
 final class GenerationPreferencesStore {
-    static let availableKVCacheBits = [2, 3, 4, 6, 8]
-
     private enum Key {
-        static let customOptionsEnabled = "generation.customOptionsEnabled"
-        static let temperature = "generation.temperature"
-        static let maximumResponseTokens = "generation.maximumResponseTokens"
-        static let mlxKVCacheMaxSize = "generation.mlxKVCacheMaxSize"
-        static let mlxKVCacheBitsEnabled = "generation.mlxKVCacheBitsEnabled"
-        static let mlxKVCacheBits = "generation.mlxKVCacheBits"
         static let generatedPromptRefinementEnabled = "generation.generatedPromptRefinementEnabled"
         static let agentPipelineProfile = "generation.agentPipelineProfile"
     }
 
-    var customOptionsEnabled: Bool {
-        didSet { userDefaults.set(customOptionsEnabled, forKey: Key.customOptionsEnabled) }
-    }
     var generatedPromptRefinementEnabled: Bool {
         didSet {
             userDefaults.set(generatedPromptRefinementEnabled, forKey: Key.generatedPromptRefinementEnabled)
@@ -29,21 +18,6 @@ final class GenerationPreferencesStore {
         didSet {
             userDefaults.set(agentPipelineProfile.rawValue, forKey: Key.agentPipelineProfile)
         }
-    }
-    var temperature: Double {
-        didSet { userDefaults.set(temperature, forKey: Key.temperature) }
-    }
-    var maximumResponseTokens: Int {
-        didSet { userDefaults.set(maximumResponseTokens, forKey: Key.maximumResponseTokens) }
-    }
-    var mlxKVCacheMaxSize: Int {
-        didSet { userDefaults.set(mlxKVCacheMaxSize, forKey: Key.mlxKVCacheMaxSize) }
-    }
-    var mlxKVCacheBitsEnabled: Bool {
-        didSet { userDefaults.set(mlxKVCacheBitsEnabled, forKey: Key.mlxKVCacheBitsEnabled) }
-    }
-    var mlxKVCacheBits: Int {
-        didSet { userDefaults.set(mlxKVCacheBits, forKey: Key.mlxKVCacheBits) }
     }
     var generatedAppMicrophoneAccessEnabled: Bool {
         didSet {
@@ -134,7 +108,6 @@ final class GenerationPreferencesStore {
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        self.customOptionsEnabled = userDefaults.bool(forKey: Key.customOptionsEnabled)
         self.generatedPromptRefinementEnabled = userDefaults.object(
             forKey: Key.generatedPromptRefinementEnabled
         ) == nil
@@ -143,19 +116,6 @@ final class GenerationPreferencesStore {
         self.agentPipelineProfile = userDefaults
             .string(forKey: Key.agentPipelineProfile)
             .flatMap(AgentPipelineProfilePreference.init(rawValue:)) ?? .automatic
-        self.temperature = userDefaults.object(forKey: Key.temperature) == nil
-            ? ModelGenerationDefaults.foundation.temperature ?? 0.7
-            : userDefaults.double(forKey: Key.temperature)
-        self.maximumResponseTokens = userDefaults.object(forKey: Key.maximumResponseTokens) == nil
-            ? ModelGenerationDefaults.remoteMaximumResponseTokens
-            : userDefaults.integer(forKey: Key.maximumResponseTokens)
-        self.mlxKVCacheMaxSize = userDefaults.object(forKey: Key.mlxKVCacheMaxSize) == nil
-            ? ModelGenerationDefaults.qwenDefaults.mlxKVCacheMaxSize ?? 4096
-            : userDefaults.integer(forKey: Key.mlxKVCacheMaxSize)
-        self.mlxKVCacheBitsEnabled = userDefaults.bool(forKey: Key.mlxKVCacheBitsEnabled)
-        self.mlxKVCacheBits = userDefaults.object(forKey: Key.mlxKVCacheBits) == nil
-            ? ModelGenerationDefaults.qwenDefaults.mlxKVCacheBits ?? 4
-            : userDefaults.integer(forKey: Key.mlxKVCacheBits)
         self.generatedAppMicrophoneAccessEnabled = userDefaults.bool(
             forKey: GeneratedAppResourcePermission.microphone.userDefaultsKey
         )

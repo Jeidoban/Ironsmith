@@ -1,8 +1,5 @@
 import AnyLanguageModel
 import Foundation
-#if canImport(Hub)
-import Hub
-#endif
 
 struct LanguageModelClient {
     var makeLanguageModel: (ModelConfig, ProviderConfig?) async throws -> any LanguageModel
@@ -33,7 +30,7 @@ extension LanguageModelClient {
         for model: ModelConfig,
         provider: ProviderConfig?,
         credentialClient: CredentialClient,
-        localModelClient: LocalModelClient,
+        localModelClient _: LocalModelClient,
         accountClient: IronsmithAccountClient,
         openAICodexAuthClient: OpenAICodexAuthClient
     ) async throws -> any LanguageModel {
@@ -42,16 +39,7 @@ extension LanguageModelClient {
             return SystemLanguageModel.default
 
         case .mlx:
-            #if canImport(Hub)
-            let hub = try localModelClient.makeHubAPI()
-            guard let hub = hub as? HubApi else {
-                throw LanguageModelClientError.mlxUnavailable
-            }
-            let directory = model.localDirectoryPath.map(URL.init(fileURLWithPath:))
-            return MLXLanguageModel(modelId: model.identifier, hub: hub, directory: directory)
-            #else
-            throw LanguageModelClientError.mlxUnavailable
-            #endif
+            throw LanguageModelClientError.unsupportedLegacyLocalModel
 
         case .remote:
             guard let provider else {
@@ -210,7 +198,7 @@ enum LanguageModelClientError: LocalizedError {
     case foundationModelsUnavailable
     case invalidProviderURL
     case missingAccountSession
-    case mlxUnavailable
+    case unsupportedLegacyLocalModel
     case missingAPIKey
     case missingProvider
 
@@ -222,8 +210,8 @@ enum LanguageModelClientError: LocalizedError {
             return "The provider URL is invalid."
         case .missingAccountSession:
             return "Sign in with Ironsmith before using Ironsmith credits."
-        case .mlxUnavailable:
-            return "MLX local AI models are unavailable in this build."
+        case .unsupportedLegacyLocalModel:
+            return "This legacy local AI model is no longer supported."
         case .missingAPIKey:
             return "This provider is missing an API key."
         case .missingProvider:

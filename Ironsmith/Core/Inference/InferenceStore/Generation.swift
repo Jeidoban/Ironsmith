@@ -1,4 +1,3 @@
-import AnyLanguageModel
 import Foundation
 
 extension InferenceStore {
@@ -11,12 +10,26 @@ extension InferenceStore {
         try validateSelectedModelCanGenerate(selectedModel, provider: provider)
         let languageModel = try await dependencies.languageModelClient.makeLanguageModel(
             selectedModel, provider)
-        let options = selectedModel.generationOptions(preferences: generationPreferences)
         let shouldRefreshIronsmithCredits = provider?.kind == .ironsmith
         return AgentLanguageModelContext(
-            languageModel: languageModel,
-            metadataLanguageModel: AnyLanguageModel.SystemLanguageModel.default,
-            options: options,
+            codingAgent: ToolGenerationOptionsResolver.stageConfiguration(
+                for: .codingAgent,
+                model: selectedModel,
+                provider: provider,
+                languageModel: languageModel
+            ),
+            promptRefinement: ToolGenerationOptionsResolver.stageConfiguration(
+                for: .promptRefinement,
+                model: selectedModel,
+                provider: provider,
+                languageModel: languageModel
+            ),
+            metadata: ToolGenerationOptionsResolver.stageConfiguration(
+                for: .metadata,
+                model: selectedModel,
+                provider: provider,
+                languageModel: languageModel
+            ),
             pipelineConfiguration: pipelineConfiguration(for: selectedModel, provider: provider),
             promptRefinementEnabled: generationPreferences.generatedPromptRefinementEnabled,
             afterLanguageModelInvocation: { [weak self] in
@@ -119,27 +132,11 @@ extension InferenceStore {
         case .appleFoundation:
             return .deterministicOnly
         case .mlx:
-            guard !usesDeterministicOnlyMLXRepair(model) else {
-                return .deterministicOnly
-            }
-            return .modelSearchReplace(
-                maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn
-            )
+            return .deterministicOnly
         case .remote:
             return .modelSearchReplace(
                 maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn
             )
         }
-    }
-
-    private func usesDeterministicOnlyMLXRepair(_ model: ModelConfig) -> Bool {
-        let searchableName = "\(model.identifier) \(model.displayName)".lowercased()
-        guard searchableName.contains("qwen") else {
-            return false
-        }
-        return searchableName.range(
-            of: #"(^|[^a-z0-9])(4b|9b)([^a-z0-9]|$)"#,
-            options: .regularExpression
-        ) != nil
     }
 }
