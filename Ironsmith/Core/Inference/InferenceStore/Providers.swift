@@ -153,6 +153,15 @@ extension InferenceStore {
                 return
             }
         }
+        if provider.kind == .openAI {
+            do {
+                try dependencies.openAICodexAuthClient.signOut()
+                openAICodexCredential = nil
+            } catch {
+                presentError(error)
+                return
+            }
+        }
 
         remoteModels.removeAll { $0.providerIdentifier == identifier }
         providerConnectionIssues.removeValue(forKey: identifier)
@@ -281,7 +290,8 @@ extension InferenceStore {
         }
 
         if provider.authMode == .apiKey,
-            apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            !(provider.kind == .openAI && hasOpenAICodexCredential)
         {
             throw ProviderCreationError.missingAPIKey
         }

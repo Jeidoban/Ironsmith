@@ -59,6 +59,11 @@ struct ModelGenerationDefaults: Equatable {
         case .mlx:
             return MLXModelCatalog.generationDefaultsByIdentifier[model.identifier] ?? .qwenDefaults
         case .remote:
+            if model.isOpenAICodexModel {
+                var defaults = Self.remote
+                defaults.maximumResponseTokens = nil
+                return defaults
+            }
             if model.providerIdentifier == ProviderKind.ollama.rawValue {
                 return OllamaModelCatalog.generationDefaultsByIdentifier[model.identifier] ?? .ollamaDefaults
             }
@@ -114,6 +119,12 @@ extension ModelConfig {
             options[custom: OllamaLanguageModel.self] = ollamaOptions
         }
 
+        if source == .remote, isOpenAICodexModel {
+            options[custom: OpenAILanguageModel.self] = OpenAILanguageModel.CustomGenerationOptions(
+                store: false
+            )
+        }
+
         return options
     }
 
@@ -122,6 +133,9 @@ extension ModelConfig {
         for defaults: ModelGenerationDefaults,
         preferences: GenerationPreferencesStore
     ) -> Int? {
+        if isOpenAICodexModel {
+            return nil
+        }
         if preferences.customOptionsEnabled {
             return preferences.maximumResponseTokens
         }

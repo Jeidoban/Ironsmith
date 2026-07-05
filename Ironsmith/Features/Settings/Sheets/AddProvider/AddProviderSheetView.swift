@@ -1,4 +1,5 @@
 import AuthenticationServices
+import AppKit
 import SwiftUI
 
 struct AddProviderSheetView: View {
@@ -13,9 +14,14 @@ struct AddProviderSheetView: View {
     @State private var baseURLString = ""
     @State private var apiKey = ""
     @State private var isSaving = false
+    @State private var isSigningInToChatGPT = false
 
     private var isCustomOpenAICompatible: Bool {
         selectedChoice?.kind == .customOpenAICompatible
+    }
+
+    private var isOpenAI: Bool {
+        selectedChoice?.kind == .openAI
     }
 
     private var isIronsmith: Bool {
@@ -114,27 +120,53 @@ struct AddProviderSheetView: View {
                 }
             }
 
-            Section {
-                if isCustomOpenAICompatible {
-                    TextField("Display Name", text: $displayName, prompt: Text("LM Studio"))
+            if isOpenAI {
+                Section {
+                    SecureField("API Key", text: $apiKey, prompt: Text("Optional"))
+                } header: {
+                    Text("API Key")
                 }
 
-                if usesEditableConnection {
-                    TextField(
-                        isOllama ? "Server URL" : "Base URL",
-                        text: $baseURLString,
-                        prompt: Text(
-                            isOllama ? "http://localhost:11434" : "http://localhost:1234/v1")
+                Section {
+                    HStack {
+                        LabeledContent("ChatGPT") {
+                            Text(openAIChatGPTStatusText)
+                                .foregroundStyle(inferenceStore.hasOpenAICodexCredential ? .primary : .secondary)
+                        }
+
+                        Spacer()
+
+                        Button(openAIChatGPTButtonTitle) {
+                            signInWithOpenAIChatGPT()
+                        }
+                        .disabled(isSaving || isSigningInToChatGPT)
+                    }
+                } header: {
+                    Text("ChatGPT")
+                }
+            } else {
+                Section {
+                    if isCustomOpenAICompatible {
+                        TextField("Display Name", text: $displayName, prompt: Text("LM Studio"))
+                    }
+
+                    if usesEditableConnection {
+                        TextField(
+                            isOllama ? "Server URL" : "Base URL",
+                            text: $baseURLString,
+                            prompt: Text(
+                                isOllama ? "http://localhost:11434" : "http://localhost:1234/v1")
+                        )
+                    }
+
+                    SecureField(
+                        "API Key",
+                        text: $apiKey,
+                        prompt: Text(isCustomOpenAICompatible || isOllama ? "Optional" : "Required")
                     )
+                } header: {
+                    Text(usesEditableConnection ? "Connection" : "Authentication")
                 }
-
-                SecureField(
-                    "API Key",
-                    text: $apiKey,
-                    prompt: Text(isCustomOpenAICompatible || isOllama ? "Optional" : "Required")
-                )
-            } header: {
-                Text(usesEditableConnection ? "Connection" : "Authentication")
             }
         }
         .formStyle(.grouped)
@@ -158,6 +190,11 @@ struct AddProviderSheetView: View {
             return trimmedBaseURLString.isEmpty
                 || (ProviderBaseURLValidator.usesLoopbackHost(trimmedBaseURLString)
                     && inferenceStore.ollamaInstallationStatus != .installed)
+        }
+
+        if isOpenAI {
+            return apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !inferenceStore.hasOpenAICodexCredential
         }
 
         return apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -184,6 +221,14 @@ struct AddProviderSheetView: View {
             displayName = ""
             baseURLString = ""
         }
+    }
+
+    private var openAIChatGPTStatusText: String {
+        inferenceStore.openAICodexCredential?.statusText ?? "Not signed in"
+    }
+
+    private var openAIChatGPTButtonTitle: String {
+        isSigningInToChatGPT ? "Signing In..." : "Sign In"
     }
 
     private func signInWithAppleOAuth() {
@@ -226,6 +271,45 @@ struct AddProviderSheetView: View {
                     onProviderAdded(selectedChoice.kind)
                     dismiss()
                 }
+            }
+        }
+    }
+
+    private func signInWithOpenAIChatGPT() {
+        guard !isSaving, !isSigningInToChatGPT else { return }
+        guard let selectedChoice, selectedChoice.kind == .openAI else { return }
+        isSigningInToChatGPT = true
+
+        Task {
+            let didSignIn = await inferenceStore.signInToOpenAIChatGPT { @MainActor url in
+                guard NSWorkspace.shared.open(url) else {
+                    throw OpenAICodexAuthClientError.browserLaunchFailed
+                }
+            }
+
+            if didSignIn {
+                await MainActor.run {
+                    isSaving = true
+                }
+                let didAdd = await inferenceStore.addProvider(
+                    choice: selectedChoice,
+                    apiKey: apiKey,
+                    displayName: displayName,
+                    baseURLString: baseURLString
+                )
+                await MainActor.run {
+                    isSaving = false
+                    isSigningInToChatGPT = false
+                    if didAdd {
+                        onProviderAdded(.openAI)
+                        dismiss()
+                    }
+                }
+                return
+            }
+
+            await MainActor.run {
+                isSigningInToChatGPT = false
             }
         }
     }

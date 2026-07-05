@@ -7,11 +7,22 @@ struct RemoteModelClient {
 extension RemoteModelClient {
     static let discoveryTimeout: TimeInterval = 10
 
-    static func live(accountClient: IronsmithAccountClient = .unconfigured) -> Self {
+    static func live(
+        accountClient: IronsmithAccountClient = .unconfigured,
+        openAICodexAuthClient: OpenAICodexAuthClient = .unconfigured
+    ) -> Self {
         Self { provider, apiKey in
             if provider.kind == .ironsmith {
                 let data = try await accountClient.invokeAPIData("api/v1/models", .get)
                 return try Self.decodeModels(data, for: provider)
+            }
+
+            if provider.kind == .openAI {
+                return try await Self.discoverOpenAIModels(
+                    provider: provider,
+                    apiKey: apiKey,
+                    openAICodexAuthClient: openAICodexAuthClient
+                )
             }
 
             let request = try Self.makeModelListRequest(for: provider, apiKey: apiKey)
@@ -26,6 +37,48 @@ extension RemoteModelClient {
 
             return try Self.decodeModels(data, for: provider)
         }
+    }
+
+    private static func discoverOpenAIModels(
+        provider: ProviderConfig,
+        apiKey: String?,
+        openAICodexAuthClient: OpenAICodexAuthClient
+    ) async throws -> [ModelConfig] {
+        var models: [ModelConfig] = []
+        var firstError: Error?
+
+        if let apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !apiKey.isEmpty {
+            do {
+                let request = try makeModelListRequest(for: provider, apiKey: apiKey)
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw RemoteModelDiscoveryError.invalidResponse
+                }
+                guard (200...299).contains(httpResponse.statusCode) else {
+                    throw RemoteModelDiscoveryError.fetchFailed(statusCode: httpResponse.statusCode)
+                }
+                models.append(contentsOf: try decodeModels(data, for: provider))
+            } catch {
+                firstError = error
+            }
+        }
+
+        do {
+            let codexModels = try await openAICodexAuthClient.discoverModels()
+            models.append(contentsOf: makeCodexModelConfigs(codexModels, provider: provider))
+        } catch OpenAICodexAuthClientError.missingCredential {
+        } catch {
+            firstError = firstError ?? error
+        }
+
+        if models.isEmpty, let firstError {
+            throw firstError
+        }
+
+        return models
+            .removingDuplicateSelectionIdentifiers()
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
     static func makeModelListRequest(for provider: ProviderConfig, apiKey: String?) throws -> URLRequest {
@@ -134,6 +187,21 @@ extension RemoteModelClient {
             .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
+    static func makeCodexModelConfigs(
+        _ codexModels: [OpenAICodexModel],
+        provider: ProviderConfig
+    ) -> [ModelConfig] {
+        codexModels.map { model in
+            ModelConfig(
+                identifier: OpenAICodexBackend.codexModelIdentifier(for: model.identifier),
+                displayName: "\(model.displayName) (Codex)",
+                providerIdentifier: provider.identifier,
+                source: .remote,
+                installState: .installed
+            )
+        }
+    }
+
     private static func filterDiscoverableModels(
         _ entries: [(identifier: String, displayName: String)],
         for providerKind: ProviderKind
@@ -208,6 +276,15 @@ extension RemoteModelClient {
                 return true
             }
             return !identifiers.contains(stableAlias)
+        }
+    }
+}
+
+private extension Array where Element == ModelConfig {
+    func removingDuplicateSelectionIdentifiers() -> [ModelConfig] {
+        var seen = Set<String>()
+        return filter { model in
+            seen.insert(model.selectionIdentifier).inserted
         }
     }
 }

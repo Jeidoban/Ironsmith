@@ -1,4 +1,5 @@
 import Supabase
+import AppKit
 import SwiftUI
 
 struct ProviderEditorSheetView: View {
@@ -15,6 +16,8 @@ struct ProviderEditorSheetView: View {
     @State private var isConfirmingAccountDeletionWithCredits = false
     @State private var isShowingCreditPacks = false
     @State private var isSigningOut = false
+    @State private var isSigningInToChatGPT = false
+    @State private var isSigningOutOfChatGPT = false
     @State private var isDeletingAccount = false
 
     private var isCustomOpenAICompatible: Bool {
@@ -23,6 +26,10 @@ struct ProviderEditorSheetView: View {
 
     private var isIronsmith: Bool {
         provider.kind == .ironsmith
+    }
+
+    private var isOpenAI: Bool {
+        provider.kind == .openAI
     }
 
     private var isOllama: Bool {
@@ -71,6 +78,8 @@ struct ProviderEditorSheetView: View {
                     } header: {
                         Text("Billing")
                     }
+                } else if isOpenAI {
+                    openAIAuthenticationSections
                 } else {
                     if usesEditableConnection {
                         Section {
@@ -169,6 +178,9 @@ struct ProviderEditorSheetView: View {
             if isIronsmith {
                 inferenceStore.refreshIronsmithSession()
             }
+            if isOpenAI {
+                inferenceStore.refreshOpenAICodexCredential()
+            }
         }
         .task(id: provider.identifier) {
             if isIronsmith {
@@ -238,6 +250,40 @@ struct ProviderEditorSheetView: View {
     }
 
     @ViewBuilder
+    private var openAIAuthenticationSections: some View {
+        Section {
+            SecureField("API Key", text: $apiKey, prompt: Text("Optional"))
+        } header: {
+            Text("API Key")
+        }
+
+        Section {
+            HStack {
+                LabeledContent("ChatGPT") {
+                    Text(openAIChatGPTStatusText)
+                        .foregroundStyle(inferenceStore.hasOpenAICodexCredential ? .primary : .secondary)
+                }
+
+                Spacer()
+
+                if inferenceStore.hasOpenAICodexCredential {
+                    Button(openAIChatGPTSignOutTitle) {
+                        signOutOpenAIChatGPT()
+                    }
+                    .disabled(isSigningInToChatGPT || isSigningOutOfChatGPT)
+                } else {
+                    Button(openAIChatGPTSignInTitle) {
+                        signInWithOpenAIChatGPT()
+                    }
+                    .disabled(isSigningInToChatGPT || isSigningOutOfChatGPT)
+                }
+            }
+        } header: {
+            Text("ChatGPT")
+        }
+    }
+
+    @ViewBuilder
     private var ironsmithAccountRows: some View {
         if let summary = inferenceStore.ironsmithAccountSummary {
             LabeledContent("Email") {
@@ -267,6 +313,18 @@ struct ProviderEditorSheetView: View {
         inferenceStore.ironsmithAccountSummary?.credits.balanceCredits
     }
 
+    private var openAIChatGPTStatusText: String {
+        inferenceStore.openAICodexCredential?.statusText ?? "Not signed in"
+    }
+
+    private var openAIChatGPTSignInTitle: String {
+        isSigningInToChatGPT ? "Signing In..." : "Sign In"
+    }
+
+    private var openAIChatGPTSignOutTitle: String {
+        isSigningOutOfChatGPT ? "Signing Out..." : "Sign Out"
+    }
+
     private func signOut() {
         guard !isSigningOut else { return }
 
@@ -292,6 +350,43 @@ struct ProviderEditorSheetView: View {
                 isDeletingAccount = false
                 if didDelete {
                     dismiss()
+                }
+            }
+        }
+    }
+
+    private func signInWithOpenAIChatGPT() {
+        guard !isSigningInToChatGPT, !isSigningOutOfChatGPT else { return }
+
+        isSigningInToChatGPT = true
+        Task {
+            let didSignIn = await inferenceStore.signInToOpenAIChatGPT { @MainActor url in
+                guard NSWorkspace.shared.open(url) else {
+                    throw OpenAICodexAuthClientError.browserLaunchFailed
+                }
+            }
+
+            await MainActor.run {
+                isSigningInToChatGPT = false
+                if didSignIn {
+                    inferenceStore.refreshOpenAICodexCredential()
+                }
+            }
+        }
+    }
+
+    private func signOutOpenAIChatGPT() {
+        guard !isSigningInToChatGPT, !isSigningOutOfChatGPT else { return }
+
+        isSigningOutOfChatGPT = true
+        Task {
+            let didSignOut = await MainActor.run {
+                inferenceStore.signOutOpenAIChatGPT(provider: provider)
+            }
+            await MainActor.run {
+                isSigningOutOfChatGPT = false
+                if didSignOut {
+                    inferenceStore.refreshOpenAICodexCredential()
                 }
             }
         }

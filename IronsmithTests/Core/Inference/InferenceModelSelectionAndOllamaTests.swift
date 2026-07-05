@@ -134,6 +134,72 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func languageModelClientBuildsOpenAICodexLanguageModel() async throws {
+        let provider = ProviderCatalog.makeProvider(for: .openAI)!
+        let model = ModelConfig(
+            identifier: "codex:gpt-5.5",
+            displayName: "GPT-5.5 (Codex)",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let authClient = OpenAICodexAuthClient(
+            credential: {
+                OpenAICodexCredential(accessToken: "codex-token", accountID: "account-id")
+            },
+            signIn: { _ in
+                OpenAICodexCredential(accessToken: "codex-token", accountID: "account-id")
+            },
+            signOut: {},
+            validCredential: {
+                OpenAICodexCredential(accessToken: "codex-token", accountID: "account-id")
+            },
+            discoverModels: { [] }
+        )
+        let client = LanguageModelClient.live(
+            credentialClient: CredentialClient(
+                loadAPIKey: { _ in nil },
+                saveAPIKey: { _, _ in },
+                deleteAPIKey: { _ in }
+            ),
+            localModelClient: Self.fakeLocalModelClient(),
+            openAICodexAuthClient: authClient
+        )
+
+        let languageModel = try await client.makeLanguageModel(model, provider)
+        let openAIModel = try #require(languageModel as? OpenAILanguageModel)
+
+        #expect(openAIModel.model == "gpt-5.5")
+        #expect(openAIModel.baseURL == OpenAICodexBackend.backendBaseURL)
+    }
+
+    @MainActor
+    @Test
+    func openAICodexGenerationOptionsOmitMaxTokensAndDisableStorage() {
+        let model = ModelConfig(
+            identifier: "codex:gpt-5.5",
+            displayName: "GPT-5.5 (Codex)",
+            providerIdentifier: ProviderKind.openAI.rawValue,
+            source: .remote,
+            installState: .installed
+        )
+
+        let options = model.generationOptions(preferences: Self.generationPreferences())
+        let openAIOptions = options[custom: OpenAILanguageModel.self]
+
+        #expect(options.maximumResponseTokens == nil)
+        #expect(openAIOptions?.store == false)
+
+        let customPreferences = Self.generationPreferences()
+        customPreferences.customOptionsEnabled = true
+        customPreferences.maximumResponseTokens = 8192
+
+        let customOptions = model.generationOptions(preferences: customPreferences)
+        #expect(customOptions.maximumResponseTokens == nil)
+    }
+
+    @MainActor
+    @Test
     func selectionIdentifierWorksForPersistedAndTransientModels() {
         let localModel = ModelConfig(
             identifier: ModelConfig.appleFoundationIdentifier,

@@ -394,6 +394,58 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func openAICodexModelDiscoveryLabelsModelsInsideOpenAIProvider() async throws {
+        let provider = ProviderCatalog.makeProvider(for: .openAI)!
+        let authClient = OpenAICodexAuthClient(
+            credential: {
+                OpenAICodexCredential(accessToken: "access-token")
+            },
+            signIn: { _ in
+                OpenAICodexCredential(accessToken: "access-token")
+            },
+            signOut: {},
+            validCredential: {
+                OpenAICodexCredential(accessToken: "access-token")
+            },
+            discoverModels: {
+                [
+                    OpenAICodexModel(identifier: "gpt-5.5", displayName: "GPT-5.5"),
+                    OpenAICodexModel(identifier: "gpt-5.4-mini", displayName: "GPT-5.4 Mini"),
+                ]
+            }
+        )
+        let client = RemoteModelClient.live(openAICodexAuthClient: authClient)
+
+        let models = try await client.discoverModels(provider, nil)
+
+        #expect(models.map(\.identifier) == ["codex:gpt-5.4-mini", "codex:gpt-5.5"])
+        #expect(models.map(\.displayName) == ["GPT-5.4 Mini (Codex)", "GPT-5.5 (Codex)"])
+        #expect(models.allSatisfy { $0.providerIdentifier == provider.identifier })
+    }
+
+    @Test
+    func openAICodexModelDecoderHandlesCatalogShapes() throws {
+        let data = """
+        {
+          "models": [
+            {"id": "gpt-5.5", "display_name": "GPT-5.5"},
+            {"slug": "o4-mini", "title": "o4 mini"},
+            {"id": "codex-auto-review", "display_name": "Codex Auto Review"},
+            {"id": "gpt-image-1", "display_name": "GPT Image"},
+            {"id": "text-embedding-3-small", "display_name": "Embedding"},
+            {"id": "gpt-5.5", "display_name": "Duplicate"}
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let models = try OpenAICodexAuthClient.decodeModels(data)
+
+        #expect(models.map(\.identifier) == ["gpt-5.5", "o4-mini"])
+        #expect(models.map(\.displayName) == ["GPT-5.5", "o4 mini"])
+    }
+
+    @MainActor
+    @Test
     func customOpenAICompatibleDiscoveryAllowsNonOpenAIPrefixes() throws {
         let customProvider = ProviderConfig(
             identifier: "custom.test",

@@ -53,6 +53,7 @@ final class InferenceStore {
     var startingOllamaProviderIDs: Set<String> = []
     var selectedModelFallbackMessage: String?
     var ironsmithSession: Session?
+    var openAICodexCredential: OpenAICodexCredential?
     var ironsmithAccountSummary: IronsmithAccountSummary?
     var ironsmithCreditPacks: [IronsmithCreditPack] = []
     var isRefreshingIronsmithAccount = false
@@ -111,6 +112,7 @@ final class InferenceStore {
         }
 
         ironsmithSession = dependencies.accountClient.currentSession()
+        refreshOpenAICodexCredential()
         let selectedRemoteProvider = providers.first { provider in
             provider.kind != .local
                 && selectedModelID?.hasPrefix("\(provider.identifier)::") == true

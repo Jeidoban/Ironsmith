@@ -32,6 +32,28 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func openAIProviderCanBeAddedWithChatGPTCredentialOnly() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(remoteModelIDs: ["codex:gpt-5.5"])
+        )
+
+        await inferenceStore.loadIfNeeded(modelContext: context)
+        inferenceStore.openAICodexCredential = OpenAICodexCredential(accessToken: "access-token")
+
+        let didAdd = await inferenceStore.addProvider(
+            choice: .init(descriptor: ProviderCatalog.descriptor(for: .openAI)!),
+            apiKey: ""
+        )
+
+        #expect(didAdd)
+        #expect(inferenceStore.providers.contains { $0.kind == .openAI })
+        #expect(inferenceStore.apiKey(for: inferenceStore.providers.first { $0.kind == .openAI }!) == "")
+    }
+
+    @MainActor
+    @Test
     func addingProviderDoesNotWaitForRemoteModelDiscovery() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
