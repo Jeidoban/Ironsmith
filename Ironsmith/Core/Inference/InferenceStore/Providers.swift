@@ -144,19 +144,23 @@ extension InferenceStore {
         guard let repository else { return }
         guard provider.isRemovable else { return }
 
-        let identifier = provider.identifier
-        if let reference = provider.apiKeyReference {
+        if provider.kind == .openAI {
             do {
-                try dependencies.credentialClient.deleteAPIKey(reference)
+                let codexCredential = try dependencies.openAICodexAuthClient.credential()
+                if codexCredential != nil {
+                    try await dependencies.openAICodexAuthClient.signOut()
+                }
+                openAICodexCredential = nil
             } catch {
                 presentError(error)
                 return
             }
         }
-        if provider.kind == .openAI {
+
+        let identifier = provider.identifier
+        if let reference = provider.apiKeyReference {
             do {
-                try await dependencies.openAICodexAuthClient.signOut()
-                openAICodexCredential = nil
+                try dependencies.credentialClient.deleteAPIKey(reference)
             } catch {
                 presentError(error)
                 return

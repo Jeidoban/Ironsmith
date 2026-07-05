@@ -78,7 +78,8 @@ extension InferenceTests {
         ollamaPullProgresses: [OllamaPullProgress] = [],
         ollamaPullResult: Result<Void, Error> = .success(()),
         ollamaDeleteResult: Result<Void, Error> = .success(()),
-        accountClient: IronsmithAccountClient = .unconfigured
+        accountClient: IronsmithAccountClient = .unconfigured,
+        openAICodexAuthClient: OpenAICodexAuthClient = .unconfigured
     ) -> InferenceDependencies {
         let credentialBox = CredentialBox()
         return InferenceDependencies(
@@ -94,6 +95,7 @@ extension InferenceTests {
                 }
             ),
             accountClient: accountClient,
+            openAICodexAuthClient: openAICodexAuthClient,
             remoteModelClient: RemoteModelClient { provider, _ in
                 await remoteDiscoveryHook?()
                 if let remoteDiscoveryScript {
