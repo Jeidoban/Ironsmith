@@ -1,15 +1,5 @@
 import Foundation
 
-/*
- Legacy PKCE OAuth dependencies, commented out for reference only. Codex CLI now owns
- ChatGPT browser login and writes auth.json under Ironsmith's CODEX_HOME.
-
- import CryptoKit
- @preconcurrency import Network
-
- private typealias OpenAICodexOAuthLaunchFlow = @MainActor @Sendable (_ url: URL) async throws -> Void
- */
-
 nonisolated struct OpenAICodexAuthClient {
     static let refreshWindow: TimeInterval = 5 * 60
 
@@ -66,65 +56,6 @@ extension OpenAICodexAuthClient {
             discoverModels: { throw OpenAICodexAuthClientError.missingCredential }
         )
     }
-
-    /*
-    Legacy PKCE OAuth implementation, commented out for reference only. The live path
-    invokes Codex CLI login/logout and reads auth.json.
-
-    nonisolated private static func performBrowserSignIn(
-        launchFlow: @escaping OpenAICodexOAuthLaunchFlow
-    ) async throws -> OpenAICodexCredential {
-        let pkce = try OpenAICodexPKCE()
-        let state = OpenAICodexRandom.base64URLString(byteCount: 32)
-        let callbackReceiver = OpenAICodexLoopbackOAuthReceiver(
-            port: OpenAICodexBackend.redirectPort,
-            path: OpenAICodexBackend.redirectPath,
-            expectedState: state
-        )
-        let authorizeURL = try authorizationURL(pkce: pkce, state: state)
-
-        let code = try await callbackReceiver.receiveCode {
-            try await launchFlow(authorizeURL)
-        }
-        let tokenResponse = try await exchangeCodeForTokens(code: code, verifier: pkce.verifier)
-        return credential(from: tokenResponse)
-    }
-
-    nonisolated private static func authorizationURL(pkce: OpenAICodexPKCE, state: String) throws -> URL {
-        var components = URLComponents(url: OpenAICodexBackend.authorizeURL, resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "client_id", value: OpenAICodexBackend.clientID),
-            URLQueryItem(name: "redirect_uri", value: OpenAICodexBackend.redirectURI),
-            URLQueryItem(name: "scope", value: "openid profile email offline_access"),
-            URLQueryItem(name: "code_challenge", value: pkce.challenge),
-            URLQueryItem(name: "code_challenge_method", value: "S256"),
-            URLQueryItem(name: "state", value: state),
-            URLQueryItem(name: "id_token_add_organizations", value: "true"),
-            URLQueryItem(name: "codex_cli_simplified_flow", value: "true"),
-            URLQueryItem(name: "originator", value: "ironsmith"),
-        ]
-        guard let url = components?.url else {
-            throw OpenAICodexAuthClientError.invalidAuthorizationURL
-        }
-        return url
-    }
-
-    nonisolated private static func exchangeCodeForTokens(
-        code: String,
-        verifier: String
-    ) async throws -> OpenAICodexTokenResponse {
-        try await tokenRequest(
-            form: [
-                "grant_type": "authorization_code",
-                "client_id": OpenAICodexBackend.clientID,
-                "code": code,
-                "code_verifier": verifier,
-                "redirect_uri": OpenAICodexBackend.redirectURI,
-            ]
-        )
-    }
-    */
 
     nonisolated static func refreshCredential(
         _ credential: OpenAICodexCredential
@@ -350,40 +281,6 @@ nonisolated struct OpenAICodexTokenResponse: Decodable {
     }
 }
 
-/*
-Legacy PKCE OAuth helpers, commented out for reference only.
-
-nonisolated private struct OpenAICodexPKCE {
-    let verifier: String
-    let challenge: String
-
-    init() throws {
-        verifier = OpenAICodexRandom.base64URLString(byteCount: 64)
-        let digest = SHA256.hash(data: Data(verifier.utf8))
-        challenge = Data(digest).openAICodexBase64URLEncodedString()
-    }
-}
-
-nonisolated private enum OpenAICodexRandom {
-    nonisolated static func base64URLString(byteCount: Int) -> String {
-        var data = Data(count: byteCount)
-        _ = data.withUnsafeMutableBytes {
-            SecRandomCopyBytes(kSecRandomDefault, byteCount, $0.baseAddress!)
-        }
-        return data.openAICodexBase64URLEncodedString()
-    }
-}
-
-private extension Data {
-    nonisolated func openAICodexBase64URLEncodedString() -> String {
-        base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-}
-*/
-
 nonisolated struct OpenAICodexJWTClaims {
     var accountID: String?
     var email: String?
@@ -447,17 +344,6 @@ nonisolated enum OpenAICodexAuthClientError: LocalizedError, Equatable {
     case codexCommandFailed(String)
     case requestFailed(statusCode: Int, message: String)
 
-    /*
-     Legacy PKCE OAuth error cases, commented out for reference only.
-
-     case browserLaunchFailed
-     case callbackTimedOut
-     case invalidAuthorizationURL
-     case invalidCallback
-     case oauthFailed(String)
-     case stateMismatch
-     */
-
     var errorDescription: String? {
         switch self {
         case .invalidAuthFile:
@@ -478,21 +364,4 @@ nonisolated enum OpenAICodexAuthClientError: LocalizedError, Equatable {
             return "ChatGPT returned HTTP \(statusCode): \(message)"
         }
     }
-
-    /*
-     Legacy PKCE OAuth error descriptions, commented out for reference only.
-
-     case .browserLaunchFailed:
-         return "Could not open the ChatGPT sign-in page."
-     case .callbackTimedOut:
-         return "ChatGPT sign-in timed out."
-     case .invalidAuthorizationURL:
-         return "Could not create the ChatGPT sign-in URL."
-     case .invalidCallback:
-         return "ChatGPT returned an invalid sign-in callback."
-     case .oauthFailed(let message):
-         return "ChatGPT sign-in failed: \(message)"
-     case .stateMismatch:
-         return "ChatGPT sign-in returned an unexpected state."
-     */
 }
