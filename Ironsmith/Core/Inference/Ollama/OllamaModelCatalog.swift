@@ -5,20 +5,17 @@ enum OllamaModelCatalog {
         let displayName: String
         let identifier: String
         let memoryRequirement: MemoryRequirement
-        let generationDefaults: ModelGenerationDefaults
 
         var id: String { identifier }
 
         init(
             displayName: String,
             identifier: String,
-            memoryRequirement: MemoryRequirement,
-            generationDefaults: ModelGenerationDefaults = .ollamaDefaults
+            memoryRequirement: MemoryRequirement
         ) {
             self.displayName = displayName
             self.identifier = identifier
             self.memoryRequirement = memoryRequirement
-            self.generationDefaults = generationDefaults
         }
     }
 
@@ -99,10 +96,6 @@ enum OllamaModelCatalog {
             return Section(memoryRequirement: memoryRequirement, entries: entries)
         }
     }
-
-    static let generationDefaultsByIdentifier = Dictionary(
-        uniqueKeysWithValues: all.map { ($0.identifier, $0.generationDefaults) }
-    )
 
     static func displayName(forIdentifier identifier: String) -> String? {
         all.first {

@@ -293,7 +293,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func languageModelResponderStreamsByDefaultAndRunsSuccessHookOnce() async throws {
+    func runtimeContextResponderStreamsByDefaultAndRunsSuccessHookOnce() async throws {
         let modeCapture = InvocationModeCapture()
         let invocationCapture = InvocationCapture()
         let model = InvocationModeLanguageModel(
@@ -303,16 +303,15 @@ extension AgentPipelineTests {
         )
         let session = LanguageModelSession(model: model)
 
-        let response = try await ToolLanguageModelResponder(
-            afterLanguageModelInvocation: {
-                await invocationCapture.record()
-            }
-        ).respond(
+        let response = try await ToolGenerationRuntimeContext.respond(
             stage: .codingAgent,
             in: session,
             to: "Build a timer",
             generating: String.self,
-            options: GenerationOptions()
+            options: GenerationOptions(),
+            afterLanguageModelInvocation: {
+                await invocationCapture.record()
+            }
         )
 
         #expect(response == "streamed")
@@ -322,7 +321,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func languageModelResponderSupportsExplicitNonStreamingOverride() async throws {
+    func runtimeContextResponderSupportsExplicitNonStreamingOverride() async throws {
         let modeCapture = InvocationModeCapture()
         let model = InvocationModeLanguageModel(
             modeCapture: modeCapture,
@@ -331,7 +330,7 @@ extension AgentPipelineTests {
         )
         let session = LanguageModelSession(model: model)
 
-        let response = try await ToolLanguageModelResponder().respond(
+        let response = try await ToolGenerationRuntimeContext.respond(
             stage: .codingAgent,
             in: session,
             to: "Build a timer",
@@ -346,7 +345,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func languageModelResponderRunsFailureHookOnce() async throws {
+    func runtimeContextResponderRunsFailureHookOnce() async throws {
         let modeCapture = InvocationModeCapture()
         let invocationCapture = InvocationCapture()
         let model = InvocationModeLanguageModel(
@@ -357,16 +356,15 @@ extension AgentPipelineTests {
         let session = LanguageModelSession(model: model)
 
         do {
-            _ = try await ToolLanguageModelResponder(
-                afterLanguageModelInvocation: {
-                    await invocationCapture.record()
-                }
-            ).respond(
+            _ = try await ToolGenerationRuntimeContext.respond(
                 stage: .codingAgent,
                 in: session,
                 to: "Build a timer",
                 generating: String.self,
-                options: GenerationOptions()
+                options: GenerationOptions(),
+                afterLanguageModelInvocation: {
+                    await invocationCapture.record()
+                }
             )
             Issue.record("Expected responder to throw.")
         } catch {

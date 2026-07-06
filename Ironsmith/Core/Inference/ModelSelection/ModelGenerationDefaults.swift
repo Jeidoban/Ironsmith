@@ -1,37 +1,5 @@
 import AnyLanguageModel
 import Foundation
-import JSONSchema
-
-struct ModelGenerationDefaults: Equatable {
-    struct Sampling: Equatable {
-        var topP: Float?
-        var topK: Int?
-        var minP: Float?
-        var presencePenalty: Float?
-        var repetitionPenalty: Float?
-    }
-
-    var maximumResponseTokens: Int?
-    var sampling: Sampling?
-
-    static let globalMaximumResponseTokens = 32_768
-    static let remoteMaximumResponseTokens = globalMaximumResponseTokens
-
-    static let foundation = Self(maximumResponseTokens: globalMaximumResponseTokens)
-    static let remote = Self(maximumResponseTokens: globalMaximumResponseTokens)
-    static let ollamaDefaults = Self(maximumResponseTokens: globalMaximumResponseTokens)
-
-    static func defaults(for model: ModelConfig) -> Self {
-        switch model.source {
-        case .appleFoundation:
-            return .foundation
-        case .mlx:
-            return .remote
-        case .remote:
-            return model.providerIdentifier == ProviderKind.ollama.rawValue ? .ollamaDefaults : .remote
-        }
-    }
-}
 
 nonisolated enum ToolGenerationStage: Sendable, Equatable, CaseIterable {
     case codingAgent
@@ -101,7 +69,7 @@ nonisolated struct ModelGenerationCapabilities: Equatable, Sendable {
 
 enum ToolGenerationOptionsResolver {
     nonisolated static let defaultStreaming = true
-    nonisolated static let globalMaximumResponseTokens = ModelGenerationDefaults.globalMaximumResponseTokens
+    nonisolated static let globalMaximumResponseTokens = 32_768
     nonisolated static let promptRefinementMaximumResponseTokens = 1_000
     nonisolated static let metadataMaximumResponseTokens = 512
 
@@ -117,7 +85,7 @@ enum ToolGenerationOptionsResolver {
             provider: provider,
             languageModel: languageModel
         )
-        let options = capabilities.applying(to: baseOptions(for: stage, model: model))
+        let options = capabilities.applying(to: baseOptions(for: stage))
         return ToolGenerationStageConfiguration(
             stage: stage,
             languageModel: languageModel,
@@ -138,20 +106,14 @@ enum ToolGenerationOptionsResolver {
             provider: provider,
             languageModel: languageModel
         )
-        return capabilities.applying(to: baseOptions(for: stage, model: model))
+        return capabilities.applying(to: baseOptions(for: stage))
     }
 
     @MainActor
-    private static func baseOptions(
-        for stage: ToolGenerationStage,
-        model: ModelConfig?
-    ) -> GenerationOptions {
+    private static func baseOptions(for stage: ToolGenerationStage) -> GenerationOptions {
         switch stage {
         case .codingAgent:
-            let maximumResponseTokens = model
-                .flatMap { ModelGenerationDefaults.defaults(for: $0).maximumResponseTokens }
-                ?? globalMaximumResponseTokens
-            return GenerationOptions(maximumResponseTokens: maximumResponseTokens)
+            return GenerationOptions(maximumResponseTokens: globalMaximumResponseTokens)
         case .promptRefinement:
             return GenerationOptions(maximumResponseTokens: promptRefinementMaximumResponseTokens)
         case .metadata:
@@ -169,28 +131,5 @@ extension ModelConfig {
             provider: nil,
             languageModel: nil
         )
-    }
-}
-
-private extension ModelGenerationDefaults {
-    var ollamaGenerationParameters: OllamaLanguageModel.CustomGenerationOptions? {
-        guard let sampling else { return nil }
-        var options: OllamaLanguageModel.CustomGenerationOptions = [:]
-        if let topP = sampling.topP {
-            options["top_p"] = .double(Double(topP))
-        }
-        if let topK = sampling.topK {
-            options["top_k"] = .int(topK)
-        }
-        if let minP = sampling.minP {
-            options["min_p"] = .double(Double(minP))
-        }
-        if let presencePenalty = sampling.presencePenalty {
-            options["presence_penalty"] = .double(Double(presencePenalty))
-        }
-        if let repetitionPenalty = sampling.repetitionPenalty {
-            options["repeat_penalty"] = .double(Double(repetitionPenalty))
-        }
-        return options.isEmpty ? nil : options
     }
 }

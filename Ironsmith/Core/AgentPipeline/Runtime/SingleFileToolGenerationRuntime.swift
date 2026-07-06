@@ -768,7 +768,11 @@ struct SingleFileToolGenerationRuntime {
         )
         do {
             try await lifecycle.updatePhase(.generating, .generatingSource, nil)
-            let continuation = try await context.streamText(in: session, to: prompt) { partialContinuation in
+            let continuation = try await context.respond(
+                in: session,
+                to: prompt,
+                generating: String.self
+            ) { partialContinuation in
                 try context.write(
                     partialSource + partialContinuation,
                     to: ToolPackageLayout.pendingContentViewDraftPath,
@@ -936,7 +940,11 @@ struct SingleFileToolGenerationRuntime {
         do {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingSource, nil)
-            let response = try await context.streamText(in: session, to: prompt) { partialSource in
+            let response = try await context.respond(
+                in: session,
+                to: prompt,
+                generating: String.self
+            ) { partialSource in
                 try context.write(
                     partialSource,
                     to: draftPath,
@@ -981,7 +989,11 @@ struct SingleFileToolGenerationRuntime {
         do {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingSource, nil)
-            let response = try await context.streamText(in: session, to: prompt) { partialSource in
+            let response = try await context.respond(
+                in: session,
+                to: prompt,
+                generating: String.self
+            ) { partialSource in
                 try context.write(
                     partialSource,
                     to: draftPath,
@@ -1031,7 +1043,11 @@ struct SingleFileToolGenerationRuntime {
         do {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingEditDiff, nil)
-            response = try await context.streamText(in: session, to: prompt) { partialPatch in
+            response = try await context.respond(
+                in: session,
+                to: prompt,
+                generating: String.self
+            ) { partialPatch in
                 try context.write(
                     partialPatch,
                     to: draftPath,

@@ -97,7 +97,7 @@ extension InferenceStore {
 
     func deleteOllamaRecommendedModel(_ entry: OllamaModelCatalog.Entry, provider: ProviderConfig) {
         guard provider.kind == .ollama,
-            OllamaModelCatalog.generationDefaultsByIdentifier[entry.identifier] != nil
+            OllamaModelCatalog.all.contains(where: { $0.identifier == entry.identifier })
         else {
             return
         }

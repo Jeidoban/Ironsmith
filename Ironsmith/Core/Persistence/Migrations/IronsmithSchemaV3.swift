@@ -105,11 +105,8 @@ enum IronsmithSchemaV3: VersionedSchema {
         var displayName: String
         var providerIdentifier: String
         var source: ModelSource
-        var localDirectoryPath: String?
-        var downloadProgress: Double?
         var installState: ModelInstallState
         var estimatedToolCredits: Int?
-        var legacyLocalModelCleanupCompleted: Bool?
 
         init(
             id: UUID = UUID(),
@@ -118,8 +115,6 @@ enum IronsmithSchemaV3: VersionedSchema {
             providerIdentifier: String,
             source: ModelSource,
             installState: ModelInstallState = .downloadable,
-            localDirectoryPath: String? = nil,
-            downloadProgress: Double? = nil,
             estimatedToolCredits: Int? = nil
         ) {
             self.id = id
@@ -129,10 +124,7 @@ enum IronsmithSchemaV3: VersionedSchema {
             self.source = source
             let resolvedInstallState: ModelInstallState = source == .appleFoundation ? .builtIn : installState
             self.installState = resolvedInstallState
-            self.localDirectoryPath = localDirectoryPath
-            self.downloadProgress = downloadProgress
             self.estimatedToolCredits = estimatedToolCredits
-            self.legacyLocalModelCleanupCompleted = true
         }
     }
 

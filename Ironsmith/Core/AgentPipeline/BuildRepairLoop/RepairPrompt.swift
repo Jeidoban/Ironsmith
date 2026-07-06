@@ -109,9 +109,10 @@ extension ContentViewBuildRepairLoop {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingRepairDiff, nil)
             let draftPath = ToolPackageLayout.pendingContentViewDraftPath
-            let response = try await context.streamText(
+            let response = try await context.respond(
                 in: repairConversation.session,
-                to: prompt
+                to: prompt,
+                generating: String.self
             ) { partialPatch in
                 try context.write(
                     partialPatch,

@@ -139,15 +139,14 @@ struct ToolMetadataClient: Sendable {
             model: languageModel,
             instructions: metadataInstructions
         )
-        let response = try await ToolLanguageModelResponder(
-            afterLanguageModelInvocation: afterLanguageModelInvocation
-        ).respond(
+        let response = try await ToolGenerationRuntimeContext.respond(
             stage: .metadata,
             in: session,
             to: Self.metadataPrompt(for: userPrompt),
             generating: GeneratedToolMetadata.self,
             options: generationOptions,
-            streaming: streaming
+            streaming: streaming,
+            afterLanguageModelInvocation: afterLanguageModelInvocation
         )
         return Self.metadataSuggestion(response, fallback: fallback)
     }
@@ -262,9 +261,7 @@ struct ToolPromptRefinementClient: Sendable {
                         model: request.languageModel,
                         instructions: promptRefinementInstructions
                     )
-                    let response = try await ToolLanguageModelResponder(
-                        afterLanguageModelInvocation: request.afterLanguageModelInvocation
-                    ).respond(
+                    let response = try await ToolGenerationRuntimeContext.respond(
                         stage: .promptRefinement,
                         in: session,
                         to: Self.promptRefinementPrompt(
@@ -274,7 +271,8 @@ struct ToolPromptRefinementClient: Sendable {
                         ),
                         generating: String.self,
                         options: request.generationOptions,
-                        streaming: request.streaming
+                        streaming: request.streaming,
+                        afterLanguageModelInvocation: request.afterLanguageModelInvocation
                     )
                     let prompt = cleanedRefinedPrompt(response)
                     if prompt.isEmpty {

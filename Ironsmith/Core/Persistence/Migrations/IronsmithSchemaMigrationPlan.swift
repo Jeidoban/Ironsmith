@@ -98,9 +98,6 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
                     for model in models where model.source == .mlx {
                         context.delete(model)
                     }
-                    for model in models where model.source != .mlx {
-                        model.legacyLocalModelCleanupCompleted = true
-                    }
 
                     try context.save()
                 }
