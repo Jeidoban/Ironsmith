@@ -169,10 +169,7 @@ struct SingleFileToolGenerationRuntime {
             try Task.checkCancellation()
             let metadata = await context.metadataClient.suggestMetadata(
                 userPrompt: prompt,
-                languageModel: context.metadata.languageModel,
-                generationOptions: context.metadata.generationOptions,
-                streaming: context.metadata.streaming,
-                afterLanguageModelInvocation: context.afterLanguageModelInvocation
+                invoker: context.languageModelInvoker
             )
             try Task.checkCancellation()
             setup = try await prepareNewCreateSetup(
@@ -284,12 +281,9 @@ struct SingleFileToolGenerationRuntime {
 
         let refinedPrompt = await context.promptRefinementClient.refinePrompt(
             userPrompt: prompt,
-            languageModel: context.promptRefinement.languageModel,
-            generationOptions: context.promptRefinement.generationOptions,
+            invoker: context.languageModelInvoker,
             appKind: appKind,
-            sandboxEnabled: sandboxEnabled,
-            streaming: context.promptRefinement.streaming,
-            afterLanguageModelInvocation: context.afterLanguageModelInvocation
+            sandboxEnabled: sandboxEnabled
         )
         try Task.checkCancellation()
         guard let refinedPrompt else {
@@ -768,7 +762,8 @@ struct SingleFileToolGenerationRuntime {
         )
         do {
             try await lifecycle.updatePhase(.generating, .generatingSource, nil)
-            let continuation = try await context.respond(
+            let continuation = try await context.languageModelInvoker.respond(
+                stage: .codingAgent,
                 in: session,
                 to: prompt,
                 generating: String.self
@@ -940,7 +935,8 @@ struct SingleFileToolGenerationRuntime {
         do {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingSource, nil)
-            let response = try await context.respond(
+            let response = try await context.languageModelInvoker.respond(
+                stage: .codingAgent,
                 in: session,
                 to: prompt,
                 generating: String.self
@@ -989,7 +985,8 @@ struct SingleFileToolGenerationRuntime {
         do {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingSource, nil)
-            let response = try await context.respond(
+            let response = try await context.languageModelInvoker.respond(
+                stage: .codingAgent,
                 in: session,
                 to: prompt,
                 generating: String.self
@@ -1043,7 +1040,8 @@ struct SingleFileToolGenerationRuntime {
         do {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingEditDiff, nil)
-            response = try await context.respond(
+            response = try await context.languageModelInvoker.respond(
+                stage: .codingAgent,
                 in: session,
                 to: prompt,
                 generating: String.self

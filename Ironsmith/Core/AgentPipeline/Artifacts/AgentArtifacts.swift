@@ -5,12 +5,12 @@ nonisolated struct AgentLanguageModelContext {
     let codingAgent: ToolGenerationStageConfiguration
     let promptRefinement: ToolGenerationStageConfiguration
     let metadata: ToolGenerationStageConfiguration
+    let languageModelInvoker: ToolLanguageModelInvoker
     let pipelineConfiguration: ToolGenerationPipelineConfiguration
     let promptRefinementEnabled: Bool
-    let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
 
     var languageModel: any LanguageModel {
-        codingAgent.languageModel
+        languageModelInvoker.languageModel
     }
 
     var repairStrategy: ToolRepairStrategy {
@@ -18,14 +18,7 @@ nonisolated struct AgentLanguageModelContext {
     }
 
     func configuration(for stage: ToolGenerationStage) -> ToolGenerationStageConfiguration {
-        switch stage {
-        case .codingAgent:
-            codingAgent
-        case .promptRefinement:
-            promptRefinement
-        case .metadata:
-            metadata
-        }
+        languageModelInvoker.configuration(for: stage)
     }
 
     init(
@@ -39,9 +32,14 @@ nonisolated struct AgentLanguageModelContext {
         self.codingAgent = codingAgent
         self.promptRefinement = promptRefinement
         self.metadata = metadata
+        self.languageModelInvoker = ToolLanguageModelInvoker(
+            codingAgent: codingAgent,
+            promptRefinement: promptRefinement,
+            metadata: metadata,
+            afterLanguageModelInvocation: afterLanguageModelInvocation
+        )
         self.pipelineConfiguration = pipelineConfiguration
         self.promptRefinementEnabled = promptRefinementEnabled
-        self.afterLanguageModelInvocation = afterLanguageModelInvocation
     }
 
     init(

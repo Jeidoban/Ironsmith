@@ -109,7 +109,8 @@ extension ContentViewBuildRepairLoop {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .generatingRepairDiff, nil)
             let draftPath = ToolPackageLayout.pendingContentViewDraftPath
-            let response = try await context.respond(
+            let response = try await context.languageModelInvoker.respond(
+                stage: .codingAgent,
                 in: repairConversation.session,
                 to: prompt,
                 generating: String.self

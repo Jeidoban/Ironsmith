@@ -29,8 +29,10 @@ extension AgentPipelineTests {
 
         let suggestion = await ToolMetadataClient.live().suggestMetadata(
             userPrompt: "recipes",
-            languageModel: StructuredMetadataLanguageModel(response: response),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
         )
 
         #expect(suggestion.displayName == "Recipe Board")
@@ -58,8 +60,10 @@ extension AgentPipelineTests {
 
         let suggestion = await ToolMetadataClient.live().suggestMetadata(
             userPrompt: "Build a timer",
-            languageModel: StructuredMetadataLanguageModel(response: response),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
         )
 
         #expect(suggestion.menuBarSystemImage == ToolMenuBarSymbol.fallback)
@@ -72,8 +76,10 @@ extension AgentPipelineTests {
 
         let suggestion = await ToolMetadataClient.live().suggestMetadata(
             userPrompt: "Build a pantry tracker",
-            languageModel: StructuredMetadataLanguageModel(response: response),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
         )
 
         #expect(suggestion.displayName == "Build A Pantry Tracker")
@@ -88,13 +94,15 @@ extension AgentPipelineTests {
         let refinedPrompt = "Build a first-version local macOS pantry tracker with a searchable list, editable item details, and expiry highlights."
         let refined = await ToolPromptRefinementClient.live().refinePrompt(
             userPrompt: "Build a pantry tracker",
-            languageModel: StubAgentLanguageModel { prompt, options in
-                await promptCapture.record(prompt)
-                await optionsCapture.record(options)
-                return refinedPrompt
-            },
-            generationOptions: GenerationOptions(
-                maximumResponseTokens: ToolGenerationOptionsResolver.promptRefinementMaximumResponseTokens
+            invoker: Self.makeInvoker(
+                languageModel: StubAgentLanguageModel { prompt, options in
+                    await promptCapture.record(prompt)
+                    await optionsCapture.record(options)
+                    return refinedPrompt
+                },
+                generationOptions: GenerationOptions(
+                    maximumResponseTokens: ToolGenerationOptionsResolver.promptRefinementMaximumResponseTokens
+                )
             ),
             sandboxEnabled: false
         )
@@ -117,8 +125,10 @@ extension AgentPipelineTests {
         let refinedPrompt = "Build a mortgage calculator with purchase price, down payment, interest, taxes, insurance, and a clear monthly payment summary."
         let refined = await ToolPromptRefinementClient.live().refinePrompt(
             userPrompt: "Make a mortgage calculator",
-            languageModel: StreamOnlyPromptRefinementLanguageModel(response: refinedPrompt),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096),
+            invoker: Self.makeInvoker(
+                languageModel: StreamOnlyPromptRefinementLanguageModel(response: refinedPrompt),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            ),
             sandboxEnabled: true
         )
 
@@ -132,11 +142,13 @@ extension AgentPipelineTests {
         let refinedPrompt = "Build a compact menu bar timer with start, pause, reset, and a current-session summary."
         let refined = await ToolPromptRefinementClient.live().refinePrompt(
             userPrompt: "Build a timer",
-            languageModel: StubAgentLanguageModel { prompt, _ in
-                await promptCapture.record(prompt)
-                return refinedPrompt
-            },
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096),
+            invoker: Self.makeInvoker(
+                languageModel: StubAgentLanguageModel { prompt, _ in
+                    await promptCapture.record(prompt)
+                    return refinedPrompt
+                },
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            ),
             appKind: .menuBar,
             sandboxEnabled: true
         )
@@ -155,8 +167,10 @@ extension AgentPipelineTests {
     func livePromptRefinementClientFallsBackToOriginalPromptOnFailure() async throws {
         let refined = await ToolPromptRefinementClient.live().refinePrompt(
             userPrompt: "Build a pantry tracker",
-            languageModel: EmptyLanguageModel(),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            invoker: Self.makeInvoker(
+                languageModel: EmptyLanguageModel(),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
         )
 
         #expect(refined == nil)
@@ -293,7 +307,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func runtimeContextResponderStreamsByDefaultAndRunsSuccessHookOnce() async throws {
+    func languageModelInvokerStreamsByDefaultAndRunsSuccessHookOnce() async throws {
         let modeCapture = InvocationModeCapture()
         let invocationCapture = InvocationCapture()
         let model = InvocationModeLanguageModel(
@@ -302,16 +316,18 @@ extension AgentPipelineTests {
             streamResult: .success("streamed")
         )
         let session = LanguageModelSession(model: model)
-
-        let response = try await ToolGenerationRuntimeContext.respond(
-            stage: .codingAgent,
-            in: session,
-            to: "Build a timer",
-            generating: String.self,
-            options: GenerationOptions(),
+        let invoker = Self.makeInvoker(
+            languageModel: model,
             afterLanguageModelInvocation: {
                 await invocationCapture.record()
             }
+        )
+
+        let response = try await invoker.respond(
+            stage: .codingAgent,
+            in: session,
+            to: "Build a timer",
+            generating: String.self
         )
 
         #expect(response == "streamed")
@@ -321,7 +337,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func runtimeContextResponderSupportsExplicitNonStreamingOverride() async throws {
+    func languageModelInvokerSupportsExplicitNonStreamingOverride() async throws {
         let modeCapture = InvocationModeCapture()
         let model = InvocationModeLanguageModel(
             modeCapture: modeCapture,
@@ -329,13 +345,13 @@ extension AgentPipelineTests {
             streamResult: .success("streamed")
         )
         let session = LanguageModelSession(model: model)
+        let invoker = Self.makeInvoker(languageModel: model)
 
-        let response = try await ToolGenerationRuntimeContext.respond(
+        let response = try await invoker.respond(
             stage: .codingAgent,
             in: session,
             to: "Build a timer",
             generating: String.self,
-            options: GenerationOptions(),
             streaming: false
         )
 
@@ -345,7 +361,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func runtimeContextResponderRunsFailureHookOnce() async throws {
+    func languageModelInvokerRunsFailureHookOnce() async throws {
         let modeCapture = InvocationModeCapture()
         let invocationCapture = InvocationCapture()
         let model = InvocationModeLanguageModel(
@@ -354,17 +370,19 @@ extension AgentPipelineTests {
             streamResult: .failure(FakeAgentError.expected)
         )
         let session = LanguageModelSession(model: model)
+        let invoker = Self.makeInvoker(
+            languageModel: model,
+            afterLanguageModelInvocation: {
+                await invocationCapture.record()
+            }
+        )
 
         do {
-            _ = try await ToolGenerationRuntimeContext.respond(
+            _ = try await invoker.respond(
                 stage: .codingAgent,
                 in: session,
                 to: "Build a timer",
-                generating: String.self,
-                options: GenerationOptions(),
-                afterLanguageModelInvocation: {
-                    await invocationCapture.record()
-                }
+                generating: String.self
             )
             Issue.record("Expected responder to throw.")
         } catch {

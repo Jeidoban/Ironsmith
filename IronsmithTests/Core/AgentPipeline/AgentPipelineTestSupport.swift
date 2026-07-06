@@ -50,6 +50,36 @@ extension AgentPipelineTests {
         )
     }
 
+    static func makeInvoker(
+        languageModel: any LanguageModel,
+        generationOptions: GenerationOptions = GenerationOptions(),
+        streaming: Bool = ToolGenerationOptionsResolver.defaultStreaming,
+        afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
+    ) -> ToolLanguageModelInvoker {
+        let codingAgent = ToolGenerationStageConfiguration(
+            stage: .codingAgent,
+            languageModel: languageModel,
+            generationOptions: generationOptions,
+            streaming: streaming
+        )
+        return ToolLanguageModelInvoker(
+            codingAgent: codingAgent,
+            promptRefinement: ToolGenerationStageConfiguration(
+                stage: .promptRefinement,
+                languageModel: languageModel,
+                generationOptions: generationOptions,
+                streaming: streaming
+            ),
+            metadata: ToolGenerationStageConfiguration(
+                stage: .metadata,
+                languageModel: languageModel,
+                generationOptions: generationOptions,
+                streaming: streaming
+            ),
+            afterLanguageModelInvocation: afterLanguageModelInvocation
+        )
+    }
+
     static func simpleContentViewSource(text: String) -> String {
         """
         import SwiftUI

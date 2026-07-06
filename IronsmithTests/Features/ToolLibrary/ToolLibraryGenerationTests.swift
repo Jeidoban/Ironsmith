@@ -313,8 +313,8 @@ extension ToolLibraryTests {
                         ),
                         request.prompt
                     )
-                    await request.languageModelContext.afterLanguageModelInvocation()
-                    await request.languageModelContext.afterLanguageModelInvocation()
+                    await request.languageModelContext.languageModelInvoker.recordInvocationCompleted()
+                    await request.languageModelContext.languageModelInvoker.recordInvocationCompleted()
                     return ToolGenerationResult(
                         toolName: "Credit Tool",
                         executableName: "CreditTool",
