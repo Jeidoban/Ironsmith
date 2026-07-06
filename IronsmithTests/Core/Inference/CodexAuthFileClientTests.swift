@@ -229,13 +229,12 @@ extension InferenceTests {
     }
 
     @Test
-    func codexCLIClientLocatesBundledVendorBinaryForCurrentArchitecture() throws {
+    func codexCLIClientLocatesBundledVendorBinary() throws {
         let resourcesURL = try Self.temporaryDirectory()
         let codexResourceURL = resourcesURL.appendingPathComponent("Codex", isDirectory: true)
         let vendorURL = resourcesURL
             .appendingPathComponent("Codex", isDirectory: true)
             .appendingPathComponent("vendor", isDirectory: true)
-            .appendingPathComponent(Self.testCodexTargetTriple, isDirectory: true)
         let versionURL = codexResourceURL.appendingPathComponent("version.txt")
         let executableURL = vendorURL.appendingPathComponent("codex")
         try FileManager.default.createDirectory(at: vendorURL, withIntermediateDirectories: true)
@@ -250,6 +249,26 @@ extension InferenceTests {
 
         #expect(resolvedURL == executableURL)
         #expect(CodexCLIClient.bundledVersion(resourceURL: resourcesURL) == "0.200.0")
+    }
+
+    @Test
+    func codexCLIClientLocatesBundledBinVendorBinary() throws {
+        let resourcesURL = try Self.temporaryDirectory()
+        let vendorBinURL = resourcesURL
+            .appendingPathComponent("Codex", isDirectory: true)
+            .appendingPathComponent("vendor", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+        let executableURL = vendorBinURL.appendingPathComponent("codex")
+        try FileManager.default.createDirectory(at: vendorBinURL, withIntermediateDirectories: true)
+        try Data().write(to: executableURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o755))],
+            ofItemAtPath: executableURL.path
+        )
+
+        let resolvedURL = try CodexCLIClient.bundledExecutableURL(resourceURL: resourcesURL)
+
+        #expect(resolvedURL == executableURL)
     }
 
     private static func temporaryDirectory() throws -> URL {
@@ -279,16 +298,6 @@ extension InferenceTests {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
-    }
-
-    private static var testCodexTargetTriple: String {
-        #if arch(arm64)
-        return "aarch64-apple-darwin"
-        #elseif arch(x86_64)
-        return "x86_64-apple-darwin"
-        #else
-        return "unsupported-apple-darwin"
-        #endif
     }
 }
 

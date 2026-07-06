@@ -13,12 +13,14 @@ SUPABASE_PUBLISHABLE_KEY_OVERRIDE=""
 API_BASE_URL_OVERRIDE=""
 APP_VERSION_OVERRIDE=""
 APP_BUILD_NUMBER_OVERRIDE=""
+CODEX_VERSION_OVERRIDE=""
+BUILD_ARCH="native"
 
 usage() {
   cat <<USAGE
 Usage: script/build.sh [build|run] [--release] [options]
 
-Builds the SwiftPM executable and stages dist/debug/Ironsmith.app or dist/release/Ironsmith.app.
+Builds the SwiftPM executable and stages dist/debug/Ironsmith.app or dist/release-<arch>/Ironsmith.app.
 
 Environment:
   Build-time backend values are read from Config/.env by default.
@@ -26,10 +28,12 @@ Environment:
 
 Options:
   --release                     Build with SwiftPM release configuration and Developer ID signing
+  --arch <native|arm64|x86_64>  Build architecture. Release builds require arm64 or x86_64.
   --sign-identity               Override the signing identity selected for this build. Required for release builds.
   --supabase-url                Override IronsmithSupabaseURL in Info.plist
   --supabase-publishable-key    Override IronsmithSupabasePublishableKey in Info.plist
   --api-base-url                Override IronsmithAPIBaseURL in Info.plist
+  --codex-version <version>     Override IRONSMITH_CODEX_VERSION for this build
   --version                     Override CFBundleShortVersionString in Info.plist
   --build-number                Override CFBundleVersion in Info.plist
   -h, --help                    Show this help
@@ -56,6 +60,10 @@ while [[ $# -gt 0 ]]; do
       RELEASE_BUILD=true
       shift
       ;;
+    --arch)
+      BUILD_ARCH="$(require_value "$1" "${2:-}")"
+      shift 2
+      ;;
     --sign-identity)
       SIGN_IDENTITY_OVERRIDE="$(require_value "$1" "${2:-}")"
       shift 2
@@ -70,6 +78,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --api-base-url)
       API_BASE_URL_OVERRIDE="$(require_value "$1" "${2:-}")"
+      shift 2
+      ;;
+    --codex-version)
+      CODEX_VERSION_OVERRIDE="$(require_value "$1" "${2:-}")"
       shift 2
       ;;
     --version)
@@ -105,9 +117,43 @@ case "$COMMAND" in
     ;;
 esac
 
+case "$BUILD_ARCH" in
+  native|arm64|x86_64) ;;
+  *)
+    echo "--arch must be native, arm64, or x86_64" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$RELEASE_BUILD" == true && "$BUILD_ARCH" == "native" ]]; then
+  echo "Release builds require an explicit architecture: --arch arm64 or --arch x86_64" >&2
+  exit 2
+fi
+
+native_arch() {
+  case "$(uname -m)" in
+    arm64)
+      printf '%s' "arm64"
+      ;;
+    x86_64)
+      printf '%s' "x86_64"
+      ;;
+    *)
+      echo "Unsupported native architecture: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+if [[ "$BUILD_ARCH" == "native" ]]; then
+  EFFECTIVE_ARCH="$(native_arch)"
+else
+  EFFECTIVE_ARCH="$BUILD_ARCH"
+fi
+
 if [[ "$RELEASE_BUILD" == true ]]; then
   SWIFT_CONFIGURATION="release"
-  DIST_LABEL="release"
+  DIST_LABEL="release-$BUILD_ARCH"
 else
   SWIFT_CONFIGURATION="debug"
   DIST_LABEL="debug"
@@ -210,17 +256,21 @@ if [[ -n "$API_BASE_URL_OVERRIDE" ]]; then
   IRONSMITH_API_BASE_URL="$API_BASE_URL_OVERRIDE"
 fi
 
+if [[ -n "$CODEX_VERSION_OVERRIDE" ]]; then
+  IRONSMITH_CODEX_VERSION="$CODEX_VERSION_OVERRIDE"
+fi
+
 resolve_sign_identity() {
   if [[ "$RELEASE_BUILD" == true ]]; then
     SIGN_IDENTITY="$SIGN_IDENTITY_OVERRIDE"
 
-    if [[ -z "$SIGN_IDENTITY" || "$SIGN_IDENTITY" == "-" ]]; then
+    if [[ -z "$SIGN_IDENTITY" ]]; then
       echo "Release builds require a Developer ID Application signing identity." >&2
-      echo "Pass --sign-identity." >&2
+      echo "Pass --sign-identity, or --sign-identity - for local ad hoc verification." >&2
       exit 1
     fi
 
-    if [[ "$SIGN_IDENTITY" != *"Developer ID Application"* ]]; then
+    if [[ "$SIGN_IDENTITY" != "-" && "$SIGN_IDENTITY" != *"Developer ID Application"* ]]; then
       echo "Release builds must be signed with a Developer ID Application identity." >&2
       echo "Received: $SIGN_IDENTITY" >&2
       exit 1
@@ -280,6 +330,79 @@ codex_vendor_has_binary() {
   [[ -x "$vendor_dir/codex" || -x "$vendor_dir/bin/codex" ]]
 }
 
+codex_platform_suffix_for_arch() {
+  case "$1" in
+    arm64)
+      printf '%s' "darwin-arm64"
+      ;;
+    x86_64)
+      printf '%s' "darwin-x64"
+      ;;
+    *)
+      echo "Unsupported Codex architecture: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+codex_triple_for_arch() {
+  case "$1" in
+    arm64)
+      printf '%s' "$CODEX_ARM64_TRIPLE"
+      ;;
+    x86_64)
+      printf '%s' "$CODEX_X64_TRIPLE"
+      ;;
+    *)
+      echo "Unsupported Codex architecture: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+PRESERVED_CODEX_RESOURCE_URL=""
+
+preserve_debug_codex_resources_if_available() {
+  if [[ "$RELEASE_BUILD" == true ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "$RESOURCES_URL/Codex/version.txt" ]]; then
+    return 0
+  fi
+
+  if ! codex_vendor_has_binary "$CODEX_VENDOR_RESOURCE_URL"; then
+    return 0
+  fi
+
+  PRESERVED_CODEX_RESOURCE_URL="$CODEX_CACHE_ROOT/.preserved-debug-codex-$$"
+  rm -rf "$PRESERVED_CODEX_RESOURCE_URL"
+  mkdir -p "$(dirname -- "$PRESERVED_CODEX_RESOURCE_URL")"
+  cp -R "$RESOURCES_URL/Codex" "$PRESERVED_CODEX_RESOURCE_URL"
+  echo "Reusing staged Codex resources from existing debug app"
+}
+
+restore_preserved_debug_codex_resources() {
+  if [[ -z "$PRESERVED_CODEX_RESOURCE_URL" || ! -d "$PRESERVED_CODEX_RESOURCE_URL" ]]; then
+    return 1
+  fi
+
+  rm -rf "$RESOURCES_URL/Codex"
+  mkdir -p "$RESOURCES_URL"
+  cp -R "$PRESERVED_CODEX_RESOURCE_URL" "$RESOURCES_URL/Codex"
+  rm -rf "$PRESERVED_CODEX_RESOURCE_URL"
+  PRESERVED_CODEX_RESOURCE_URL=""
+  return 0
+}
+
+cleanup_preserved_debug_codex_resources() {
+  if [[ -n "$PRESERVED_CODEX_RESOURCE_URL" ]]; then
+    rm -rf "$PRESERVED_CODEX_RESOURCE_URL"
+  fi
+}
+
+trap cleanup_preserved_debug_codex_resources EXIT
+
 download_codex_vendor() {
   local resolved_version="$1"
   local platform_suffix="$2"
@@ -320,25 +443,33 @@ download_codex_vendor() {
 }
 
 stage_codex_resources() {
-  local resolved_version
-  resolved_version="$(resolve_codex_version)"
+  if restore_preserved_debug_codex_resources; then
+    return 0
+  fi
 
-  echo "Bundling Codex $resolved_version"
-  download_codex_vendor "$resolved_version" "darwin-arm64" "$CODEX_ARM64_TRIPLE"
-  download_codex_vendor "$resolved_version" "darwin-x64" "$CODEX_X64_TRIPLE"
+  local resolved_version
+  local platform_suffix
+  local triple
+
+  resolved_version="$(resolve_codex_version)"
+  platform_suffix="$(codex_platform_suffix_for_arch "$EFFECTIVE_ARCH")"
+  triple="$(codex_triple_for_arch "$EFFECTIVE_ARCH")"
+
+  echo "Bundling Codex $resolved_version ($EFFECTIVE_ARCH)"
+  download_codex_vendor "$resolved_version" "$platform_suffix" "$triple"
 
   mkdir -p "$RESOURCES_URL/Codex"
   printf '%s\n' "$resolved_version" > "$RESOURCES_URL/Codex/version.txt"
+  rm -rf "$CODEX_VENDOR_RESOURCE_URL"
   mkdir -p "$CODEX_VENDOR_RESOURCE_URL"
-  rm -rf "$CODEX_VENDOR_RESOURCE_URL/$CODEX_ARM64_TRIPLE"
-  rm -rf "$CODEX_VENDOR_RESOURCE_URL/$CODEX_X64_TRIPLE"
-  cp -R "$CODEX_CACHE_ROOT/$resolved_version/$CODEX_ARM64_TRIPLE" "$CODEX_VENDOR_RESOURCE_URL/$CODEX_ARM64_TRIPLE"
-  cp -R "$CODEX_CACHE_ROOT/$resolved_version/$CODEX_X64_TRIPLE" "$CODEX_VENDOR_RESOURCE_URL/$CODEX_X64_TRIPLE"
+  cp -R "$CODEX_CACHE_ROOT/$resolved_version/$triple/." "$CODEX_VENDOR_RESOURCE_URL"
 }
 
 codesign_file() {
   local file_url="$1"
-  if [[ "$RELEASE_BUILD" == true ]]; then
+  if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    /usr/bin/codesign --force --sign "$SIGN_IDENTITY" "$file_url" >/dev/null
+  elif [[ "$RELEASE_BUILD" == true ]]; then
     /usr/bin/codesign \
       --force \
       --sign "$SIGN_IDENTITY" \
@@ -363,50 +494,39 @@ sign_codex_vendor_executables() {
 }
 
 build_native_executable() {
-  echo "Building $APP_NAME ($DIST_LABEL)"
+  echo "Building $APP_NAME ($DIST_LABEL, native)"
   swift build --configuration "$SWIFT_CONFIGURATION"
   BUILD_ARCH_BIN_DIR="$(swift build --configuration "$SWIFT_CONFIGURATION" --show-bin-path)"
   BUILD_ARCH_EXECUTABLE_URL="$BUILD_ARCH_BIN_DIR/$APP_NAME"
   require_executable "$BUILD_ARCH_EXECUTABLE_URL"
 }
 
-build_release_arch() {
-  local arch="$1"
+build_arch_executable() {
+  local configuration="$1"
+  local arch="$2"
   local triple="$arch-apple-macosx$MINIMUM_MACOS_VERSION"
 
-  echo "Building $APP_NAME (release, $arch)"
-  swift build --configuration release --triple "$triple"
-  BUILD_ARCH_BIN_DIR="$(swift build --configuration release --triple "$triple" --show-bin-path)"
+  echo "Building $APP_NAME ($DIST_LABEL, $arch)"
+  swift build --configuration "$configuration" --triple "$triple"
+  BUILD_ARCH_BIN_DIR="$(swift build --configuration "$configuration" --triple "$triple" --show-bin-path)"
   BUILD_ARCH_EXECUTABLE_URL="$BUILD_ARCH_BIN_DIR/$APP_NAME"
   require_executable "$BUILD_ARCH_EXECUTABLE_URL"
 }
 
-if [[ "$RELEASE_BUILD" == true ]]; then
-  build_release_arch arm64
-  ARM64_EXECUTABLE_URL="$BUILD_ARCH_EXECUTABLE_URL"
-  RESOURCE_BUNDLE_BIN_DIR="$BUILD_ARCH_BIN_DIR"
-
-  build_release_arch x86_64
-  X86_64_EXECUTABLE_URL="$BUILD_ARCH_EXECUTABLE_URL"
-else
+if [[ "$BUILD_ARCH" == "native" ]]; then
   build_native_executable
-  EXECUTABLE_URL="$BUILD_ARCH_EXECUTABLE_URL"
-  RESOURCE_BUNDLE_BIN_DIR="$BUILD_ARCH_BIN_DIR"
+else
+  build_arch_executable "$SWIFT_CONFIGURATION" "$BUILD_ARCH"
 fi
 
+EXECUTABLE_URL="$BUILD_ARCH_EXECUTABLE_URL"
+RESOURCE_BUNDLE_BIN_DIR="$BUILD_ARCH_BIN_DIR"
+
+preserve_debug_codex_resources_if_available
 rm -rf "$APP_URL"
 mkdir -p "$MACOS_URL" "$RESOURCES_URL"
 
-if [[ "$RELEASE_BUILD" == true ]]; then
-  /usr/bin/lipo \
-    -create \
-    "$ARM64_EXECUTABLE_URL" \
-    "$X86_64_EXECUTABLE_URL" \
-    -output "$MACOS_URL/$APP_NAME"
-  /usr/bin/lipo "$MACOS_URL/$APP_NAME" -verify_arch arm64 x86_64
-else
-  cp "$EXECUTABLE_URL" "$MACOS_URL/$APP_NAME"
-fi
+cp "$EXECUTABLE_URL" "$MACOS_URL/$APP_NAME"
 chmod 755 "$MACOS_URL/$APP_NAME"
 
 cp "$REPO_ROOT/Ironsmith/Info.plist" "$INFO_PLIST_URL"
@@ -466,7 +586,9 @@ find "$RESOURCE_BUNDLE_BIN_DIR" \
 stage_codex_resources
 sign_codex_vendor_executables
 
-if [[ "$RELEASE_BUILD" == true ]]; then
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  /usr/bin/codesign --force --sign "$SIGN_IDENTITY" "$APP_URL" >/dev/null
+elif [[ "$RELEASE_BUILD" == true ]]; then
   /usr/bin/codesign \
     --force \
     --sign "$SIGN_IDENTITY" \

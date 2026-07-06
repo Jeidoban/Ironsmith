@@ -112,7 +112,6 @@ extension CodexCLIClient {
         let vendorURL = resourceURL
             .appendingPathComponent("Codex", isDirectory: true)
             .appendingPathComponent("vendor", isDirectory: true)
-            .appendingPathComponent(currentTargetTriple, isDirectory: true)
 
         let candidates = [
             vendorURL.appendingPathComponent("codex"),
@@ -138,16 +137,6 @@ extension CodexCLIClient {
             return nil
         }
         return version
-    }
-
-    nonisolated private static var currentTargetTriple: String {
-        #if arch(arm64)
-        return "aarch64-apple-darwin"
-        #elseif arch(x86_64)
-        return "x86_64-apple-darwin"
-        #else
-        return "unsupported-apple-darwin"
-        #endif
     }
 
     nonisolated private static func validate(_ result: CodexCLIProcessResult) throws {
