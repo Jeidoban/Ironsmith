@@ -2,7 +2,11 @@ import Foundation
 
 nonisolated enum OpenAICodexBackend {
     static let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+    static let authorizeURL = URL(string: "https://auth.openai.com/oauth/authorize")!
     static let tokenURL = URL(string: "https://auth.openai.com/oauth/token")!
+    static let redirectURI = "http://localhost:1455/auth/callback"
+    static let scope = "openid profile email offline_access"
+    static let originator = "codex_cli_rs"
     static let backendBaseURL = URL(string: "https://chatgpt.com/backend-api/codex/")!
     static let modelsURL = URL(string: "https://chatgpt.com/backend-api/codex/models")!
     static var modelCatalogClientVersion: String {

@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated struct OpenAICodexAuthClient {
-    static let refreshWindow: TimeInterval = 5 * 60
+    static let refreshWindow: TimeInterval = 30 * 60
 
     var credential: @Sendable () throws -> OpenAICodexCredential?
     var signIn: @Sendable () async throws -> OpenAICodexCredential
@@ -12,7 +12,7 @@ nonisolated struct OpenAICodexAuthClient {
 
 extension OpenAICodexAuthClient {
     nonisolated static func live(
-        codexCLIClient: CodexCLIClient = .live(),
+        pkceAuthClient: OpenAICodexPKCEAuthClient = .live(),
         authFileClient: CodexAuthFileClient = .live(),
         refreshCredential: @escaping @Sendable (OpenAICodexCredential) async throws -> OpenAICodexCredential = { credential in
             try await Self.refreshCredential(credential)
@@ -28,14 +28,12 @@ extension OpenAICodexAuthClient {
                 try authFileClient.credential()
             },
             signIn: {
-                try await codexCLIClient.signIn()
-                guard let credential = try authFileClient.credential() else {
-                    throw OpenAICodexAuthClientError.missingCredential
-                }
+                let credential = try await pkceAuthClient.signIn()
+                try authFileClient.saveCredential(credential)
                 return credential
             },
             signOut: {
-                try await codexCLIClient.signOut()
+                try authFileClient.deleteCredential()
             },
             validCredential: {
                 try await tokenStore.validCredential()
@@ -88,7 +86,7 @@ extension OpenAICodexAuthClient {
         return refreshed
     }
 
-    nonisolated private static func tokenRequest<T: Decodable>(
+    nonisolated static func tokenRequest<T: Decodable>(
         form: [String: String]
     ) async throws -> T {
         var request = URLRequest(url: OpenAICodexBackend.tokenURL)
@@ -214,7 +212,7 @@ extension OpenAICodexAuthClient {
             || identifier.hasPrefix("o")
     }
 
-    nonisolated private static func credential(from response: OpenAICodexTokenResponse) -> OpenAICodexCredential {
+    nonisolated static func credential(from response: OpenAICodexTokenResponse) -> OpenAICodexCredential {
         let claims = OpenAICodexJWTClaims.bestClaims(
             idToken: response.idToken,
             accessToken: response.accessToken
@@ -335,29 +333,41 @@ nonisolated struct OpenAICodexJWTClaims {
 }
 
 nonisolated enum OpenAICodexAuthClientError: LocalizedError, Equatable {
+    case invalidOAuthAuthorizationURL
+    case invalidOAuthState
     case invalidAuthFile
     case invalidModelURL
     case invalidResponse
+    case missingOAuthCode
     case missingCodexBinary(String)
     case missingCredential
     case missingRefreshToken
+    case oauthSignInFailed(String)
     case codexCommandFailed(String)
     case requestFailed(statusCode: Int, message: String)
 
     var errorDescription: String? {
         switch self {
+        case .invalidOAuthAuthorizationURL:
+            return "Could not create the ChatGPT sign-in URL."
+        case .invalidOAuthState:
+            return "ChatGPT sign-in returned an invalid state. Try signing in again."
         case .invalidAuthFile:
             return "Codex sign-in data is invalid. Sign in with ChatGPT again."
         case .invalidModelURL:
             return "Could not create the ChatGPT model list URL."
         case .invalidResponse:
             return "ChatGPT returned an invalid response."
+        case .missingOAuthCode:
+            return "ChatGPT sign-in did not return an authorization code."
         case .missingCodexBinary(let message):
             return message
         case .missingCredential:
             return "Sign in with ChatGPT before using Codex models."
         case .missingRefreshToken:
             return "Sign in with ChatGPT again before using Codex models."
+        case .oauthSignInFailed(let message):
+            return message.isEmpty ? "ChatGPT sign-in failed." : message
         case .codexCommandFailed(let message):
             return message.isEmpty ? "Codex command failed." : message
         case .requestFailed(let statusCode, let message):
