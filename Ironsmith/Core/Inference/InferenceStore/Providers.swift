@@ -166,15 +166,6 @@ extension InferenceStore {
                 return
             }
         }
-        if provider.kind == .openAI {
-            do {
-                try await dependencies.openAICodexAuthClient.signOut()
-                openAICodexCredential = nil
-            } catch {
-                presentError(error)
-                return
-            }
-        }
 
         remoteModels.removeAll { $0.providerIdentifier == identifier }
         providerConnectionIssues.removeValue(forKey: identifier)
