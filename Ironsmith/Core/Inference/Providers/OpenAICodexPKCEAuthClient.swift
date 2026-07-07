@@ -159,7 +159,11 @@ nonisolated private final class OpenAICodexLoopbackOAuthServer: @unchecked Senda
                 }
                 group.addTask {
                     try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                    throw OpenAICodexAuthClientError.oauthSignInFailed("Timed out waiting for ChatGPT sign-in.")
+                    let error = OpenAICodexAuthClientError.oauthSignInFailed(
+                        "Timed out waiting for ChatGPT sign-in."
+                    )
+                    self.resume(throwing: error)
+                    throw error
                 }
 
                 guard let code = try await group.next() else {
@@ -169,7 +173,7 @@ nonisolated private final class OpenAICodexLoopbackOAuthServer: @unchecked Senda
                 return code
             }
         } onCancel: {
-            self.stop()
+            self.resume(throwing: CancellationError())
         }
     }
 
