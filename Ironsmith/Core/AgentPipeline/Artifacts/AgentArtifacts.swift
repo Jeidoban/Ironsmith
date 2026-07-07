@@ -2,45 +2,76 @@ import AnyLanguageModel
 import Foundation
 
 nonisolated struct AgentLanguageModelContext {
-    let languageModel: any LanguageModel
-    let metadataLanguageModel: any LanguageModel
-    let options: GenerationOptions
+    let codingAgent: ToolGenerationStageConfiguration
+    let promptRefinement: ToolGenerationStageConfiguration
+    let metadata: ToolGenerationStageConfiguration
+    let languageModelInvoker: ToolLanguageModelInvoker
     let pipelineConfiguration: ToolGenerationPipelineConfiguration
     let promptRefinementEnabled: Bool
-    let afterLanguageModelInvocation: @MainActor @Sendable () async -> Void
+
+    var languageModel: any LanguageModel {
+        languageModelInvoker.languageModel
+    }
 
     var repairStrategy: ToolRepairStrategy {
         pipelineConfiguration.repairStrategy
     }
 
+    func configuration(for stage: ToolGenerationStage) -> ToolGenerationStageConfiguration {
+        languageModelInvoker.configuration(for: stage)
+    }
+
     init(
-        languageModel: any LanguageModel,
-        metadataLanguageModel: (any LanguageModel)?,
-        options: GenerationOptions,
+        codingAgent: ToolGenerationStageConfiguration,
+        promptRefinement: ToolGenerationStageConfiguration,
+        metadata: ToolGenerationStageConfiguration,
         pipelineConfiguration: ToolGenerationPipelineConfiguration,
         promptRefinementEnabled: Bool = true,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
-        self.languageModel = languageModel
-        self.metadataLanguageModel =
-            metadataLanguageModel ?? AnyLanguageModel.SystemLanguageModel.default
-        self.options = options
+        self.codingAgent = codingAgent
+        self.promptRefinement = promptRefinement
+        self.metadata = metadata
+        self.languageModelInvoker = ToolLanguageModelInvoker(
+            codingAgent: codingAgent,
+            promptRefinement: promptRefinement,
+            metadata: metadata,
+            afterLanguageModelInvocation: afterLanguageModelInvocation
+        )
         self.pipelineConfiguration = pipelineConfiguration
         self.promptRefinementEnabled = promptRefinementEnabled
-        self.afterLanguageModelInvocation = afterLanguageModelInvocation
     }
 
     init(
         languageModel: any LanguageModel,
-        options: GenerationOptions,
+        generationOptions: GenerationOptions = GenerationOptions(
+            maximumResponseTokens: ToolGenerationOptionsResolver.globalMaximumResponseTokens
+        ),
+        streaming: Bool = ToolGenerationOptionsResolver.defaultStreaming,
         pipelineConfiguration: ToolGenerationPipelineConfiguration,
         promptRefinementEnabled: Bool = true,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
-        self.init(
+        let codingAgent = ToolGenerationStageConfiguration(
+            stage: .codingAgent,
             languageModel: languageModel,
-            metadataLanguageModel: nil,
-            options: options,
+            generationOptions: generationOptions,
+            streaming: streaming
+        )
+        self.init(
+            codingAgent: codingAgent,
+            promptRefinement: ToolGenerationStageConfiguration(
+                stage: .promptRefinement,
+                languageModel: languageModel,
+                generationOptions: generationOptions,
+                streaming: streaming
+            ),
+            metadata: ToolGenerationStageConfiguration(
+                stage: .metadata,
+                languageModel: languageModel,
+                generationOptions: generationOptions,
+                streaming: streaming
+            ),
             pipelineConfiguration: pipelineConfiguration,
             promptRefinementEnabled: promptRefinementEnabled,
             afterLanguageModelInvocation: afterLanguageModelInvocation

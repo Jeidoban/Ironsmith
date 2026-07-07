@@ -27,7 +27,7 @@ extension AgentPipelineTests {
     ) -> SingleFileToolGenerationRuntime {
         let languageModelContext = AgentLanguageModelContext(
             languageModel: languageModel,
-            options: generationOptions,
+            generationOptions: generationOptions,
             pipelineConfiguration: pipelineConfiguration,
             promptRefinementEnabled: promptRefinementEnabled,
             afterLanguageModelInvocation: afterLanguageModelInvocation
@@ -47,6 +47,36 @@ extension AgentPipelineTests {
                 languageModelContext: languageModelContext,
                 dependencies: dependencies
             )
+        )
+    }
+
+    static func makeInvoker(
+        languageModel: any LanguageModel,
+        generationOptions: GenerationOptions = GenerationOptions(),
+        streaming: Bool = ToolGenerationOptionsResolver.defaultStreaming,
+        afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
+    ) -> ToolLanguageModelInvoker {
+        let codingAgent = ToolGenerationStageConfiguration(
+            stage: .codingAgent,
+            languageModel: languageModel,
+            generationOptions: generationOptions,
+            streaming: streaming
+        )
+        return ToolLanguageModelInvoker(
+            codingAgent: codingAgent,
+            promptRefinement: ToolGenerationStageConfiguration(
+                stage: .promptRefinement,
+                languageModel: languageModel,
+                generationOptions: generationOptions,
+                streaming: streaming
+            ),
+            metadata: ToolGenerationStageConfiguration(
+                stage: .metadata,
+                languageModel: languageModel,
+                generationOptions: generationOptions,
+                streaming: streaming
+            ),
+            afterLanguageModelInvocation: afterLanguageModelInvocation
         )
     }
 
@@ -438,9 +468,27 @@ struct StructuredMetadataLanguageModel: LanguageModel {
         includeSchemaInPrompt: Bool,
         options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-        LanguageModelSession.ResponseStream(
+        let response = response
+        return LanguageModelSession.ResponseStream(
             stream: AsyncThrowingStream { continuation in
-                continuation.finish(throwing: FakeAgentError.unsupportedStructuredGeneration)
+                Task {
+                    do {
+                        let generated = try await response.next(
+                            prompt: prompt,
+                            generating: type,
+                            options: options
+                        )
+                        continuation.yield(
+                            .init(
+                                content: generated.content.asPartiallyGenerated(),
+                                rawContent: generated.rawContent
+                            )
+                        )
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
             }
         )
     }

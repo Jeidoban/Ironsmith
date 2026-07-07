@@ -18,7 +18,7 @@ usage() {
 Usage: script/package.sh [path/to/App.app] [options]
 
 Packages a .app into a DMG, submits the DMG for notarization, and staples it.
-Defaults to dist/release/Ironsmith.app when no .app path is provided.
+Defaults to dist/release-arm64/Ironsmith.app when no .app path is provided.
 
 General options:
   --output                      Output DMG path. Default: next to the app, named after the app
@@ -119,7 +119,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 if [[ -z "$APP_URL" ]]; then
-  APP_URL="$REPO_ROOT/dist/release/Ironsmith.app"
+  APP_URL="$REPO_ROOT/dist/release-arm64/Ironsmith.app"
 fi
 
 if [[ "$APP_URL" != *.app ]]; then
@@ -129,8 +129,8 @@ fi
 
 if [[ ! -d "$APP_URL" ]]; then
   echo "Missing app bundle at $APP_URL" >&2
-  if [[ "$APP_URL" == "$REPO_ROOT/dist/release/Ironsmith.app" ]]; then
-    echo "Build it first with: script/build.sh --release --sign-identity \"Developer ID Application: Example (TEAMID)\"" >&2
+  if [[ "$APP_URL" == "$REPO_ROOT/dist/release-arm64/Ironsmith.app" ]]; then
+    echo "Build it first with: script/build.sh --release --arch arm64 --sign-identity \"Developer ID Application: Example (TEAMID)\"" >&2
   fi
   exit 1
 fi

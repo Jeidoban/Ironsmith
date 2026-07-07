@@ -4,7 +4,6 @@ import Foundation
 enum SettingsPreviewState {
     enum Selection {
         case appleFoundation
-        case mlx
         case remote
         case none
     }
@@ -46,14 +45,6 @@ enum SettingsPreviewState {
             installState: .builtIn
         )
 
-        let mlxModel = ModelConfig(
-            identifier: MLXModelCatalog.all[0].identifier,
-            displayName: MLXModelCatalog.all[0].displayName,
-            providerIdentifier: localProvider.identifier,
-            source: .mlx,
-            installState: .installed
-        )
-
         let remoteModel = ModelConfig(
             identifier: "gpt-4o-mini",
             displayName: "gpt-4o-mini",
@@ -63,14 +54,12 @@ enum SettingsPreviewState {
         )
 
         inferenceStore.providers = [localProvider, openAIProvider]
-        inferenceStore.persistedModels = [appleFoundationModel, mlxModel]
+        inferenceStore.persistedModels = [appleFoundationModel]
         inferenceStore.remoteModels = [remoteModel]
 
         switch selectedModel {
         case .appleFoundation:
             inferenceStore.selectedModelID = appleFoundationModel.selectionIdentifier
-        case .mlx:
-            inferenceStore.selectedModelID = mlxModel.selectionIdentifier
         case .remote:
             inferenceStore.selectedModelID = remoteModel.selectionIdentifier
         case .none:

@@ -3,6 +3,7 @@ import Foundation
 nonisolated struct CodexAuthFileClient: Sendable {
     var credential: @Sendable () throws -> OpenAICodexCredential?
     var saveCredential: @Sendable (OpenAICodexCredential) throws -> Void
+    var deleteCredential: @Sendable () throws -> Void
 }
 
 extension CodexAuthFileClient {
@@ -13,6 +14,9 @@ extension CodexAuthFileClient {
             },
             saveCredential: { credential in
                 try save(credential, to: authFileURL)
+            },
+            deleteCredential: {
+                try delete(authFileURL)
             }
         )
     }
@@ -20,7 +24,8 @@ extension CodexAuthFileClient {
     nonisolated static var unconfigured: Self {
         Self(
             credential: { nil },
-            saveCredential: { _ in }
+            saveCredential: { _ in },
+            deleteCredential: {}
         )
     }
 
@@ -76,6 +81,13 @@ extension CodexAuthFileClient {
             [.posixPermissions: NSNumber(value: Int16(0o600))],
             ofItemAtPath: authFileURL.path
         )
+    }
+
+    nonisolated static func delete(_ authFileURL: URL) throws {
+        guard FileManager.default.fileExists(atPath: authFileURL.path) else {
+            return
+        }
+        try FileManager.default.removeItem(at: authFileURL)
     }
 
     nonisolated static func updatedAuthData(

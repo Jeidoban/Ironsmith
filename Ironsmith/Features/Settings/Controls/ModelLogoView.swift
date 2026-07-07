@@ -133,7 +133,7 @@ enum SettingsModelPresentation {
 
     private static func isDisplayNoise(_ token: String) -> Bool {
         let lowercased = token.lowercased()
-        if ["mlx", "gguf", "latest", "q4", "q5", "q6", "q8", "awq", "gptq", "f16", "fp16", "bf16", "bit", "k", "m", "s", "0"].contains(lowercased) {
+        if ["gguf", "latest", "q4", "q5", "q6", "q8", "awq", "gptq", "f16", "fp16", "bf16", "bit", "k", "m", "s", "0"].contains(lowercased) {
             return true
         }
         if lowercased.hasSuffix("bit"), lowercased.dropLast(3).allSatisfy(\.isNumber) {
@@ -147,7 +147,7 @@ enum SettingsModelPresentation {
 
     private static func formattedToken(_ token: String, keepsShortAcronyms: Bool) -> String {
         let lowercased = token.lowercased()
-        if ["ai", "glm", "gpt", "mlx", "oss"].contains(lowercased) {
+        if ["ai", "glm", "gpt", "oss"].contains(lowercased) {
             return lowercased.uppercased()
         }
         if lowercased == "deepseek" {
@@ -193,8 +193,6 @@ enum SettingsModelPresentation {
 #Preview("AI Model Provider Logos") {
     HStack {
         ModelLogoView(identifier: ModelConfig.appleFoundationIdentifier, displayName: "Apple Foundation Model", fallbackProviderKind: .local)
-        ModelLogoView(identifier: "mlx-community/Qwen3.5", displayName: "Qwen 3.5", fallbackProviderKind: .local)
-        ModelLogoView(identifier: "mlx-community/gemma-4", displayName: "Gemma 4", fallbackProviderKind: .local)
         ModelLogoView(identifier: "openai/gpt-5.4", displayName: "GPT 5.4", fallbackProviderKind: .ironsmith)
         ModelLogoView(identifier: "anthropic/claude-sonnet-4.6", displayName: "Claude Sonnet 4.6", fallbackProviderKind: .ironsmith)
         ModelLogoView(identifier: "deepseek/deepseek-v4-flash", displayName: "DeepSeek V4 Flash", fallbackProviderKind: .ironsmith)

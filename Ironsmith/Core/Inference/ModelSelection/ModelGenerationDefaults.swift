@@ -1,73 +1,123 @@
 import AnyLanguageModel
 import Foundation
-import JSONSchema
 
-struct ModelGenerationDefaults: Equatable {
-    struct Sampling: Equatable {
-        var topP: Float?
-        var topK: Int?
-        var minP: Float?
-        var presencePenalty: Float?
-        var repetitionPenalty: Float?
+nonisolated enum ToolGenerationStage: Sendable, Equatable, CaseIterable {
+    case codingAgent
+    case promptRefinement
+    case metadata
+}
+
+struct ToolGenerationStageConfiguration {
+    let stage: ToolGenerationStage
+    let languageModel: any LanguageModel
+    let generationOptions: GenerationOptions
+    let streaming: Bool
+}
+
+nonisolated struct ModelGenerationCapabilities: Equatable, Sendable {
+    var supportsMaximumResponseTokens: Bool
+    var supportsResponseStorage: Bool
+    var requiresStreaming: Bool
+
+    static let standard = Self(
+        supportsMaximumResponseTokens: true,
+        supportsResponseStorage: true,
+        requiresStreaming: false
+    )
+
+    static let openAICodex = Self(
+        supportsMaximumResponseTokens: false,
+        supportsResponseStorage: false,
+        requiresStreaming: true
+    )
+
+    static func resolved(
+        model: ModelConfig?,
+        provider: ProviderConfig?,
+        languageModel: (any LanguageModel)?
+    ) -> Self {
+        if model?.isOpenAICodexModel == true || isOpenAICodexLanguageModel(languageModel) {
+            return .openAICodex
+        }
+        return .standard
     }
 
-    var temperature: Double?
-    var maximumResponseTokens: Int? = 4096
-    var mlxKVCacheMaxSize: Int?
-    var mlxKVCacheBitsEnabled: Bool?
-    var mlxKVCacheBits: Int?
-    var mlxThinkingEnabled: Bool?
-    var sampling: Sampling?
+    static func isOpenAICodexLanguageModel(_ languageModel: (any LanguageModel)?) -> Bool {
+        guard let openAIModel = languageModel as? OpenAILanguageModel else {
+            return false
+        }
+        return openAIModel.baseURL == OpenAICodexBackend.backendBaseURL
+    }
 
-    static let remoteMaximumResponseTokens = 32_768
+    func applying(to options: GenerationOptions) -> GenerationOptions {
+        var options = options
+        if !supportsMaximumResponseTokens {
+            options.maximumResponseTokens = nil
+        }
 
-    static let foundation = Self(
-        temperature: 0.7,
-        maximumResponseTokens: 4096
-    )
+        if !supportsResponseStorage {
+            var openAIOptions =
+                options[custom: OpenAILanguageModel.self]
+                ?? OpenAILanguageModel.CustomGenerationOptions()
+            openAIOptions.store = false
+            options[custom: OpenAILanguageModel.self] = openAIOptions
+        }
 
-    static let remote = Self(
-        temperature: nil,
-        maximumResponseTokens: remoteMaximumResponseTokens
-    )
+        return options
+    }
+}
 
-    static let ollamaDefaults = Self(
-        temperature: nil,
-        maximumResponseTokens: remoteMaximumResponseTokens
-    )
+enum ToolGenerationOptionsResolver {
+    nonisolated static let defaultStreaming = true
+    nonisolated static let globalMaximumResponseTokens = 32_768
+    nonisolated static let promptRefinementMaximumResponseTokens = 1_000
+    nonisolated static let metadataMaximumResponseTokens = 512
 
-    static let qwenDefaults = Self(
-        temperature: 0.6,
-        maximumResponseTokens: 4096,
-        mlxKVCacheMaxSize: 16_384,
-        mlxKVCacheBitsEnabled: false,
-        mlxKVCacheBits: 4,
-        mlxThinkingEnabled: false,
-        sampling: Sampling(
-            topP: 0.95,
-            topK: 20,
-            minP: 0.0,
-            presencePenalty: 0.0,
-            repetitionPenalty: 1.0
+    @MainActor
+    static func stageConfiguration(
+        for stage: ToolGenerationStage,
+        model: ModelConfig?,
+        provider: ProviderConfig?,
+        languageModel: any LanguageModel
+    ) -> ToolGenerationStageConfiguration {
+        let capabilities = ModelGenerationCapabilities.resolved(
+            model: model,
+            provider: provider,
+            languageModel: languageModel
         )
-    )
+        let options = capabilities.applying(to: baseOptions(for: stage))
+        return ToolGenerationStageConfiguration(
+            stage: stage,
+            languageModel: languageModel,
+            generationOptions: options,
+            streaming: defaultStreaming || capabilities.requiresStreaming
+        )
+    }
 
-    static func defaults(for model: ModelConfig) -> Self {
-        switch model.source {
-        case .appleFoundation:
-            return .foundation
-        case .mlx:
-            return MLXModelCatalog.generationDefaultsByIdentifier[model.identifier] ?? .qwenDefaults
-        case .remote:
-            if model.isOpenAICodexModel {
-                var defaults = Self.remote
-                defaults.maximumResponseTokens = nil
-                return defaults
-            }
-            if model.providerIdentifier == ProviderKind.ollama.rawValue {
-                return OllamaModelCatalog.generationDefaultsByIdentifier[model.identifier] ?? .ollamaDefaults
-            }
-            return .remote
+    @MainActor
+    static func options(
+        for stage: ToolGenerationStage,
+        model: ModelConfig?,
+        provider: ProviderConfig?,
+        languageModel: (any LanguageModel)?
+    ) -> GenerationOptions {
+        let capabilities = ModelGenerationCapabilities.resolved(
+            model: model,
+            provider: provider,
+            languageModel: languageModel
+        )
+        return capabilities.applying(to: baseOptions(for: stage))
+    }
+
+    @MainActor
+    private static func baseOptions(for stage: ToolGenerationStage) -> GenerationOptions {
+        switch stage {
+        case .codingAgent:
+            return GenerationOptions(maximumResponseTokens: globalMaximumResponseTokens)
+        case .promptRefinement:
+            return GenerationOptions(maximumResponseTokens: promptRefinementMaximumResponseTokens)
+        case .metadata:
+            return GenerationOptions(maximumResponseTokens: metadataMaximumResponseTokens)
         }
     }
 }
@@ -75,105 +125,11 @@ struct ModelGenerationDefaults: Equatable {
 extension ModelConfig {
     @MainActor
     func generationOptions(preferences: GenerationPreferencesStore) -> GenerationOptions {
-        let defaults = ModelGenerationDefaults.defaults(for: self)
-        let customOptionsEnabled = preferences.customOptionsEnabled
-        let temperature: Double?
-
-        switch source {
-        case .remote:
-            temperature = customOptionsEnabled ? preferences.temperature : nil
-        case .appleFoundation, .mlx:
-            temperature = customOptionsEnabled ? preferences.temperature : defaults.temperature
-        }
-
-        var options = GenerationOptions(
-            temperature: temperature,
-            maximumResponseTokens: maximumResponseTokens(for: defaults, preferences: preferences)
+        ToolGenerationOptionsResolver.options(
+            for: .codingAgent,
+            model: self,
+            provider: nil,
+            languageModel: nil
         )
-
-        if source == .mlx {
-            #if canImport(Hub)
-            let maxSize = customOptionsEnabled
-                ? preferences.mlxKVCacheMaxSize
-                : defaults.mlxKVCacheMaxSize ?? 4096
-            let bitsEnabled = customOptionsEnabled
-                ? preferences.mlxKVCacheBitsEnabled
-                : defaults.mlxKVCacheBitsEnabled ?? false
-            let bits = bitsEnabled
-                ? (customOptionsEnabled ? preferences.mlxKVCacheBits : defaults.mlxKVCacheBits ?? 4)
-                : nil
-
-            options[custom: MLXLanguageModel.self] = MLXLanguageModel.CustomGenerationOptions(
-                kvCache: .init(maxSize: maxSize, bits: bits, groupSize: 64, quantizedStart: 0),
-                userInputProcessing: nil,
-                additionalContext: ["enable_thinking": .bool(defaults.mlxThinkingEnabled ?? false)],
-                // TODO: Enable if we add back mlx and use AnyLanguageModel fork
-//                regularGeneration: defaults.mlxGenerationParameters,
-//                structuredGeneration: defaults.mlxGenerationParameters
-            )
-            #endif
-        }
-
-        if source == .remote, providerIdentifier == ProviderKind.ollama.rawValue,
-           let ollamaOptions = defaults.ollamaGenerationParameters {
-            options[custom: OllamaLanguageModel.self] = ollamaOptions
-        }
-
-        if source == .remote, isOpenAICodexModel {
-            options[custom: OpenAILanguageModel.self] = OpenAILanguageModel.CustomGenerationOptions(
-                store: false
-            )
-        }
-
-        return options
-    }
-
-    @MainActor
-    private func maximumResponseTokens(
-        for defaults: ModelGenerationDefaults,
-        preferences: GenerationPreferencesStore
-    ) -> Int? {
-        if isOpenAICodexModel {
-            return nil
-        }
-        if preferences.customOptionsEnabled {
-            return preferences.maximumResponseTokens
-        }
-        return defaults.maximumResponseTokens
-    }
-}
-
-private extension ModelGenerationDefaults {
-    // TODO: Enable if we add back mlx and use AnyLanguageModel fork
-//    var mlxGenerationParameters: MLXLanguageModel.CustomGenerationOptions.GenerationParameters? {
-//        guard let sampling else { return nil }
-//        return .init(
-//            topP: sampling.topP,
-//            topK: sampling.topK,
-//            minP: sampling.minP,
-//            repetitionPenalty: sampling.repetitionPenalty,
-//            presencePenalty: sampling.presencePenalty
-//        )
-//    }
-
-    var ollamaGenerationParameters: OllamaLanguageModel.CustomGenerationOptions? {
-        guard let sampling else { return nil }
-        var options: OllamaLanguageModel.CustomGenerationOptions = [:]
-        if let topP = sampling.topP {
-            options["top_p"] = .double(Double(topP))
-        }
-        if let topK = sampling.topK {
-            options["top_k"] = .int(topK)
-        }
-        if let minP = sampling.minP {
-            options["min_p"] = .double(Double(minP))
-        }
-        if let presencePenalty = sampling.presencePenalty {
-            options["presence_penalty"] = .double(Double(presencePenalty))
-        }
-        if let repetitionPenalty = sampling.repetitionPenalty {
-            options["repeat_penalty"] = .double(Double(repetitionPenalty))
-        }
-        return options.isEmpty ? nil : options
     }
 }

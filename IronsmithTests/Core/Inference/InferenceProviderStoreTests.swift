@@ -54,83 +54,6 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func removingAPIKeyOpenAIProviderDoesNotRequireCodexLogout() async throws {
-        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
-        let context = ModelContext(container)
-        let codexLogout = CodexLogoutRecorder()
-        let authClient = OpenAICodexAuthClient(
-            credential: { nil },
-            signIn: { throw OpenAICodexAuthClientError.missingCredential },
-            signOut: {
-                await codexLogout.record()
-                throw OpenAICodexAuthClientError.missingCodexBinary("Missing Codex")
-            },
-            validCredential: { throw OpenAICodexAuthClientError.missingCredential },
-            discoverModels: { throw OpenAICodexAuthClientError.missingCredential }
-        )
-        let inferenceStore = InferenceStore(
-            dependencies: Self.dependencies(
-                remoteModelIDs: ["gpt-test"],
-                openAICodexAuthClient: authClient
-            )
-        )
-
-        await inferenceStore.loadIfNeeded(modelContext: context)
-        let didAdd = await inferenceStore.addProvider(
-            choice: .init(descriptor: ProviderCatalog.descriptor(for: .openAI)!),
-            apiKey: "test-key"
-        )
-        let provider = try #require(inferenceStore.providers.first { $0.kind == .openAI })
-
-        await inferenceStore.removeProvider(provider)
-
-        #expect(didAdd)
-        #expect(await codexLogout.callCount == 0)
-        #expect(!(inferenceStore.providers.contains { $0.kind == .openAI }))
-        #expect(inferenceStore.presentedErrorMessage == nil)
-    }
-
-    @MainActor
-    @Test
-    func removingOpenAIProviderPreservesAPIKeyWhenCodexLogoutFails() async throws {
-        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
-        let context = ModelContext(container)
-        let codexLogout = CodexLogoutRecorder()
-        let authClient = OpenAICodexAuthClient(
-            credential: { OpenAICodexCredential(accessToken: "codex-token") },
-            signIn: { OpenAICodexCredential(accessToken: "codex-token") },
-            signOut: {
-                await codexLogout.record()
-                throw OpenAICodexAuthClientError.missingCodexBinary("Missing Codex")
-            },
-            validCredential: { OpenAICodexCredential(accessToken: "codex-token") },
-            discoverModels: { [] }
-        )
-        let inferenceStore = InferenceStore(
-            dependencies: Self.dependencies(
-                remoteModelIDs: ["gpt-test"],
-                openAICodexAuthClient: authClient
-            )
-        )
-
-        await inferenceStore.loadIfNeeded(modelContext: context)
-        let didAdd = await inferenceStore.addProvider(
-            choice: .init(descriptor: ProviderCatalog.descriptor(for: .openAI)!),
-            apiKey: "test-key"
-        )
-        let provider = try #require(inferenceStore.providers.first { $0.kind == .openAI })
-
-        await inferenceStore.removeProvider(provider)
-
-        #expect(didAdd)
-        #expect(await codexLogout.callCount == 1)
-        #expect(inferenceStore.providers.contains { $0.kind == .openAI })
-        #expect(inferenceStore.apiKey(for: provider) == "test-key")
-        #expect(inferenceStore.presentedErrorMessage == "Missing Codex")
-    }
-
-    @MainActor
-    @Test
     func addingProviderDoesNotWaitForRemoteModelDiscovery() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
@@ -620,13 +543,5 @@ extension InferenceTests {
         }
 
         #expect(inferenceStore.availableProviderChoices.map(\.kind) == [.customOpenAICompatible])
-    }
-}
-
-private actor CodexLogoutRecorder {
-    private(set) var callCount = 0
-
-    func record() {
-        callCount += 1
     }
 }

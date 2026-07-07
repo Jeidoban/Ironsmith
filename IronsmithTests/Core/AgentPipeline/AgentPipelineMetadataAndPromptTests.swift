@@ -29,8 +29,10 @@ extension AgentPipelineTests {
 
         let suggestion = await ToolMetadataClient.live().suggestMetadata(
             userPrompt: "recipes",
-            languageModel: StructuredMetadataLanguageModel(response: response),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
         )
 
         #expect(suggestion.displayName == "Recipe Board")
@@ -58,8 +60,10 @@ extension AgentPipelineTests {
 
         let suggestion = await ToolMetadataClient.live().suggestMetadata(
             userPrompt: "Build a timer",
-            languageModel: StructuredMetadataLanguageModel(response: response),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
         )
 
         #expect(suggestion.menuBarSystemImage == ToolMenuBarSymbol.fallback)
@@ -72,8 +76,10 @@ extension AgentPipelineTests {
 
         let suggestion = await ToolMetadataClient.live().suggestMetadata(
             userPrompt: "Build a pantry tracker",
-            languageModel: StructuredMetadataLanguageModel(response: response),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
         )
 
         #expect(suggestion.displayName == "Build A Pantry Tracker")
@@ -88,12 +94,16 @@ extension AgentPipelineTests {
         let refinedPrompt = "Build a first-version local macOS pantry tracker with a searchable list, editable item details, and expiry highlights."
         let refined = await ToolPromptRefinementClient.live().refinePrompt(
             userPrompt: "Build a pantry tracker",
-            languageModel: StubAgentLanguageModel { prompt, options in
-                await promptCapture.record(prompt)
-                await optionsCapture.record(options)
-                return refinedPrompt
-            },
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096),
+            invoker: Self.makeInvoker(
+                languageModel: StubAgentLanguageModel { prompt, options in
+                    await promptCapture.record(prompt)
+                    await optionsCapture.record(options)
+                    return refinedPrompt
+                },
+                generationOptions: GenerationOptions(
+                    maximumResponseTokens: ToolGenerationOptionsResolver.promptRefinementMaximumResponseTokens
+                )
+            ),
             sandboxEnabled: false
         )
 
@@ -103,7 +113,10 @@ extension AgentPipelineTests {
         #expect(prompt.contains("App sandbox: disabled."))
         #expect(prompt.contains("must not make changes to the user's system unless the user asks"))
         #expect(prompt.contains("Return a plain text prompt"))
-        #expect(await optionsCapture.options.first?.maximumResponseTokens == 1000)
+        #expect(
+            await optionsCapture.options.first?.maximumResponseTokens
+                == ToolGenerationOptionsResolver.promptRefinementMaximumResponseTokens
+        )
     }
 
     @MainActor
@@ -112,8 +125,10 @@ extension AgentPipelineTests {
         let refinedPrompt = "Build a mortgage calculator with purchase price, down payment, interest, taxes, insurance, and a clear monthly payment summary."
         let refined = await ToolPromptRefinementClient.live().refinePrompt(
             userPrompt: "Make a mortgage calculator",
-            languageModel: StreamOnlyPromptRefinementLanguageModel(response: refinedPrompt),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096),
+            invoker: Self.makeInvoker(
+                languageModel: StreamOnlyPromptRefinementLanguageModel(response: refinedPrompt),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            ),
             sandboxEnabled: true
         )
 
@@ -127,11 +142,13 @@ extension AgentPipelineTests {
         let refinedPrompt = "Build a compact menu bar timer with start, pause, reset, and a current-session summary."
         let refined = await ToolPromptRefinementClient.live().refinePrompt(
             userPrompt: "Build a timer",
-            languageModel: StubAgentLanguageModel { prompt, _ in
-                await promptCapture.record(prompt)
-                return refinedPrompt
-            },
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096),
+            invoker: Self.makeInvoker(
+                languageModel: StubAgentLanguageModel { prompt, _ in
+                    await promptCapture.record(prompt)
+                    return refinedPrompt
+                },
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            ),
             appKind: .menuBar,
             sandboxEnabled: true
         )
@@ -150,8 +167,10 @@ extension AgentPipelineTests {
     func livePromptRefinementClientFallsBackToOriginalPromptOnFailure() async throws {
         let refined = await ToolPromptRefinementClient.live().refinePrompt(
             userPrompt: "Build a pantry tracker",
-            languageModel: EmptyLanguageModel(),
-            generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            invoker: Self.makeInvoker(
+                languageModel: EmptyLanguageModel(),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
         )
 
         #expect(refined == nil)
@@ -284,6 +303,168 @@ extension AgentPipelineTests {
         #expect(!(prompts.first?.contains("Rewrite the whole app with unrelated features.") ?? false))
         #expect(await metadataCapture.count == 0)
         #expect(await promptRefinementCapture.count == 0)
+    }
+
+    @MainActor
+    @Test
+    func languageModelInvokerStreamsByDefaultAndRunsSuccessHookOnce() async throws {
+        let modeCapture = InvocationModeCapture()
+        let invocationCapture = InvocationCapture()
+        let model = InvocationModeLanguageModel(
+            modeCapture: modeCapture,
+            respondResult: .success("responded"),
+            streamResult: .success("streamed")
+        )
+        let session = LanguageModelSession(model: model)
+        let invoker = Self.makeInvoker(
+            languageModel: model,
+            afterLanguageModelInvocation: {
+                await invocationCapture.record()
+            }
+        )
+
+        let response = try await invoker.respond(
+            stage: .codingAgent,
+            in: session,
+            to: "Build a timer",
+            generating: String.self
+        )
+
+        #expect(response == "streamed")
+        #expect(await modeCapture.modes == [.stream])
+        #expect(await invocationCapture.count == 1)
+    }
+
+    @MainActor
+    @Test
+    func languageModelInvokerSupportsExplicitNonStreamingOverride() async throws {
+        let modeCapture = InvocationModeCapture()
+        let model = InvocationModeLanguageModel(
+            modeCapture: modeCapture,
+            respondResult: .success("responded"),
+            streamResult: .success("streamed")
+        )
+        let session = LanguageModelSession(model: model)
+        let invoker = Self.makeInvoker(languageModel: model)
+
+        let response = try await invoker.respond(
+            stage: .codingAgent,
+            in: session,
+            to: "Build a timer",
+            generating: String.self,
+            streaming: false
+        )
+
+        #expect(response == "responded")
+        #expect(await modeCapture.modes == [.respond])
+    }
+
+    @MainActor
+    @Test
+    func languageModelInvokerRunsFailureHookOnce() async throws {
+        let modeCapture = InvocationModeCapture()
+        let invocationCapture = InvocationCapture()
+        let model = InvocationModeLanguageModel(
+            modeCapture: modeCapture,
+            respondResult: .success("responded"),
+            streamResult: .failure(FakeAgentError.expected)
+        )
+        let session = LanguageModelSession(model: model)
+        let invoker = Self.makeInvoker(
+            languageModel: model,
+            afterLanguageModelInvocation: {
+                await invocationCapture.record()
+            }
+        )
+
+        do {
+            _ = try await invoker.respond(
+                stage: .codingAgent,
+                in: session,
+                to: "Build a timer",
+                generating: String.self
+            )
+            Issue.record("Expected responder to throw.")
+        } catch {
+            #expect(error as? FakeAgentError == .expected)
+        }
+
+        #expect(await modeCapture.modes == [.stream])
+        #expect(await invocationCapture.count == 1)
+    }
+}
+
+private enum InvocationMode: Equatable {
+    case respond
+    case stream
+}
+
+private actor InvocationModeCapture {
+    private(set) var modes: [InvocationMode] = []
+
+    func record(_ mode: InvocationMode) {
+        modes.append(mode)
+    }
+}
+
+private struct InvocationModeLanguageModel: LanguageModel {
+    typealias UnavailableReason = Never
+
+    let modeCapture: InvocationModeCapture
+    let respondResult: Result<String, any Error>
+    let streamResult: Result<String, any Error>
+
+    func respond<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        await modeCapture.record(.respond)
+        guard type == String.self else {
+            throw FakeAgentError.unsupportedStructuredGeneration
+        }
+        let response = try respondResult.get()
+        return LanguageModelSession.Response(
+            content: response as! Content,
+            rawContent: GeneratedContent(response),
+            transcriptEntries: []
+        )
+    }
+
+    func streamResponse<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
+        let modeCapture = modeCapture
+        let streamResult = streamResult
+        return LanguageModelSession.ResponseStream(
+            stream: AsyncThrowingStream { continuation in
+                Task {
+                    await modeCapture.record(.stream)
+                    guard type == String.self else {
+                        continuation.finish(throwing: FakeAgentError.unsupportedStructuredGeneration)
+                        return
+                    }
+                    do {
+                        let response = try streamResult.get()
+                        continuation.yield(
+                            .init(
+                                content: (response as! Content).asPartiallyGenerated(),
+                                rawContent: GeneratedContent(response)
+                            )
+                        )
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+            }
+        )
     }
 }
 

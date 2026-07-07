@@ -189,53 +189,90 @@ extension InferenceTests {
 
         #expect(options.maximumResponseTokens == nil)
         #expect(openAIOptions?.store == false)
-
-        let customPreferences = Self.generationPreferences()
-        customPreferences.customOptionsEnabled = true
-        customPreferences.maximumResponseTokens = 8192
-
-        let customOptions = model.generationOptions(preferences: customPreferences)
-        #expect(customOptions.maximumResponseTokens == nil)
     }
 
     @MainActor
     @Test
-    func openAICodexGenerationOptionsSanitizerRemovesUnsupportedParameters() {
-        let languageModel = OpenAILanguageModel(
-            baseURL: OpenAICodexBackend.backendBaseURL,
-            apiKey: "token",
-            model: "gpt-5.5",
-            apiVariant: .responses
+    func toolGenerationOptionsResolverUsesStageSpecificOptionsForOpenAI() {
+        let provider = ProviderCatalog.makeProvider(for: .openAI)!
+        let model = ModelConfig(
+            identifier: "gpt-5.5",
+            displayName: "GPT-5.5",
+            providerIdentifier: ProviderKind.openAI.rawValue,
+            source: .remote,
+            installState: .installed
         )
-        var options = GenerationOptions(maximumResponseTokens: 8192)
-        var openAIOptions = OpenAILanguageModel.CustomGenerationOptions()
-        openAIOptions.store = true
-        options[custom: OpenAILanguageModel.self] = openAIOptions
-
-        let sanitized = OpenAICodexGenerationOptions.sanitized(options, for: languageModel)
-
-        #expect(sanitized.maximumResponseTokens == nil)
-        #expect(sanitized[custom: OpenAILanguageModel.self]?.store == false)
-    }
-
-    @MainActor
-    @Test
-    func openAICodexGenerationOptionsSanitizerLeavesNormalOpenAIOptionsUnchanged() {
         let languageModel = OpenAILanguageModel(
             baseURL: OpenAILanguageModel.defaultBaseURL,
             apiKey: "token",
             model: "gpt-5.5",
             apiVariant: .responses
         )
-        var options = GenerationOptions(maximumResponseTokens: 8192)
-        var openAIOptions = OpenAILanguageModel.CustomGenerationOptions()
-        openAIOptions.store = true
-        options[custom: OpenAILanguageModel.self] = openAIOptions
 
-        let sanitized = OpenAICodexGenerationOptions.sanitized(options, for: languageModel)
+        let codingAgent = ToolGenerationOptionsResolver.stageConfiguration(
+            for: .codingAgent,
+            model: model,
+            provider: provider,
+            languageModel: languageModel
+        )
+        let promptRefinement = ToolGenerationOptionsResolver.stageConfiguration(
+            for: .promptRefinement,
+            model: model,
+            provider: provider,
+            languageModel: languageModel
+        )
+        let metadata = ToolGenerationOptionsResolver.stageConfiguration(
+            for: .metadata,
+            model: model,
+            provider: provider,
+            languageModel: languageModel
+        )
 
-        #expect(sanitized.maximumResponseTokens == 8192)
-        #expect(sanitized[custom: OpenAILanguageModel.self]?.store == true)
+        #expect(codingAgent.generationOptions.maximumResponseTokens == ToolGenerationOptionsResolver.globalMaximumResponseTokens)
+        #expect(
+            promptRefinement.generationOptions.maximumResponseTokens
+                == ToolGenerationOptionsResolver.promptRefinementMaximumResponseTokens
+        )
+        #expect(
+            metadata.generationOptions.maximumResponseTokens
+                == ToolGenerationOptionsResolver.metadataMaximumResponseTokens
+        )
+        #expect(codingAgent.streaming)
+        #expect(promptRefinement.streaming)
+        #expect(metadata.streaming)
+    }
+
+    @MainActor
+    @Test
+    func toolGenerationOptionsResolverAppliesCodexCapabilitiesToEveryStage() {
+        let provider = ProviderCatalog.makeProvider(for: .openAI)!
+        let model = ModelConfig(
+            identifier: "codex:gpt-5.5",
+            displayName: "GPT-5.5 (Codex)",
+            providerIdentifier: ProviderKind.openAI.rawValue,
+            source: .remote,
+            installState: .installed
+        )
+        let languageModel = OpenAILanguageModel(
+            baseURL: OpenAICodexBackend.backendBaseURL,
+            apiKey: "token",
+            model: "gpt-5.5",
+            apiVariant: .responses
+        )
+        let stages = ToolGenerationStage.allCases.map {
+            ToolGenerationOptionsResolver.stageConfiguration(
+                for: $0,
+                model: model,
+                provider: provider,
+                languageModel: languageModel
+            )
+        }
+
+        for stage in stages {
+            #expect(stage.generationOptions.maximumResponseTokens == nil)
+            #expect(stage.generationOptions[custom: OpenAILanguageModel.self]?.store == false)
+            #expect(stage.streaming)
+        }
     }
 
     @MainActor
@@ -281,7 +318,7 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func localProviderModelsHideAppleFoundationUntilEnabled() throws {
+    func localProviderModelsOnlyShowAppleFoundationWhenEnabled() throws {
         let localProvider = try #require(ProviderCatalog.makeProvider(for: .local))
         let foundationModel = ModelConfig(
             identifier: ModelConfig.appleFoundationIdentifier,
@@ -290,28 +327,20 @@ extension InferenceTests {
             source: .appleFoundation,
             installState: .builtIn
         )
-        let mlxModel = ModelConfig(
-            identifier: "local-test-model",
-            displayName: "Local Test Model",
-            providerIdentifier: ProviderConfig.localProviderIdentifier,
-            source: .mlx,
-            installState: .installed
-        )
         let inferenceStore = InferenceStore(
             dependencies: Self.dependencies(),
             appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
         )
         inferenceStore.providers = [localProvider]
-        inferenceStore.persistedModels = [foundationModel, mlxModel]
+        inferenceStore.persistedModels = [foundationModel]
 
-        #expect(inferenceStore.models(for: localProvider).map(\.identifier) == [mlxModel.identifier])
+        #expect(inferenceStore.models(for: localProvider).isEmpty)
 
         inferenceStore.setAppleFoundationModelEnabled(true)
 
         #expect(
             inferenceStore.models(for: localProvider).map(\.identifier) == [
                 ModelConfig.appleFoundationIdentifier,
-                mlxModel.identifier,
             ]
         )
     }
@@ -322,33 +351,30 @@ extension InferenceTests {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
         let selection = Self.modelSelection()
+        let appleFoundationPreference = Self.appleFoundationModelPreferenceStore(isEnabled: true)
         let firstStore = InferenceStore(
             dependencies: Self.dependencies(),
-            modelSelection: selection
+            modelSelection: selection,
+            appleFoundationModelPreferenceStore: appleFoundationPreference
         )
 
         await firstStore.loadIfNeeded(modelContext: context)
-        let mlxModel = ModelConfig(
-            identifier: "local-test-model",
-            displayName: "Local Test Model",
-            providerIdentifier: ProviderConfig.localProviderIdentifier,
-            source: .mlx,
-            installState: .installed
-        )
-        context.insert(mlxModel)
-        try context.save()
         try firstStore.refreshData()
 
-        firstStore.selectModel(mlxModel.selectionIdentifier)
+        let model = try #require(firstStore.persistedModels.first {
+            $0.identifier == ModelConfig.appleFoundationIdentifier
+        })
+        firstStore.selectModel(model.selectionIdentifier)
 
         let secondStore = InferenceStore(
             dependencies: Self.dependencies(),
-            modelSelection: selection
+            modelSelection: selection,
+            appleFoundationModelPreferenceStore: appleFoundationPreference
         )
         await secondStore.loadIfNeeded(modelContext: context)
 
-        #expect(secondStore.selectedModelID == mlxModel.selectionIdentifier)
-        #expect(secondStore.selectedModel?.identifier == mlxModel.identifier)
+        #expect(secondStore.selectedModelID == model.selectionIdentifier)
+        #expect(secondStore.selectedModel?.identifier == model.identifier)
     }
 
     @MainActor
@@ -410,26 +436,16 @@ extension InferenceTests {
         let context = ModelContext(container)
         let selection = Self.modelSelection()
         selection.selectedModelID = "missing::model"
-        let mlxModel = ModelConfig(
-            identifier: "local-test-model",
-            displayName: "Local Test Model",
-            providerIdentifier: ProviderConfig.localProviderIdentifier,
-            source: .mlx,
-            installState: .installed
-        )
-        context.insert(mlxModel)
-        try context.save()
         let store = InferenceStore(
             dependencies: Self.dependencies(),
             modelSelection: selection,
-            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore(isEnabled: true)
         )
 
         await store.loadIfNeeded(modelContext: context)
 
-        #expect(store.selectedModelID == mlxModel.selectionIdentifier)
-        #expect(store.selectedModel?.identifier == mlxModel.identifier)
-        #expect(selection.selectedModelID == mlxModel.selectionIdentifier)
+        #expect(store.selectedModel?.identifier == ModelConfig.appleFoundationIdentifier)
+        #expect(selection.selectedModelID == store.selectedModelID)
         #expect(store.selectedModelFallbackMessage?.contains("first available AI model") == true)
     }
 
@@ -511,50 +527,6 @@ extension InferenceTests {
         #expect(await discoveryScript.count == 2)
         #expect(!(store.remoteModels.contains { $0.providerIdentifier == provider.identifier }))
         #expect(store.connectionIssue(for: provider)?.message == "Could not connect to Ollama.")
-    }
-
-    @MainActor
-    @Test(.disabled("MLX catalog is temporarily disabled while local model downloads are parked."))
-    func localModelDownloadSuccessUpdatesPersistedModel() async throws {
-        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
-        let context = ModelContext(container)
-        let entry = MLXModelCatalog.all[0]
-        let inferenceStore = InferenceStore(
-            dependencies: Self.dependencies(downloadResult: .success(URL(fileURLWithPath: "/tmp/\(entry.identifier)")))
-        )
-
-        await inferenceStore.loadIfNeeded(modelContext: context)
-        inferenceStore.downloadFromCatalog(entry)
-
-        await Self.eventually {
-            inferenceStore.persistedModels.contains {
-                $0.identifier == entry.identifier && $0.installState == .installed
-            }
-        }
-
-        let model = try #require(inferenceStore.persistedModels.first { $0.identifier == entry.identifier })
-        #expect(model.localDirectoryPath != nil)
-        #expect(model.downloadProgress == 1)
-    }
-
-    @MainActor
-    @Test(.disabled("MLX catalog is temporarily disabled while local model downloads are parked."))
-    func localModelDownloadFailureRemovesPersistedModel() async throws {
-        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
-        let context = ModelContext(container)
-        let entry = MLXModelCatalog.all[0]
-        let inferenceStore = InferenceStore(
-            dependencies: Self.dependencies(downloadResult: .failure(FakeInferenceError.expected))
-        )
-
-        await inferenceStore.loadIfNeeded(modelContext: context)
-        inferenceStore.downloadFromCatalog(entry)
-
-        await Self.eventually {
-            inferenceStore.presentedErrorMessage != nil
-        }
-
-        #expect(!(inferenceStore.persistedModels.contains { $0.identifier == entry.identifier }))
     }
 
     @MainActor

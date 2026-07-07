@@ -101,7 +101,7 @@ struct SettingsProviderCardView: View {
     }
 
     private func localModelRows(_ models: [ModelConfig]) -> [ProviderModelRow] {
-        let storedRows = models
+        models
             .filter { $0.installState == .installed || $0.installState == .builtIn || $0.installState == .downloading }
             .map {
                 ProviderModelRow(
@@ -110,18 +110,6 @@ struct SettingsProviderCardView: View {
                     isInstalled: isModelInstalledInProviderCard($0)
                 )
             }
-        let storedIdentifiers = Set(storedRows.map(\.identifier))
-        let availableRows = MLXModelCatalog.all
-            .filter { !storedIdentifiers.contains($0.identifier) }
-            .map {
-                ProviderModelRow(
-                    identifier: $0.identifier,
-                    displayName: $0.displayName,
-                    isInstalled: false
-                )
-            }
-
-        return (storedRows + availableRows)
             .sorted {
                 if $0.isInstalled != $1.isInstalled {
                     return $0.isInstalled
