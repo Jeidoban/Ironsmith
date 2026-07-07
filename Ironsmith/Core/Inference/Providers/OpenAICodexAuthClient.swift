@@ -343,7 +343,6 @@ nonisolated enum OpenAICodexAuthClientError: LocalizedError, Equatable {
     case missingCredential
     case missingRefreshToken
     case oauthSignInFailed(String)
-    case codexCommandFailed(String)
     case requestFailed(statusCode: Int, message: String)
 
     var errorDescription: String? {
@@ -368,8 +367,6 @@ nonisolated enum OpenAICodexAuthClientError: LocalizedError, Equatable {
             return "Sign in with ChatGPT again before using Codex models."
         case .oauthSignInFailed(let message):
             return message.isEmpty ? "ChatGPT sign-in failed." : message
-        case .codexCommandFailed(let message):
-            return message.isEmpty ? "Codex command failed." : message
         case .requestFailed(let statusCode, let message):
             return "ChatGPT returned HTTP \(statusCode): \(message)"
         }

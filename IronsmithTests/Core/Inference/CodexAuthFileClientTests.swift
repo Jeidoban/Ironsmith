@@ -304,7 +304,7 @@ extension InferenceTests {
     }
 
     @Test
-    func codexCLIClientBuildsCommandsWithBundledExecutableAndCodexHome() async throws {
+    func codexCLIClientBuildsGenericCommandsWithBundledExecutableAndCodexHome() async throws {
         let directory = try Self.temporaryDirectory()
         let codexHomeDirectory = directory.appendingPathComponent(".codex", isDirectory: true)
         let executableURL = directory.appendingPathComponent("codex")
@@ -316,56 +316,19 @@ extension InferenceTests {
             environment: ["PATH": "/usr/bin"],
             runProcess: { request in
                 await recorder.record(request)
-                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+                return CodexCLIProcessResult(stdout: "ok", stderr: "", terminationStatus: 0)
             }
         )
 
-        try await client.signIn()
-        _ = try await client.loginStatus()
-        try await client.signOut()
+        let result = try await client.run(["exec", "--json"])
 
         let requests = await recorder.requests
-        #expect(requests.map(\.executableURL) == [executableURL, executableURL, executableURL])
-        #expect(requests.map(\.arguments) == [
-            ["login"],
-            ["login", "status"],
-            ["logout"],
-        ])
+        #expect(result.stdout == "ok")
+        #expect(requests.map(\.executableURL) == [executableURL])
+        #expect(requests.map(\.arguments) == [["exec", "--json"]])
         #expect(requests.allSatisfy { $0.currentDirectoryURL == codexHomeDirectory })
         #expect(requests.allSatisfy { $0.environment["CODEX_HOME"] == codexHomeDirectory.path })
         #expect(FileManager.default.fileExists(atPath: codexHomeDirectory.path))
-    }
-
-    @Test
-    func codexCLIClientRedactsTokenShapedCommandFailures() async throws {
-        let directory = try Self.temporaryDirectory()
-        let client = CodexCLIClient.live(
-            codexHomeDirectory: directory.appendingPathComponent(".codex", isDirectory: true),
-            executableURL: directory.appendingPathComponent("codex"),
-            bundleResourceURL: nil,
-            environment: [:],
-            runProcess: { _ in
-                CodexCLIProcessResult(
-                    stdout: #""access_token": "eyJ.header.payload""#,
-                    stderr: #"Bearer eyJ.access.payload and refresh_token: rt.1.secret"#,
-                    terminationStatus: 1
-                )
-            }
-        )
-
-        do {
-            try await client.signIn()
-            Issue.record("Expected Codex command failure.")
-        } catch let error as OpenAICodexAuthClientError {
-            guard case .codexCommandFailed(let message) = error else {
-                Issue.record("Expected codexCommandFailed, got \(error).")
-                return
-            }
-            #expect(!message.contains("eyJ.header.payload"))
-            #expect(!message.contains("eyJ.access.payload"))
-            #expect(!message.contains("rt.1.secret"))
-            #expect(message.contains("[redacted]") || message.contains("[jwt-redacted]"))
-        }
     }
 
     @Test

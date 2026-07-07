@@ -20,9 +20,7 @@ nonisolated struct CodexCLIProcessResult: Equatable, Sendable {
 }
 
 nonisolated struct CodexCLIClient: Sendable {
-    var signIn: @Sendable () async throws -> Void
-    var signOut: @Sendable () async throws -> Void
-    var loginStatus: @Sendable () async throws -> CodexCLIProcessResult
+    var run: @Sendable (_ arguments: [String]) async throws -> CodexCLIProcessResult
 }
 
 extension CodexCLIClient {
@@ -36,31 +34,9 @@ extension CodexCLIClient {
         }
     ) -> Self {
         Self(
-            signIn: {
+            run: { arguments in
                 let request = try makeRequest(
-                    command: ["login"],
-                    codexHomeDirectory: codexHomeDirectory,
-                    executableURL: executableURL,
-                    bundleResourceURL: bundleResourceURL,
-                    environment: environment
-                )
-                let result = try await runProcess(request)
-                try validate(result)
-            },
-            signOut: {
-                let request = try makeRequest(
-                    command: ["logout"],
-                    codexHomeDirectory: codexHomeDirectory,
-                    executableURL: executableURL,
-                    bundleResourceURL: bundleResourceURL,
-                    environment: environment
-                )
-                let result = try await runProcess(request)
-                try validate(result)
-            },
-            loginStatus: {
-                let request = try makeRequest(
-                    command: ["login", "status"],
+                    arguments: arguments,
                     codexHomeDirectory: codexHomeDirectory,
                     executableURL: executableURL,
                     bundleResourceURL: bundleResourceURL,
@@ -73,16 +49,14 @@ extension CodexCLIClient {
 
     nonisolated static var unconfigured: Self {
         Self(
-            signIn: { throw OpenAICodexAuthClientError.missingCodexBinary("Codex CLI is not configured.") },
-            signOut: {},
-            loginStatus: {
+            run: { _ in
                 throw OpenAICodexAuthClientError.missingCodexBinary("Codex CLI is not configured.")
             }
         )
     }
 
     nonisolated static func makeRequest(
-        command: [String],
+        arguments: [String],
         codexHomeDirectory: URL,
         executableURL: URL?,
         bundleResourceURL: URL?,
@@ -99,7 +73,7 @@ extension CodexCLIClient {
 
         return CodexCLIProcessRequest(
             executableURL: resolvedExecutableURL,
-            arguments: command,
+            arguments: arguments,
             environment: resolvedEnvironment,
             currentDirectoryURL: codexHomeDirectory
         )
@@ -109,6 +83,7 @@ extension CodexCLIClient {
         guard let resourceURL else {
             throw OpenAICodexAuthClientError.missingCodexBinary("Could not locate app resources.")
         }
+
         let vendorURL = resourceURL
             .appendingPathComponent("Codex", isDirectory: true)
             .appendingPathComponent("vendor", isDirectory: true)
@@ -137,39 +112,6 @@ extension CodexCLIClient {
             return nil
         }
         return version
-    }
-
-    nonisolated private static func validate(_ result: CodexCLIProcessResult) throws {
-        guard result.terminationStatus == 0 else {
-            throw OpenAICodexAuthClientError.codexCommandFailed(sanitizedOutput(result.combinedOutput))
-        }
-    }
-
-    nonisolated private static func sanitizedOutput(_ output: String) -> String {
-        var sanitized = output
-        for key in ["OPENAI_API_KEY", "access_token", "refresh_token", "id_token"] {
-            sanitized = sanitized.replacingOccurrences(
-                of: #""\#(key)"\s*:\s*"[^"]+""#,
-                with: #""\#(key)": "[redacted]""#,
-                options: .regularExpression
-            )
-        }
-        sanitized = sanitized.replacingOccurrences(
-            of: #"Bearer\s+[A-Za-z0-9._~+/=-]+"#,
-            with: "Bearer [redacted]",
-            options: .regularExpression
-        )
-        sanitized = sanitized.replacingOccurrences(
-            of: #"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#,
-            with: "[jwt-redacted]",
-            options: .regularExpression
-        )
-        sanitized = sanitized.replacingOccurrences(
-            of: #"rt\.[A-Za-z0-9._-]+"#,
-            with: "rt.[redacted]",
-            options: .regularExpression
-        )
-        return sanitized
     }
 
     nonisolated private static func runProcess(_ request: CodexCLIProcessRequest) async throws -> CodexCLIProcessResult {
