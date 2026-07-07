@@ -17,7 +17,8 @@ struct LocalModelManagementView: View {
     private var rows: [LocalModelRow] {
         let localModels = inferenceStore.persistedModels
             .filter { $0.providerIdentifier == provider.identifier }
-        return localModels
+        return
+            localModels
             .filter {
                 $0.installState == .installed || $0.installState == .builtIn
             }
