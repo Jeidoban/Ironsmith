@@ -10,9 +10,8 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
         try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
-        let swiftCache = root.appendingPathComponent("swift-cache", isDirectory: true)
-        try FileManager.default.createDirectory(at: swiftCache, withIntermediateDirectories: true)
-        let missingCache = root.appendingPathComponent("missing-cache", isDirectory: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
 
         let cliCapture = CodexAgentCLICapture()
         let cliClient = CodexCLIClient(
@@ -20,8 +19,10 @@ extension AgentPipelineTests {
                 Issue.record("Codex agent should use streaming exec.")
                 return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1)
             },
-            runStreaming: { arguments, environment, onStdoutLine, _ in
+            runStreaming: { arguments, environment, onStdoutLine, onStderrLine in
                 await cliCapture.record(arguments: arguments, environment: environment)
+                await onStderrLine("2026-07-07 codex[1:2] dev 0 () : purging events up to event id 123")
+                await onStderrLine("useful stderr")
                 await onStdoutLine(#"{"type":"thread.started","thread_id":"thread-1"}"#)
                 await onStdoutLine(#"{"type":"item.completed","item":{"type":"agent_message","text":"I am editing ContentView."}}"#)
                 await onStdoutLine(#"{"type":"item.started","item":{"type":"command_execution","command":"swift build","status":"in_progress","aggregated_output":"hidden"}}"#)
@@ -32,7 +33,7 @@ extension AgentPipelineTests {
         let client = CodexAgentClient.live(
             cliClient: cliClient,
             openAICodexAuthClient: .unconfigured,
-            swiftCacheDirectoryCandidates: [swiftCache, missingCache]
+            temporaryDirectory: temporaryDirectory
         )
         let eventCapture = CodexAgentEventCapture()
         let request = CodexAgentRequest(
@@ -62,24 +63,55 @@ extension AgentPipelineTests {
             packageRoot.path,
             "--skip-git-repo-check",
         ])
-        #expect(arguments.contains("--add-dir"))
-        #expect(arguments.contains(swiftCache.path))
-        #expect(!arguments.contains(missingCache.path))
+        #expect(!arguments.contains("--add-dir"))
         #expect(arguments.contains("--model"))
         #expect(arguments.contains("gpt-5.5"))
-        #expect(arguments.last?.contains("Create or edit only Sources/MortgageMate/ContentView.swift") == true)
-        #expect(arguments.last?.contains("normal swift build") == true)
+        let prompt = try #require(arguments.last)
+        #expect(prompt.contains("Create or edit only Sources/MortgageMate/ContentView.swift"))
+        #expect(prompt.contains("Run `swift build`"))
+        #expect(!prompt.contains("HOME="))
+        #expect(!prompt.contains("XDG_CACHE_HOME="))
+        #expect(!prompt.contains("CLANG_MODULE_CACHE_PATH="))
+        #expect(!prompt.contains("SWIFTPM_MODULECACHE_OVERRIDE="))
+        #expect(!prompt.contains("SWIFT_MODULE_CACHE_PATH="))
+        #expect(!prompt.contains("TMPDIR="))
+        #expect(!prompt.contains("mktemp"))
+        #expect(!prompt.contains("trap "))
+        #expect(!prompt.contains("swift build --disable-sandbox"))
+        #expect(prompt.contains("Use \(temporaryDirectory.path)/ironsmith-codex-swift-"))
+        #expect(prompt.contains("for any temporary scratch files you deliberately create."))
+        #expect(prompt.contains("Do not write deliberate scratch files directly in the top-level system temp directory."))
+        #expect(prompt.contains("Ironsmith will clean up the temporary workspace after Codex exits."))
         #expect(environment["OPENAI_API_KEY"] == "sk-test")
+        let codexHomeDirectory = try #require(environment["HOME"])
+        #expect(codexHomeDirectory.hasPrefix("\(temporaryDirectory.path)/ironsmith-codex-swift-"))
+        #expect(codexHomeDirectory.hasSuffix("/home"))
+        let codexTemporaryWorkspace = String(codexHomeDirectory.dropLast("/home".count))
+        #expect(environment["TMPDIR"] == nil)
+        #expect(environment["XDG_CACHE_HOME"] == "\(codexTemporaryWorkspace)/cache")
+        #expect(environment["CLANG_MODULE_CACHE_PATH"] == "\(codexTemporaryWorkspace)/clang-module-cache")
+        #expect(environment["SWIFTPM_MODULECACHE_OVERRIDE"] == "\(codexTemporaryWorkspace)/swift-module-cache")
+        #expect(environment["SWIFT_MODULE_CACHE_PATH"] == "\(codexTemporaryWorkspace)/swift-module-cache")
+        let remainingTemporaryItems = try FileManager.default.contentsOfDirectory(
+            atPath: temporaryDirectory.path
+        )
+        #expect(remainingTemporaryItems.isEmpty)
         #expect(FileManager.default.fileExists(atPath: result.transcriptURL.path))
         let transcript = try String(contentsOf: result.transcriptURL, encoding: .utf8)
         #expect(transcript.contains(#""thread_id":"thread-1""#))
         #expect(transcript.contains(#""aggregated_output":"hidden""#))
-        #expect(await eventCapture.events == [
-            .threadStarted("thread-1"),
-            .agentMessage("I am editing ContentView."),
-            .commandExecution(command: "swift build", status: "in_progress", exitCode: nil),
-            .turnCompleted,
-        ])
+        let events = await eventCapture.events
+        #expect(events.contains(.threadStarted("thread-1")))
+        #expect(events.contains(.error("useful stderr")))
+        #expect(events.contains(.agentMessage("I am editing ContentView.")))
+        #expect(events.contains(.commandExecution(command: "swift build", status: "in_progress", exitCode: nil)))
+        #expect(events.contains(.turnCompleted))
+        #expect(!events.contains { event in
+            if case .error(let message) = event {
+                return message.contains("purging events up to event id")
+            }
+            return false
+        })
     }
 
     @Test
@@ -110,8 +142,7 @@ extension AgentPipelineTests {
         )
         let client = CodexAgentClient.live(
             cliClient: cliClient,
-            openAICodexAuthClient: authClient,
-            swiftCacheDirectoryCandidates: []
+            openAICodexAuthClient: authClient
         )
 
         _ = try await client.run(
@@ -129,6 +160,57 @@ extension AgentPipelineTests {
 
         #expect(await authCapture.validCredentialCallCount == 1)
         #expect(try #require(await cliCapture.environment)["OPENAI_API_KEY"] == nil)
+    }
+
+    @Test
+    func codexAgentClientDeletesSwiftTempWorkspaceWhenCodexFails() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+
+        let cliClient = CodexCLIClient(
+            run: { _ in
+                Issue.record("Codex agent should use streaming exec.")
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1)
+            },
+            runStreaming: { _, _, _, _ in
+                CodexCLIProcessResult(stdout: "", stderr: "failed", terminationStatus: 1)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured,
+            temporaryDirectory: temporaryDirectory
+        )
+
+        do {
+            _ = try await client.run(
+                CodexAgentRequest(
+                    packageRootURL: packageRoot,
+                    executableName: "Demo",
+                    displayName: "Demo",
+                    appKind: .window,
+                    sandboxEnabled: true,
+                    userPrompt: "Make a demo",
+                    modelIdentifier: "codex:gpt-5.5",
+                    authentication: .apiKey("sk-test")
+                )
+            )
+            Issue.record("Expected Codex failure.")
+        } catch let error as CodexAgentError {
+            guard case .commandFailed = error else {
+                Issue.record("Expected commandFailed, got \(error).")
+                return
+            }
+        }
+
+        let remainingTemporaryItems = try FileManager.default.contentsOfDirectory(
+            atPath: temporaryDirectory.path
+        )
+        #expect(remainingTemporaryItems.isEmpty)
     }
 
     @MainActor

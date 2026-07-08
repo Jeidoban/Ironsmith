@@ -46,6 +46,74 @@ nonisolated struct CodexAgentResult: Equatable, Sendable {
     let transcriptURL: URL
 }
 
+nonisolated struct CodexAgentSwiftBuildWorkspace: Equatable, Sendable {
+    let rootURL: URL
+
+    var homeURL: URL {
+        rootURL.appendingPathComponent("home", isDirectory: true)
+    }
+
+    var cacheURL: URL {
+        rootURL.appendingPathComponent("cache", isDirectory: true)
+    }
+
+    var clangModuleCacheURL: URL {
+        rootURL.appendingPathComponent("clang-module-cache", isDirectory: true)
+    }
+
+    var swiftModuleCacheURL: URL {
+        rootURL.appendingPathComponent("swift-module-cache", isDirectory: true)
+    }
+
+    var temporaryDirectoryURL: URL {
+        rootURL.appendingPathComponent("tmp", isDirectory: true)
+    }
+
+    var directories: [URL] {
+        [
+            rootURL,
+            homeURL,
+            cacheURL,
+            clangModuleCacheURL,
+            swiftModuleCacheURL,
+            temporaryDirectoryURL,
+        ]
+    }
+
+    var environment: [String: String] {
+        [
+            "HOME": homeURL.path,
+            "XDG_CACHE_HOME": cacheURL.path,
+            "CLANG_MODULE_CACHE_PATH": clangModuleCacheURL.path,
+            "SWIFTPM_MODULECACHE_OVERRIDE": swiftModuleCacheURL.path,
+            "SWIFT_MODULE_CACHE_PATH": swiftModuleCacheURL.path,
+        ]
+    }
+
+    static func create(
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        fileManager: FileManager = .default
+    ) throws -> Self {
+        let workspace = Self(
+            rootURL: temporaryDirectory.appendingPathComponent(
+                "ironsmith-codex-swift-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        )
+        for directory in workspace.directories {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        return workspace
+    }
+
+    func remove(fileManager: FileManager = .default) throws {
+        if fileManager.fileExists(atPath: rootURL.path) {
+            try fileManager.removeItem(at: rootURL)
+        }
+    }
+
+}
+
 nonisolated enum CodexAgentEvent: Equatable, Sendable {
     case threadStarted(String?)
     case turnStarted
@@ -64,7 +132,8 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             return "Codex turn completed."
         case .agentMessage(let message):
             let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : "Codex: \(AgentDiagnosticsLog.compact(trimmed, limit: 500))"
+            return trimmed.isEmpty
+                ? nil : "Codex: \(AgentDiagnosticsLog.compact(trimmed, limit: 500))"
         case .commandExecution(let command, let status, let exitCode):
             var summary = "Codex command"
             if let status, !status.isEmpty {
@@ -85,7 +154,7 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             return nil
         }
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String
+            let type = object["type"] as? String
         else {
             return nil
         }
@@ -108,7 +177,7 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
 
     private static func itemEvent(_ object: [String: Any]) -> CodexAgentEvent? {
         guard let item = object["item"] as? [String: Any],
-              let itemType = stringValue(in: item, keys: ["type"])
+            let itemType = stringValue(in: item, keys: ["type"])
         else {
             return nil
         }
@@ -136,7 +205,8 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
     private static func stringValue(in object: [String: Any], keys: [String]) -> String? {
         for key in keys {
             if let value = object[key] as? String,
-               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
                 return value
             }
         }
@@ -163,20 +233,31 @@ extension CodexAgentClient {
     nonisolated static func live(
         cliClient: CodexCLIClient = .live(),
         openAICodexAuthClient: OpenAICodexAuthClient = .live(),
-        swiftCacheDirectoryCandidates: [URL] = defaultSwiftCacheDirectoryCandidates()
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory
     ) -> Self {
         Self { request in
-            var environment: [String: String] = [:]
+            let openAIAPIKey: String?
             switch request.authentication {
             case .apiKey(let apiKey):
-                environment["OPENAI_API_KEY"] = apiKey
+                openAIAPIKey = apiKey
             case .chatGPTLogin:
                 _ = try await openAICodexAuthClient.validCredential()
+                openAIAPIKey = nil
             }
 
             let transcriptWriter = try CodexAgentTranscriptWriter(
                 packageRootURL: request.packageRootURL
             )
+            let swiftBuildWorkspace = try CodexAgentSwiftBuildWorkspace.create(
+                temporaryDirectory: temporaryDirectory
+            )
+            defer {
+                try? swiftBuildWorkspace.remove()
+            }
+            var environment = swiftBuildWorkspace.environment
+            if let openAIAPIKey {
+                environment["OPENAI_API_KEY"] = openAIAPIKey
+            }
 
             var arguments = [
                 "exec",
@@ -187,13 +268,12 @@ extension CodexAgentClient {
                 request.packageRootURL.path,
                 "--skip-git-repo-check",
             ]
-            for directory in existingDirectories(swiftCacheDirectoryCandidates) {
-                arguments.append(contentsOf: ["--add-dir", directory.path])
-            }
             if let model = modelArgument(from: request.modelIdentifier) {
                 arguments.append(contentsOf: ["--model", model])
             }
-            arguments.append(prompt(for: request))
+            arguments.append(
+                prompt(for: request, temporaryWorkspaceURL: swiftBuildWorkspace.rootURL)
+            )
 
             let result = try await cliClient.runStreaming(
                 arguments,
@@ -206,6 +286,7 @@ extension CodexAgentClient {
                 { line in
                     let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
+                    guard !isIgnorableStderrLine(trimmed) else { return }
                     await request.onEvent(.error(trimmed))
                 }
             )
@@ -234,7 +315,10 @@ extension CodexAgentClient {
         }
     }
 
-    nonisolated static func prompt(for request: CodexAgentRequest) -> String {
+    nonisolated static func prompt(
+        for request: CodexAgentRequest,
+        temporaryWorkspaceURL: URL
+    ) -> String {
         """
         You are Codex running inside Ironsmith.
         Build the requested macOS SwiftUI app by editing this generated Swift package.
@@ -254,52 +338,32 @@ extension CodexAgentClient {
         - Do not add other source files.
         - Do not add package dependencies.
         - Do not add previews or @main declarations.
-        - Use normal swift build when you need to check compilation.
-        - Do not inspect or modify Swift cache directories except through normal build commands.
-        - Keep working until ContentView.swift exists, is complete, and swift build succeeds.
+        - Run `swift build --disable-sandbox` when you need to check compilation.
+        - Use \(temporaryWorkspaceURL.path) for any temporary scratch files you deliberately create.
+        - Do not write deliberate scratch files directly in the top-level system temp directory.
+        - Ironsmith will clean up the temporary workspace after Codex exits.
+        - Keep working until ContentView.swift exists, is complete, and `swift build --disable-sandbox` succeeds.
+        - Define ContentView as the root View, but you may create helper types in the same file. Helper types must not conform to App.
+        - An entry point already exists and already calls ContentView, so do not add another @main or App type.
+        - This is a macOS SwiftUI app. Do not use iOS-only modifiers.
+        - This is a local only app. Do not add or imply a separate backend service, custom server component, account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync.
+        - Make the app feel native to macOS.
+        - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and local-only state.
+        - Apple frameworks and APIs are allowed and encouraged over custom solutions, but do not add any third-party dependencies.
+        - Use // MARK: - to separate sections of code.
         """
-    }
-
-    nonisolated static func defaultSwiftCacheDirectoryCandidates(
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) -> [URL] {
-        [
-            homeDirectory.appendingPathComponent(".swiftpm", isDirectory: true),
-            homeDirectory
-                .appendingPathComponent("Library", isDirectory: true)
-                .appendingPathComponent("Caches", isDirectory: true)
-                .appendingPathComponent("org.swift.swiftpm", isDirectory: true),
-            homeDirectory
-                .appendingPathComponent("Library", isDirectory: true)
-                .appendingPathComponent("Caches", isDirectory: true)
-                .appendingPathComponent("swift-package", isDirectory: true),
-            homeDirectory
-                .appendingPathComponent("Library", isDirectory: true)
-                .appendingPathComponent("Caches", isDirectory: true)
-                .appendingPathComponent("swift-build", isDirectory: true),
-            homeDirectory
-                .appendingPathComponent("Library", isDirectory: true)
-                .appendingPathComponent("Developer", isDirectory: true)
-                .appendingPathComponent("Xcode", isDirectory: true)
-                .appendingPathComponent("DerivedData", isDirectory: true)
-                .appendingPathComponent("ModuleCache.noindex", isDirectory: true),
-        ]
-    }
-
-    nonisolated private static func existingDirectories(
-        _ candidates: [URL]
-    ) -> [URL] {
-        candidates.filter { url in
-            var isDirectory: ObjCBool = false
-            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-                && isDirectory.boolValue
-        }
     }
 
     nonisolated private static func modelArgument(from identifier: String) -> String? {
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return OpenAICodexBackend.rawCodexModelIdentifier(from: trimmed) ?? trimmed
+    }
+
+    nonisolated private static func isIgnorableStderrLine(_ line: String) -> Bool {
+        line.contains("FSEventsPurgeEventsForDeviceUpToEventId")
+            || line.contains("f2d_purge_events_for_device_up_to_event_id_rpc() failed")
+            || line.contains("purging events up to event id")
     }
 }
 
@@ -327,7 +391,8 @@ enum CodexAgentError: LocalizedError, Equatable {
             return
                 "Codex exited with status \(status): \(AgentDiagnosticsLog.compact(redactSecrets(output), limit: 1_500)). Transcript: \(transcriptURL.path)"
         case .protectedFileChanged(let path):
-            return "Codex changed \(path), but Ironsmith only allows Codex to edit ContentView.swift."
+            return
+                "Codex changed \(path), but Ironsmith only allows Codex to edit ContentView.swift."
         case .missingContentView:
             return "Codex did not create ContentView.swift."
         }
