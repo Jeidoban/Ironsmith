@@ -6,7 +6,7 @@ import Observation
 final class GenerationPreferencesStore {
     private enum Key {
         static let generatedPromptRefinementEnabled = "generation.generatedPromptRefinementEnabled"
-        static let agentPipelineProfile = "generation.agentPipelineProfile"
+        static let codingAgentPreference = "generation.agentPipelineProfile"
     }
 
     var generatedPromptRefinementEnabled: Bool {
@@ -14,9 +14,9 @@ final class GenerationPreferencesStore {
             userDefaults.set(generatedPromptRefinementEnabled, forKey: Key.generatedPromptRefinementEnabled)
         }
     }
-    var agentPipelineProfile: AgentPipelineProfilePreference {
+    var codingAgentPreference: ToolCodingAgentPreference {
         didSet {
-            userDefaults.set(agentPipelineProfile.rawValue, forKey: Key.agentPipelineProfile)
+            userDefaults.set(codingAgentPreference.rawValue, forKey: Key.codingAgentPreference)
         }
     }
     var generatedAppMicrophoneAccessEnabled: Bool {
@@ -113,9 +113,9 @@ final class GenerationPreferencesStore {
         ) == nil
             ? true
             : userDefaults.bool(forKey: Key.generatedPromptRefinementEnabled)
-        self.agentPipelineProfile = userDefaults
-            .string(forKey: Key.agentPipelineProfile)
-            .flatMap(AgentPipelineProfilePreference.init(rawValue:)) ?? .automatic
+        self.codingAgentPreference = userDefaults
+            .string(forKey: Key.codingAgentPreference)
+            .flatMap(ToolCodingAgentPreference.init(rawValue:)) ?? .automatic
         self.generatedAppMicrophoneAccessEnabled = userDefaults.bool(
             forKey: GeneratedAppResourcePermission.microphone.userDefaultsKey
         )

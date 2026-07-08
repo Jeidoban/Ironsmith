@@ -51,7 +51,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -129,7 +129,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -197,7 +197,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -263,7 +263,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback(),
@@ -345,7 +345,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: ToolMetadataClient { _ in
@@ -407,7 +407,7 @@ extension AgentPipelineTests {
         let languageModelContext = AgentLanguageModelContext(
             languageModel: EmptyLanguageModel(),
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn))
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn))
         )
         let dependencies = ToolGenerationRuntimeDependencies(
             toolsDirectoryURL: toolsDirectory,
@@ -471,7 +471,7 @@ extension AgentPipelineTests {
         let languageModelContext = AgentLanguageModelContext(
             languageModel: EmptyLanguageModel(),
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn))
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn))
         )
         let dependencies = ToolGenerationRuntimeDependencies(
             toolsDirectoryURL: toolsDirectory,
@@ -549,7 +549,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: ToolMetadataClient { _ in
@@ -649,7 +649,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: ToolMetadataClient { _ in
@@ -727,7 +727,7 @@ extension AgentPipelineTests {
                 try await responses.next(prompt)
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -772,7 +772,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: SwiftPackageProcessClient(
                 build: { packageRoot in

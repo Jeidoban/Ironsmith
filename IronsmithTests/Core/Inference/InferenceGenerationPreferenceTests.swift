@@ -22,18 +22,37 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func agentPipelineProfilePreferenceDefaultsAutomaticAndPersists() {
-        let suiteName = "IronsmithTests.AgentPipelineProfile.\(UUID().uuidString)"
+    func codingAgentPreferenceDefaultsAutomaticAndPersists() {
+        let suiteName = "IronsmithTests.ToolCodingAgent.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
         userDefaults.removePersistentDomain(forName: suiteName)
 
         let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
-        #expect(preferences.agentPipelineProfile == .automatic)
+        #expect(preferences.codingAgentPreference == .automatic)
 
-        preferences.agentPipelineProfile = .largeModel
+        preferences.codingAgentPreference = .ironsmithFlame
 
         let reloadedPreferences = GenerationPreferencesStore(userDefaults: userDefaults)
-        #expect(reloadedPreferences.agentPipelineProfile == .largeModel)
+        #expect(reloadedPreferences.codingAgentPreference == .ironsmithFlame)
+
+        reloadedPreferences.codingAgentPreference = .codex
+
+        let reloadedCodexPreferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(reloadedCodexPreferences.codingAgentPreference == .codex)
+    }
+
+    @MainActor
+    @Test
+    func codingAgentPreferencePreservesLegacySmallAndLargeRawValues() {
+        let suiteName = "IronsmithTests.ToolCodingAgentLegacy.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        userDefaults.set("small_model", forKey: "generation.agentPipelineProfile")
+        #expect(GenerationPreferencesStore(userDefaults: userDefaults).codingAgentPreference == .ironsmithSpark)
+
+        userDefaults.set("large_model", forKey: "generation.agentPipelineProfile")
+        #expect(GenerationPreferencesStore(userDefaults: userDefaults).codingAgentPreference == .ironsmithFlame)
     }
 
     @MainActor
@@ -200,9 +219,9 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func explicitAgentPipelineProfileOverridesAutomaticProviderDefault() async throws {
+    func explicitToolCodingAgentOverridesAutomaticProviderDefault() async throws {
         let preferences = Self.generationPreferences()
-        preferences.agentPipelineProfile = .largeModel
+        preferences.codingAgentPreference = .ironsmithFlame
         let store = Self.dependenciesBackedStore(generationPreferences: preferences)
         let provider = ProviderCatalog.makeProvider(for: .ollama)!
         let model = ModelConfig(
@@ -218,11 +237,37 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.pipelineConfiguration.profile == .largeModel)
+        #expect(context.pipelineConfiguration.codingAgent == .ironsmithFlame)
         #expect(
             context.repairStrategy == .modelSearchReplace(
                 maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
             )
         )
+    }
+
+    @MainActor
+    @Test
+    func selectedOpenAICodexModelUsesCodexAgentAndChatGPTAuthenticationWhenRequested() async throws {
+        let preferences = Self.generationPreferences()
+        preferences.codingAgentPreference = .codex
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
+        let provider = ProviderCatalog.makeProvider(for: .openAI)!
+        let model = ModelConfig(
+            identifier: "codex:gpt-5.5",
+            displayName: "GPT-5.5 (Codex)",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        store.providers = [provider]
+        store.remoteModels = [model]
+        store.selectModel(model.selectionIdentifier)
+
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+
+        #expect(context.pipelineConfiguration.codingAgent == .codex)
+        #expect(context.codingAgentModelIdentifier == "codex:gpt-5.5")
+        #expect(context.codexAgentAuthentication == .chatGPTLogin)
     }
 }

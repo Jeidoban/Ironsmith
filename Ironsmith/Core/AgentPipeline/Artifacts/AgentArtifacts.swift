@@ -8,6 +8,8 @@ nonisolated struct AgentLanguageModelContext {
     let languageModelInvoker: ToolLanguageModelInvoker
     let pipelineConfiguration: ToolGenerationPipelineConfiguration
     let promptRefinementEnabled: Bool
+    let codingAgentModelIdentifier: String
+    let codexAgentAuthentication: CodexAgentAuthentication?
 
     var languageModel: any LanguageModel {
         languageModelInvoker.languageModel
@@ -27,6 +29,8 @@ nonisolated struct AgentLanguageModelContext {
         metadata: ToolGenerationStageConfiguration,
         pipelineConfiguration: ToolGenerationPipelineConfiguration,
         promptRefinementEnabled: Bool = true,
+        codingAgentModelIdentifier: String = "",
+        codexAgentAuthentication: CodexAgentAuthentication? = nil,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
         self.codingAgent = codingAgent
@@ -40,6 +44,8 @@ nonisolated struct AgentLanguageModelContext {
         )
         self.pipelineConfiguration = pipelineConfiguration
         self.promptRefinementEnabled = promptRefinementEnabled
+        self.codingAgentModelIdentifier = codingAgentModelIdentifier
+        self.codexAgentAuthentication = codexAgentAuthentication
     }
 
     init(
@@ -50,6 +56,8 @@ nonisolated struct AgentLanguageModelContext {
         streaming: Bool = ToolGenerationOptionsResolver.defaultStreaming,
         pipelineConfiguration: ToolGenerationPipelineConfiguration,
         promptRefinementEnabled: Bool = true,
+        codingAgentModelIdentifier: String = "",
+        codexAgentAuthentication: CodexAgentAuthentication? = nil,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
         let codingAgent = ToolGenerationStageConfiguration(
@@ -74,6 +82,8 @@ nonisolated struct AgentLanguageModelContext {
             ),
             pipelineConfiguration: pipelineConfiguration,
             promptRefinementEnabled: promptRefinementEnabled,
+            codingAgentModelIdentifier: codingAgentModelIdentifier,
+            codexAgentAuthentication: codexAgentAuthentication,
             afterLanguageModelInvocation: afterLanguageModelInvocation
         )
     }

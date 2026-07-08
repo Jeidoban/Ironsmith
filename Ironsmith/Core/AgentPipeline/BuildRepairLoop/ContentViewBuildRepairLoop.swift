@@ -215,7 +215,7 @@ struct ContentViewBuildRepairLoop {
                         packageRoot: \(layout.packageRootURL.path)
                         contentViewErrorCount: \(state.contentViewErrors.count)
                         regenerationThreshold: \(sourceAwareRegenerationThreshold)
-                        profile: \(context.pipelineConfiguration.profile.rawValue)
+                        codingAgent: \(context.pipelineConfiguration.codingAgent.rawValue)
                         """
                     )
                 }

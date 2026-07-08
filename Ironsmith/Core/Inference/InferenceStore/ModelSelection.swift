@@ -49,6 +49,7 @@ extension InferenceStore {
             availableModels.contains(where: { $0.selectionIdentifier == selectedModelID })
         {
             modelSelection.selectedModelID = selectedModelID
+            reconcileSelectedCodingAgentPreference()
             return
         }
 
@@ -76,10 +77,33 @@ extension InferenceStore {
         selectModel(selectionIdentifier, fallbackMessage: nil)
     }
 
+    var selectedModelSupportedCodingAgentPreferences: Set<ToolCodingAgentPreference> {
+        ToolCodingAgentSupport.supportedPreferences(
+            for: selectedModel,
+            provider: selectedModel.flatMap(provider(for:))
+        )
+    }
+
+    func selectedModelSupportsCodingAgentPreference(_ preference: ToolCodingAgentPreference) -> Bool {
+        selectedModelSupportedCodingAgentPreferences.contains(preference)
+    }
+
+    func reconcileSelectedCodingAgentPreference() {
+        let effectivePreference = ToolCodingAgentSupport.effectivePreference(
+            requested: generationPreferences.codingAgentPreference,
+            model: selectedModel,
+            provider: selectedModel.flatMap(provider(for:))
+        )
+        if generationPreferences.codingAgentPreference != effectivePreference {
+            generationPreferences.codingAgentPreference = effectivePreference
+        }
+    }
+
     private func selectModel(_ selectionIdentifier: String?, fallbackMessage: String?) {
         selectedModelID = selectionIdentifier
         modelSelection.selectedModelID = selectionIdentifier
         selectedModelFallbackMessage = fallbackMessage
+        reconcileSelectedCodingAgentPreference()
     }
 
     private static func modelName(fromSelectionIdentifier selectionIdentifier: String) -> String {

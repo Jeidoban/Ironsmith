@@ -24,7 +24,7 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.pipelineConfiguration.profile == .largeModel)
+        #expect(context.pipelineConfiguration.codingAgent == .ironsmithFlame)
         #expect(
             context.repairStrategy == .modelSearchReplace(
                 maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
@@ -50,7 +50,7 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.pipelineConfiguration.profile == .smallModel)
+        #expect(context.pipelineConfiguration.codingAgent == .ironsmithSpark)
         #expect(context.repairStrategy == .modelSearchReplace(maxPatchBlocksPerTurn: 3))
     }
 
@@ -72,7 +72,7 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.pipelineConfiguration.profile == .smallModel)
+        #expect(context.pipelineConfiguration.codingAgent == .ironsmithSpark)
         #expect(context.repairStrategy == .modelSearchReplace(maxPatchBlocksPerTurn: 3))
     }
 
@@ -314,6 +314,43 @@ extension InferenceTests {
 
         #expect(inferenceStore.availableModels.count == 2)
         #expect(inferenceStore.availableModels.contains { $0.source == .appleFoundation })
+    }
+
+    @MainActor
+    @Test
+    func unsupportedSelectedModelResetsCodexCodingAgentPreference() {
+        let preferences = Self.generationPreferences()
+        preferences.codingAgentPreference = .codex
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
+        let openAIProvider = ProviderCatalog.makeProvider(for: .openAI)!
+        let ollamaProvider = ProviderCatalog.makeProvider(for: .ollama)!
+        let openAIModel = ModelConfig(
+            identifier: "gpt-test",
+            displayName: "GPT Test",
+            providerIdentifier: openAIProvider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let ollamaModel = ModelConfig(
+            identifier: "gemma4:e2b",
+            displayName: "Gemma 4 E2B",
+            providerIdentifier: ollamaProvider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        store.providers = [openAIProvider, ollamaProvider]
+        store.remoteModels = [openAIModel, ollamaModel]
+
+        store.selectModel(openAIModel.selectionIdentifier)
+
+        #expect(store.selectedModelSupportsCodingAgentPreference(.codex))
+        #expect(preferences.codingAgentPreference == .codex)
+
+        store.selectModel(ollamaModel.selectionIdentifier)
+
+        #expect(!store.selectedModelSupportsCodingAgentPreference(.codex))
+        #expect(preferences.codingAgentPreference == .automatic)
     }
 
     @MainActor

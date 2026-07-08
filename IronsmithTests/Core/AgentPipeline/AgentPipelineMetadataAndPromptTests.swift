@@ -190,7 +190,7 @@ extension AgentPipelineTests {
                 return Self.simpleContentViewSource(text: "refined prompt")
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in
@@ -232,7 +232,7 @@ extension AgentPipelineTests {
                 return Self.simpleContentViewSource(text: "original prompt")
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in
@@ -276,7 +276,7 @@ extension AgentPipelineTests {
                 return Self.renameOldToNewPatch
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in

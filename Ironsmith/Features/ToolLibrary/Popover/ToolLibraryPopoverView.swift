@@ -193,13 +193,14 @@ struct ToolLibraryPopoverView: View {
                 appKind: appKindBinding,
                 sandboxPermissions: sandboxPermissionsBinding,
                 resourcePermissions: resourcePermissionsBinding,
-                agentPipelineProfile: agentPipelineProfileBinding,
+                codingAgentPreference: codingAgentPreferenceBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
                 showsSandboxControl: showSandboxOverride,
                 modelPickerTitle: composerModelPickerTitle,
                 isModelPickerEnabled: isComposerModelPickerEnabled,
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
+                isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(.codex),
                 isPromptFocused: $isPromptFocused,
                 onChooseModel: {
                     isShowingModelPicker = true
@@ -569,11 +570,11 @@ struct ToolLibraryPopoverView: View {
         )
     }
 
-    private var agentPipelineProfileBinding: Binding<AgentPipelineProfilePreference> {
+    private var codingAgentPreferenceBinding: Binding<ToolCodingAgentPreference> {
         Binding(
-            get: { inferenceStore.generationPreferences.agentPipelineProfile },
+            get: { inferenceStore.generationPreferences.codingAgentPreference },
             set: { newValue in
-                inferenceStore.generationPreferences.agentPipelineProfile = newValue
+                inferenceStore.generationPreferences.codingAgentPreference = newValue
             }
         )
     }

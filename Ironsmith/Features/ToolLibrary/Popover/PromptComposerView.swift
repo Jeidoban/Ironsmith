@@ -11,13 +11,14 @@ struct PromptComposerView: View {
     @Binding var appKind: ToolAppKind
     @Binding var sandboxPermissions: GeneratedAppSandboxPermissions
     @Binding var resourcePermissions: GeneratedAppResourcePermissions
-    @Binding var agentPipelineProfile: AgentPipelineProfilePreference
+    @Binding var codingAgentPreference: ToolCodingAgentPreference
     let placeholder: String
     let showsSandboxControl: Bool
     let modelPickerTitle: String
     let isModelPickerEnabled: Bool
     let isSubmitEnabled: Bool
     let isSubmitting: Bool
+    let isCodexAgentSupported: Bool
     let isPromptFocused: FocusState<Bool>.Binding
     let onChooseModel: () -> Void
     let onSubmit: () -> Void
@@ -117,13 +118,16 @@ struct PromptComposerView: View {
                 }
             }
 
-            Picker("Coding Agent", selection: $agentPipelineProfile) {
-                Text(AgentPipelineProfilePreference.automatic.displayName)
-                    .tag(AgentPipelineProfilePreference.automatic)
-                Text(AgentPipelineProfilePreference.largeModel.displayName)
-                    .tag(AgentPipelineProfilePreference.largeModel)
-                Text(AgentPipelineProfilePreference.smallModel.displayName)
-                    .tag(AgentPipelineProfilePreference.smallModel)
+            Picker("Coding Agent", selection: $codingAgentPreference) {
+                Text(ToolCodingAgentPreference.automatic.displayName)
+                    .tag(ToolCodingAgentPreference.automatic)
+                Text(ToolCodingAgentPreference.ironsmithSpark.displayName)
+                    .tag(ToolCodingAgentPreference.ironsmithSpark)
+                Text(ToolCodingAgentPreference.ironsmithFlame.displayName)
+                    .tag(ToolCodingAgentPreference.ironsmithFlame)
+                Text(ToolCodingAgentPreference.codex.displayName)
+                    .tag(ToolCodingAgentPreference.codex)
+                    .disabled(!isCodexAgentSupported)
             }
 
             if showsSandboxControl {
@@ -321,7 +325,7 @@ private struct PromptComposerPreview: View {
             resourcePermissions: .constant(
                 isEditing ? GeneratedAppResourcePermissions([.camera]) : .none
             ),
-            agentPipelineProfile: .constant(.automatic),
+            codingAgentPreference: .constant(.automatic),
             placeholder: isEditing
                 ? "Describe changes for Clipboard Cleaner…"
                 : "Describe a new app to build…",
@@ -330,6 +334,7 @@ private struct PromptComposerPreview: View {
             isModelPickerEnabled: true,
             isSubmitEnabled: isEditing,
             isSubmitting: false,
+            isCodexAgentSupported: true,
             isPromptFocused: $isPromptFocused,
             onChooseModel: {},
             onSubmit: {},

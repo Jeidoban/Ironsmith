@@ -148,7 +148,7 @@ extension ContentViewBuildRepairLoop {
         )
         let repairedSource: String
         do {
-            if context.pipelineConfiguration.profile == .largeModel {
+            if context.pipelineConfiguration.codingAgent == .ironsmithFlame {
                 let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
                     sanitizedPatch,
                     to: originalSource,

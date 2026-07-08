@@ -80,7 +80,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -124,7 +124,7 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -174,7 +174,7 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -225,7 +225,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -276,7 +276,7 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -315,7 +315,7 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -338,7 +338,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func modelPatchEditUsesProfilePatchBlockCaps() async throws {
+    func modelPatchEditUsesCodingAgentPatchBlockCaps() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -364,7 +364,7 @@ extension AgentPipelineTests {
         let localRuntime = Self.makeRuntime(
             languageModel: model,
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -372,7 +372,7 @@ extension AgentPipelineTests {
         let remoteRuntime = Self.makeRuntime(
             languageModel: model,
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: .fallback()
@@ -427,7 +427,7 @@ extension AgentPipelineTests {
                 try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: SwiftPackageProcessClient(
                 build: { packageRoot in

@@ -1,9 +1,10 @@
 import Foundation
 
-enum AgentPipelineProfilePreference: String, Codable, CaseIterable, Identifiable, Sendable {
+enum ToolCodingAgentPreference: String, Codable, CaseIterable, Identifiable, Sendable {
     case automatic
-    case smallModel = "small_model"
-    case largeModel = "large_model"
+    case ironsmithSpark = "small_model"
+    case ironsmithFlame = "large_model"
+    case codex
 
     var id: String { rawValue }
 
@@ -11,30 +12,69 @@ enum AgentPipelineProfilePreference: String, Codable, CaseIterable, Identifiable
         switch self {
         case .automatic:
             return "Automatic"
-        case .smallModel:
-            return "Small Model Agent"
-        case .largeModel:
-            return "Large Model Agent"
+        case .ironsmithSpark:
+            return "Ironsmith Spark"
+        case .ironsmithFlame:
+            return "Ironsmith Flame"
+        case .codex:
+            return "Codex"
         }
     }
 }
 
-enum AgentPipelineProfile: String, Codable, Equatable, Sendable {
-    case smallModel = "small_model"
-    case largeModel = "large_model"
+enum ToolCodingAgent: String, Codable, Equatable, Sendable {
+    case ironsmithSpark = "small_model"
+    case ironsmithFlame = "large_model"
+    case codex
 
     var displayName: String {
         switch self {
-        case .smallModel:
-            return "Small Model Agent"
-        case .largeModel:
-            return "Large Model Agent"
+        case .ironsmithSpark:
+            return "Ironsmith Spark"
+        case .ironsmithFlame:
+            return "Ironsmith Flame"
+        case .codex:
+            return "Codex"
         }
+    }
+}
+
+enum ToolCodingAgentSupport {
+    static func supportedPreferences(
+        for model: ModelConfig?,
+        provider: ProviderConfig?
+    ) -> Set<ToolCodingAgentPreference> {
+        var supported: Set<ToolCodingAgentPreference> = [
+            .automatic,
+            .ironsmithSpark,
+            .ironsmithFlame,
+        ]
+        if supportsCodex(model: model, provider: provider) {
+            supported.insert(.codex)
+        }
+        return supported
+    }
+
+    static func supportsCodex(
+        model _: ModelConfig?,
+        provider: ProviderConfig?
+    ) -> Bool {
+        provider?.kind == .openAI
+    }
+
+    static func effectivePreference(
+        requested: ToolCodingAgentPreference,
+        model: ModelConfig?,
+        provider: ProviderConfig?
+    ) -> ToolCodingAgentPreference {
+        supportedPreferences(for: model, provider: provider).contains(requested)
+            ? requested
+            : .automatic
     }
 }
 
 struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
-    let profile: AgentPipelineProfile
+    let codingAgent: ToolCodingAgent
     let repairStrategy: ToolRepairStrategy
     let maximumGenerationAttempts: Int
     let batchesRepairDiagnostics: Bool
@@ -44,9 +84,9 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
     let fallsBackToWholeFileEditAfterInvalidInitialPatch: Bool
     let maximumModelRepairAttempts: Int?
 
-    static func small(repairStrategy: ToolRepairStrategy) -> Self {
+    static func ironsmithSpark(repairStrategy: ToolRepairStrategy) -> Self {
         ToolGenerationPipelineConfiguration(
-            profile: .smallModel,
+            codingAgent: .ironsmithSpark,
             repairStrategy: repairStrategy,
             maximumGenerationAttempts: ToolGenerationRepairPolicy.maximumGenerationAttempts,
             batchesRepairDiagnostics: true,
@@ -58,9 +98,9 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
         )
     }
 
-    static func large(repairStrategy: ToolRepairStrategy) -> Self {
+    static func ironsmithFlame(repairStrategy: ToolRepairStrategy) -> Self {
         ToolGenerationPipelineConfiguration(
-            profile: .largeModel,
+            codingAgent: .ironsmithFlame,
             repairStrategy: repairStrategy,
             maximumGenerationAttempts: 1,
             batchesRepairDiagnostics: false,
@@ -69,6 +109,20 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
             regeneratesAfterModelRepairStall: false,
             fallsBackToWholeFileEditAfterInvalidInitialPatch: false,
             maximumModelRepairAttempts: ToolGenerationRepairPolicy.largeModelMaximumRepairAttempts
+        )
+    }
+
+    static func codex() -> Self {
+        ToolGenerationPipelineConfiguration(
+            codingAgent: .codex,
+            repairStrategy: .deterministicOnly,
+            maximumGenerationAttempts: 1,
+            batchesRepairDiagnostics: false,
+            restoresBestCandidateOnFailure: false,
+            rollsBackModelRepairWhenErrorCountIncreases: false,
+            regeneratesAfterModelRepairStall: false,
+            fallsBackToWholeFileEditAfterInvalidInitialPatch: false,
+            maximumModelRepairAttempts: nil
         )
     }
 }

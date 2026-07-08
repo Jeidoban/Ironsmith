@@ -32,6 +32,8 @@ extension InferenceStore {
             ),
             pipelineConfiguration: pipelineConfiguration(for: selectedModel, provider: provider),
             promptRefinementEnabled: generationPreferences.generatedPromptRefinementEnabled,
+            codingAgentModelIdentifier: selectedModel.identifier,
+            codexAgentAuthentication: try codexAgentAuthentication(for: selectedModel, provider: provider),
             afterLanguageModelInvocation: { [weak self] in
                 guard shouldRefreshIronsmithCredits else { return }
                 await self?.refreshIronsmithAccountSummary()
@@ -84,47 +86,77 @@ extension InferenceStore {
         for model: ModelConfig,
         provider: ProviderConfig?
     ) -> ToolGenerationPipelineConfiguration {
-        let profile = resolvedAgentPipelineProfile(for: model, provider: provider)
-        switch profile {
-        case .smallModel:
-            return .small(repairStrategy: smallModelRepairStrategy(for: model))
-        case .largeModel:
-            return .large(
+        let codingAgent = resolvedToolCodingAgent(for: model, provider: provider)
+        switch codingAgent {
+        case .ironsmithSpark:
+            return .ironsmithSpark(repairStrategy: smallModelRepairStrategy(for: model))
+        case .ironsmithFlame:
+            return .ironsmithFlame(
                 repairStrategy: .modelSearchReplace(
                     maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
                 )
             )
+        case .codex:
+            return .codex()
         }
     }
 
-    private func resolvedAgentPipelineProfile(
+    private func resolvedToolCodingAgent(
         for model: ModelConfig,
         provider: ProviderConfig?
-    ) -> AgentPipelineProfile {
-        switch generationPreferences.agentPipelineProfile {
-        case .smallModel:
-            return .smallModel
-        case .largeModel:
-            return .largeModel
+    ) -> ToolCodingAgent {
+        switch ToolCodingAgentSupport.effectivePreference(
+            requested: generationPreferences.codingAgentPreference,
+            model: model,
+            provider: provider
+        ) {
+        case .ironsmithSpark:
+            return .ironsmithSpark
+        case .ironsmithFlame:
+            return .ironsmithFlame
+        case .codex:
+            return .codex
         case .automatic:
-            return defaultAgentPipelineProfile(for: model, provider: provider)
+            return defaultToolCodingAgent(for: model, provider: provider)
         }
     }
 
-    private func defaultAgentPipelineProfile(
+    private func defaultToolCodingAgent(
         for model: ModelConfig,
         provider: ProviderConfig?
-    ) -> AgentPipelineProfile {
+    ) -> ToolCodingAgent {
         guard model.source == .remote else {
-            return .smallModel
+            return .ironsmithSpark
         }
 
         switch provider?.kind {
         case .ironsmith, .openAI, .anthropic, .gemini:
-            return .largeModel
+            return .ironsmithFlame
         case .local, .ollama, .customOpenAICompatible, nil:
-            return .smallModel
+            return .ironsmithSpark
         }
+    }
+
+    private func codexAgentAuthentication(
+        for model: ModelConfig,
+        provider: ProviderConfig?
+    ) throws -> CodexAgentAuthentication? {
+        guard resolvedToolCodingAgent(for: model, provider: provider) == .codex else {
+            return nil
+        }
+        guard provider?.kind == .openAI else {
+            throw CodexAgentError.unsupportedProvider
+        }
+        if model.openAICodexRawIdentifier != nil {
+            return .chatGPTLogin
+        }
+        guard let reference = provider?.apiKeyReference,
+              let apiKey = try dependencies.credentialClient.loadAPIKey(reference),
+              !apiKey.isEmpty
+        else {
+            throw LanguageModelClientError.missingAPIKey
+        }
+        return .apiKey(apiKey)
     }
 
     private func smallModelRepairStrategy(for model: ModelConfig) -> ToolRepairStrategy {

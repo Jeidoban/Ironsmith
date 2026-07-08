@@ -143,6 +143,7 @@ struct ToolGenerationRuntimeDependencies {
     let promptRefinementClient: ToolPromptRefinementClient
     let versionBackupClient: ToolVersionBackupClient
     let packageMaterializer: ToolPackageMaterializer
+    let codexAgentClient: CodexAgentClient
 
     init(
         toolsDirectoryURL: URL,
@@ -153,7 +154,8 @@ struct ToolGenerationRuntimeDependencies {
         metadataClient: ToolMetadataClient = .fallback(),
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         versionBackupClient: ToolVersionBackupClient,
-        packageMaterializer: ToolPackageMaterializer? = nil
+        packageMaterializer: ToolPackageMaterializer? = nil,
+        codexAgentClient: CodexAgentClient = .unconfigured
     ) {
         self.toolsDirectoryURL = toolsDirectoryURL
         self.fileClient = fileClient
@@ -164,6 +166,7 @@ struct ToolGenerationRuntimeDependencies {
         self.promptRefinementClient = promptRefinementClient
         self.versionBackupClient = versionBackupClient
         self.packageMaterializer = packageMaterializer ?? ToolPackageMaterializer(fileClient: fileClient)
+        self.codexAgentClient = codexAgentClient
     }
 
     static func live(
@@ -175,7 +178,8 @@ struct ToolGenerationRuntimeDependencies {
         metadataClient: ToolMetadataClient = .live(),
         promptRefinementClient: ToolPromptRefinementClient = .live(),
         versionBackupClient: ToolVersionBackupClient = .live,
-        packageMaterializer: ToolPackageMaterializer? = nil
+        packageMaterializer: ToolPackageMaterializer? = nil,
+        codexAgentClient: CodexAgentClient = .live()
     ) -> Self {
         Self(
             toolsDirectoryURL: toolsDirectoryURL,
@@ -186,7 +190,8 @@ struct ToolGenerationRuntimeDependencies {
             metadataClient: metadataClient,
             promptRefinementClient: promptRefinementClient,
             versionBackupClient: versionBackupClient,
-            packageMaterializer: packageMaterializer
+            packageMaterializer: packageMaterializer,
+            codexAgentClient: codexAgentClient
         )
     }
 }
@@ -205,6 +210,9 @@ struct ToolGenerationRuntimeContext {
     let promptRefinementEnabled: Bool
     let versionBackupClient: ToolVersionBackupClient
     let packageMaterializer: ToolPackageMaterializer
+    let codexAgentClient: CodexAgentClient
+    let codingAgentModelIdentifier: String
+    let codexAgentAuthentication: CodexAgentAuthentication?
 
     var languageModel: any LanguageModel {
         languageModelInvoker.languageModel
@@ -239,6 +247,9 @@ struct ToolGenerationRuntimeContext {
         self.promptRefinementEnabled = languageModelContext.promptRefinementEnabled
         self.versionBackupClient = dependencies.versionBackupClient
         self.packageMaterializer = dependencies.packageMaterializer
+        self.codexAgentClient = dependencies.codexAgentClient
+        self.codingAgentModelIdentifier = languageModelContext.codingAgentModelIdentifier
+        self.codexAgentAuthentication = languageModelContext.codexAgentAuthentication
     }
 
     func configuration(for stage: ToolGenerationStage) -> ToolGenerationStageConfiguration {
