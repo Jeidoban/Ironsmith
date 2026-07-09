@@ -27,12 +27,22 @@ nonisolated struct CodexCLIClient: Sendable {
         _ onStdoutLine: @escaping @Sendable (String) async -> Void,
         _ onStderrLine: @escaping @Sendable (String) async -> Void
     ) async throws -> CodexCLIProcessResult
+    var runStreamingToFile: @Sendable (
+        _ arguments: [String],
+        _ environmentOverrides: [String: String],
+        _ stdoutURL: URL,
+        _ onStdoutLine: @escaping @Sendable (String) async -> Void,
+        _ onStderrLine: @escaping @Sendable (String) async -> Void
+    ) async throws -> CodexCLIProcessResult
 
     init(
         run: @escaping @Sendable (_ arguments: [String]) async throws -> CodexCLIProcessResult
     ) {
         self.run = run
         self.runStreaming = { arguments, _, _, _ in
+            try await run(arguments)
+        }
+        self.runStreamingToFile = { arguments, _, _, _, _ in
             try await run(arguments)
         }
     }
@@ -44,10 +54,36 @@ nonisolated struct CodexCLIClient: Sendable {
             _ environmentOverrides: [String: String],
             _ onStdoutLine: @escaping @Sendable (String) async -> Void,
             _ onStderrLine: @escaping @Sendable (String) async -> Void
-        ) async throws -> CodexCLIProcessResult
+        ) async throws -> CodexCLIProcessResult,
+        runStreamingToFile: (@Sendable (
+            _ arguments: [String],
+            _ environmentOverrides: [String: String],
+            _ stdoutURL: URL,
+            _ onStdoutLine: @escaping @Sendable (String) async -> Void,
+            _ onStderrLine: @escaping @Sendable (String) async -> Void
+        ) async throws -> CodexCLIProcessResult)? = nil
     ) {
         self.run = run
         self.runStreaming = runStreaming
+        self.runStreamingToFile = runStreamingToFile ?? { arguments, environmentOverrides, stdoutURL, onStdoutLine, onStderrLine in
+            let writer = try CodexCLIOutputFileWriter(url: stdoutURL)
+            do {
+                let result = try await runStreaming(
+                    arguments,
+                    environmentOverrides,
+                    { line in
+                        await writer.writeLine(line)
+                        await onStdoutLine(line)
+                    },
+                    onStderrLine
+                )
+                await writer.close()
+                return result
+            } catch {
+                await writer.close()
+                throw error
+            }
+        }
     }
 }
 
@@ -85,6 +121,21 @@ extension CodexCLIClient {
                     onStdoutLine: onStdoutLine,
                     onStderrLine: onStderrLine
                 )
+            },
+            runStreamingToFile: { arguments, environmentOverrides, stdoutURL, onStdoutLine, onStderrLine in
+                let request = try makeRequest(
+                    arguments: arguments,
+                    codexHomeDirectory: codexHomeDirectory,
+                    executableURL: executableURL,
+                    bundleResourceURL: bundleResourceURL,
+                    environment: environment.merging(environmentOverrides) { _, override in override }
+                )
+                return try await runProcessStreamingToFile(
+                    request,
+                    stdoutURL: stdoutURL,
+                    onStdoutLine: onStdoutLine,
+                    onStderrLine: onStderrLine
+                )
             }
         )
     }
@@ -95,6 +146,9 @@ extension CodexCLIClient {
                 throw OpenAICodexAuthClientError.missingCodexBinary("Codex CLI is not configured.")
             },
             runStreaming: { _, _, _, _ in
+                throw OpenAICodexAuthClientError.missingCodexBinary("Codex CLI is not configured.")
+            },
+            runStreamingToFile: { _, _, _, _, _ in
                 throw OpenAICodexAuthClientError.missingCodexBinary("Codex CLI is not configured.")
             }
         )
@@ -243,6 +297,84 @@ extension CodexCLIClient {
         }
     }
 
+    nonisolated private static func runProcessStreamingToFile(
+        _ request: CodexCLIProcessRequest,
+        stdoutURL: URL,
+        onStdoutLine: @escaping @Sendable (String) async -> Void,
+        onStderrLine: @escaping @Sendable (String) async -> Void
+    ) async throws -> CodexCLIProcessResult {
+        let processReference = CodexCLIProcessReference()
+        let tailCompletion = CodexCLIFileTailCompletion()
+        return try await withTaskCancellationHandler {
+            let task = Task.detached(priority: .utility) {
+                try prepareOutputFile(at: stdoutURL)
+
+                let process = Process()
+                let stdout = try FileHandle(forWritingTo: stdoutURL)
+                let stderr = Pipe()
+
+                process.executableURL = request.executableURL
+                process.arguments = request.arguments
+                process.environment = request.environment
+                process.currentDirectoryURL = request.currentDirectoryURL
+                process.standardOutput = stdout
+                process.standardError = stderr
+
+                guard !processReference.set(process) else {
+                    throw CancellationError()
+                }
+                defer { processReference.clear(process) }
+
+                let stdoutTask = Task.detached(priority: .utility) {
+                    try await tailLines(
+                        from: stdoutURL,
+                        completion: tailCompletion,
+                        onLine: onStdoutLine
+                    )
+                }
+
+                do {
+                    try process.run()
+                } catch {
+                    try? stdout.close()
+                    tailCompletion.finish()
+                    _ = try? await stdoutTask.value
+                    throw error
+                }
+
+                async let stderrText = readLines(
+                    from: stderr.fileHandleForReading,
+                    onLine: onStderrLine
+                )
+
+                process.waitUntilExit()
+                try? stdout.close()
+                tailCompletion.finish()
+
+                return CodexCLIProcessResult(
+                    stdout: try await stdoutTask.value,
+                    stderr: try await stderrText,
+                    terminationStatus: process.terminationStatus
+                )
+            }
+
+            let result = try await task.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            processReference.terminate()
+            tailCompletion.finish()
+        }
+    }
+
+    nonisolated fileprivate static func prepareOutputFile(at url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: url, options: .atomic)
+    }
+
     nonisolated private static func readLines(
         from handle: FileHandle,
         onLine: @escaping @Sendable (String) async -> Void
@@ -264,6 +396,83 @@ extension CodexCLIClient {
             await onLine(line.trimmingTrailingCarriageReturn())
         }
         return String(data: allData, encoding: .utf8) ?? ""
+    }
+
+    nonisolated private static func tailLines(
+        from url: URL,
+        completion: CodexCLIFileTailCompletion,
+        onLine: @escaping @Sendable (String) async -> Void
+    ) async throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        var allData = Data()
+        var lineData = Data()
+
+        while true {
+            try Task.checkCancellation()
+            let data = try handle.read(upToCount: 64 * 1024) ?? Data()
+            if data.isEmpty {
+                if completion.isFinished {
+                    if !lineData.isEmpty {
+                        let line = String(data: lineData, encoding: .utf8) ?? ""
+                        await onLine(line.trimmingTrailingCarriageReturn())
+                    }
+                    return String(data: allData, encoding: .utf8) ?? ""
+                }
+                try await Task.sleep(nanoseconds: 100_000_000)
+                continue
+            }
+
+            for byte in data {
+                allData.append(byte)
+                if byte == 10 {
+                    let line = String(data: lineData, encoding: .utf8) ?? ""
+                    await onLine(line.trimmingTrailingCarriageReturn())
+                    lineData.removeAll(keepingCapacity: true)
+                } else {
+                    lineData.append(byte)
+                }
+            }
+        }
+    }
+}
+
+private actor CodexCLIOutputFileWriter {
+    private let fileHandle: FileHandle
+
+    init(url: URL) throws {
+        try CodexCLIClient.prepareOutputFile(at: url)
+        self.fileHandle = try FileHandle(forWritingTo: url)
+    }
+
+    func writeLine(_ line: String) {
+        guard let data = "\(line)\n".data(using: .utf8) else { return }
+        try? fileHandle.write(contentsOf: data)
+    }
+
+    func close() {
+        try? fileHandle.close()
+    }
+}
+
+private final class CodexCLIFileTailCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    nonisolated(unsafe) private var finished = false
+
+    nonisolated init() {}
+
+    nonisolated func finish() {
+        lock.lock()
+        finished = true
+        lock.unlock()
+    }
+
+    nonisolated var isFinished: Bool {
+        lock.lock()
+        let value = finished
+        lock.unlock()
+        return value
     }
 }
 

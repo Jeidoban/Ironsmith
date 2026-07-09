@@ -332,6 +332,47 @@ extension InferenceTests {
     }
 
     @Test
+    func codexCLIClientStreamsStdoutFromOutputFile() async throws {
+        let directory = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let codexHomeDirectory = directory.appendingPathComponent(".codex", isDirectory: true)
+        let stdoutURL = directory.appendingPathComponent("agent.jsonl")
+        let lineRecorder = CodexCLILineRecorder()
+        let client = CodexCLIClient.live(
+            codexHomeDirectory: codexHomeDirectory,
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            bundleResourceURL: nil,
+            environment: ["PATH": "/bin:/usr/bin"]
+        )
+        let firstLine = #"{"type":"thread.started","thread_id":"thread-1"}"#
+        let secondLine = #"{"type":"turn.completed"}"#
+        let script = """
+        printf '%s\\n' '\(firstLine)'
+        sleep 0.1
+        printf '%s\\n' '\(secondLine)'
+        """
+
+        let result = try await client.runStreamingToFile(
+            ["-c", script],
+            [:],
+            stdoutURL,
+            { line in
+                await lineRecorder.recordStdout(line)
+            },
+            { line in
+                await lineRecorder.recordStderr(line)
+            }
+        )
+
+        let transcript = try String(contentsOf: stdoutURL, encoding: .utf8)
+        #expect(result.terminationStatus == 0)
+        #expect(result.stdout == "\(firstLine)\n\(secondLine)\n")
+        #expect(transcript == result.stdout)
+        #expect(await lineRecorder.stdout == [firstLine, secondLine])
+        #expect(await lineRecorder.stderr.isEmpty)
+    }
+
+    @Test
     func codexCLIClientLocatesBundledVendorBinary() throws {
         let resourcesURL = try Self.temporaryDirectory()
         let codexResourceURL = resourcesURL.appendingPathComponent("Codex", isDirectory: true)
@@ -409,5 +450,18 @@ private actor CodexCLIRequestRecorder {
 
     func record(_ request: CodexCLIProcessRequest) {
         requests.append(request)
+    }
+}
+
+private actor CodexCLILineRecorder {
+    private(set) var stdout: [String] = []
+    private(set) var stderr: [String] = []
+
+    func recordStdout(_ line: String) {
+        stdout.append(line)
+    }
+
+    func recordStderr(_ line: String) {
+        stderr.append(line)
     }
 }

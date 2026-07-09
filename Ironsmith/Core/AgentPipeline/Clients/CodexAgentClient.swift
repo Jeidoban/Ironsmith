@@ -245,7 +245,7 @@ extension CodexAgentClient {
                 openAIAPIKey = nil
             }
 
-            let transcriptWriter = try CodexAgentTranscriptWriter(
+            let transcriptFile = try CodexAgentTranscriptFile(
                 packageRootURL: request.packageRootURL
             )
             let swiftBuildWorkspace = try CodexAgentSwiftBuildWorkspace.create(
@@ -275,11 +275,11 @@ extension CodexAgentClient {
                 prompt(for: request, temporaryWorkspaceURL: swiftBuildWorkspace.rootURL)
             )
 
-            let result = try await cliClient.runStreaming(
+            let result = try await cliClient.runStreamingToFile(
                 arguments,
                 environment,
+                transcriptFile.url,
                 { line in
-                    await transcriptWriter.writeLine(line)
                     guard let event = CodexAgentEvent.parse(jsonLine: line) else { return }
                     await request.onEvent(event)
                 },
@@ -290,9 +290,8 @@ extension CodexAgentClient {
                     await request.onEvent(.error(trimmed))
                 }
             )
-            await transcriptWriter.close()
 
-            let transcriptURL = transcriptWriter.url
+            let transcriptURL = transcriptFile.url
             guard result.terminationStatus == 0 else {
                 throw CodexAgentError.commandFailed(
                     status: result.terminationStatus,
@@ -350,6 +349,7 @@ extension CodexAgentClient {
         - Make the app feel native to macOS.
         - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and local-only state.
         - Apple frameworks and APIs are allowed and encouraged over custom solutions, but do not add any third-party dependencies.
+        - Internet searches are encouraged if you need extra context to complete the user's request, especially for apple documentation.
         - Use // MARK: - to separate sections of code.
         """
     }
@@ -413,9 +413,8 @@ enum CodexAgentError: LocalizedError, Equatable {
     }
 }
 
-private actor CodexAgentTranscriptWriter {
+nonisolated private struct CodexAgentTranscriptFile: Sendable {
     let url: URL
-    private let fileHandle: FileHandle
 
     init(
         packageRootURL: URL
@@ -425,29 +424,8 @@ private actor CodexAgentTranscriptWriter {
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let fileName = "agent-\(Self.timestamp())-\(UUID().uuidString.lowercased()).jsonl"
         let url = directoryURL.appendingPathComponent(fileName)
-        fileManager.createFile(atPath: url.path, contents: nil)
+        try Data().write(to: url, options: .atomic)
         self.url = url
-        self.fileHandle = try FileHandle(forWritingTo: url)
-    }
-
-    func writeLine(_ line: String) {
-        guard let data = "\(line)\n".data(using: .utf8) else { return }
-        do {
-            try fileHandle.write(contentsOf: data)
-        } catch {
-            AgentDiagnosticsLog.append(
-                """
-                Failed to write Codex JSONL transcript.
-                path: \(url.path)
-                error:
-                \(AgentDiagnosticsLog.renderError(error, limit: 500))
-                """
-            )
-        }
-    }
-
-    func close() {
-        try? fileHandle.close()
     }
 
     private static func timestamp() -> String {
