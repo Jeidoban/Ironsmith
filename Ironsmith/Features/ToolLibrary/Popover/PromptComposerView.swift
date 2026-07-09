@@ -118,16 +118,13 @@ struct PromptComposerView: View {
                 }
             }
 
-            Picker("Coding Agent", selection: $codingAgentPreference) {
-                Text(ToolCodingAgentPreference.automatic.displayName)
-                    .tag(ToolCodingAgentPreference.automatic)
-                Text(ToolCodingAgentPreference.ironsmithSpark.displayName)
-                    .tag(ToolCodingAgentPreference.ironsmithSpark)
-                Text(ToolCodingAgentPreference.ironsmithFlame.displayName)
-                    .tag(ToolCodingAgentPreference.ironsmithFlame)
-                Text(ToolCodingAgentPreference.codex.displayName)
-                    .tag(ToolCodingAgentPreference.codex)
+            Menu("Coding Agent") {
+                codingAgentButton(.automatic)
+                codingAgentButton(.ironsmithSpark)
+                codingAgentButton(.ironsmithFlame)
+                codingAgentButton(.codex)
                     .disabled(!isCodexAgentSupported)
+                    .help("Codex currently supports OpenAI models only.")
             }
 
             if showsSandboxControl {
@@ -239,6 +236,19 @@ struct PromptComposerView: View {
 
     private var sandboxHelpText: String {
         "Controls whether generated apps include App Sandbox entitlements."
+    }
+
+    private func codingAgentButton(_ preference: ToolCodingAgentPreference) -> some View {
+        Button {
+            guard preference != .codex || isCodexAgentSupported else { return }
+            codingAgentPreference = preference
+        } label: {
+            if codingAgentPreference == preference {
+                Label(preference.displayName, systemImage: "checkmark")
+            } else {
+                Text(preference.displayName)
+            }
+        }
     }
 
     private func resourcePermissionBinding(for permission: GeneratedAppResourcePermission)

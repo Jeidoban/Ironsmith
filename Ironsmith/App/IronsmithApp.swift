@@ -75,16 +75,21 @@ final class IronsmithApplicationController {
     private let commandLineToolsGate: CommandLineToolsGate
     private let menuBarPopoverPresentationStore: MenuBarPopoverPresentationStore
     private let menuBarController: IronsmithMenuBarController?
+    private let agentOutputWindowController: IronsmithAgentOutputWindowController?
     private let settingsWindowController: IronsmithSettingsWindowController?
     private let storeWindowController: IronsmithStoreWindowController?
 
     init() {
         let isRunningTests = IronsmithRuntimeEnvironment.isRunningTests
         let inferenceStore = InferenceStore()
+        var appKitAgentOutputWindowController: IronsmithAgentOutputWindowController?
         var appKitSettingsWindowController: IronsmithSettingsWindowController?
         var appKitStoreWindowController: IronsmithStoreWindowController?
         var appKitMenuBarController: IronsmithMenuBarController?
         let routeStore = IronsmithRouteStore(
+            openAgentOutputWindow: { toolID in
+                appKitAgentOutputWindowController?.show(toolID: toolID)
+            },
             openSettingsWindow: {
                 appKitSettingsWindowController?.show()
             },
@@ -114,10 +119,16 @@ final class IronsmithApplicationController {
         self.commandLineToolsGate = commandLineToolsGate
         self.menuBarPopoverPresentationStore = menuBarPopoverPresentationStore
         if isRunningTests {
+            agentOutputWindowController = nil
             settingsWindowController = nil
             storeWindowController = nil
             menuBarController = nil
         } else {
+            let agentOutputWindowController = IronsmithAgentOutputWindowController(
+                modelContainer: modelContainer
+            )
+            appKitAgentOutputWindowController = agentOutputWindowController
+            self.agentOutputWindowController = agentOutputWindowController
             let settingsWindowController = IronsmithSettingsWindowController(
                 modelContainer: modelContainer,
                 inferenceStore: inferenceStore,

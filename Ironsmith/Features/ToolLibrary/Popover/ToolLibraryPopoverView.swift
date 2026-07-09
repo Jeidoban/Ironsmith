@@ -98,6 +98,8 @@ struct ToolLibraryPopoverView: View {
                                 canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
                                 showsStoreActions: isStoreFeatureEnabled,
                                 canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
+                                activeCodingAgent: toolLibraryStore.activeCodingAgent(for: tool),
+                                canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool),
                                 onSelect: {
                                     toolLibraryStore.toggleSelection(
                                         for: tool,
@@ -143,6 +145,9 @@ struct ToolLibraryPopoverView: View {
                                     Task {
                                         await toolLibraryStore.viewSource(tool)
                                     }
+                                },
+                                onShowAgentOutput: {
+                                    routeStore.open(.agentOutput(tool.id))
                                 },
                                 onContinue: {
                                     toolLibraryStore.continueGeneration(

@@ -119,7 +119,8 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
     case turnStarted
     case turnCompleted
     case agentMessage(String)
-    case commandExecution(command: String, status: String?, exitCode: Int?)
+    case commandExecution(id: String?, command: String, status: String?, exitCode: Int?)
+    case fileChange(id: String?, changes: [CodexAgentFileChange], status: String?)
     case error(String)
 
     var diagnosticSummary: String? {
@@ -134,15 +135,27 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty
                 ? nil : "Codex: \(AgentDiagnosticsLog.compact(trimmed, limit: 500))"
-        case .commandExecution(let command, let status, let exitCode):
+        case .commandExecution(_, let command, let status, let exitCode):
+            guard status != "in_progress" else { return nil }
             var summary = "Codex command"
-            if let status, !status.isEmpty {
+            if let status = CodexAgentStatusFormatter.displayText(status) {
                 summary += " \(status)"
             }
             if let exitCode {
                 summary += " (exit \(exitCode))"
             }
             return "\(summary): \(AgentDiagnosticsLog.compact(command, limit: 500))"
+        case .fileChange(_, let changes, let status):
+            guard status != "in_progress" else { return nil }
+            let changeSummary = changes
+                .map { $0.diagnosticSummary }
+                .joined(separator: ", ")
+            guard !changeSummary.isEmpty else { return nil }
+            var summary = "Codex file change"
+            if let status = CodexAgentStatusFormatter.displayText(status) {
+                summary += " \(status)"
+            }
+            return "\(summary): \(AgentDiagnosticsLog.compact(changeSummary, limit: 500))"
         case .error(let message):
             return "Codex error: \(AgentDiagnosticsLog.compact(message, limit: 500))"
         }
@@ -189,12 +202,32 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
         case "command_execution":
             guard let command = stringValue(in: item, keys: ["command"]) else { return nil }
             return .commandExecution(
+                id: stringValue(in: item, keys: ["id"]),
                 command: command,
                 status: stringValue(in: item, keys: ["status"]),
                 exitCode: intValue(item["exit_code"])
             )
+        case "file_change":
+            let changes = fileChanges(in: item)
+            guard !changes.isEmpty else { return nil }
+            return .fileChange(
+                id: stringValue(in: item, keys: ["id"]),
+                changes: changes,
+                status: stringValue(in: item, keys: ["status"])
+            )
         default:
             return nil
+        }
+    }
+
+    private static func fileChanges(in object: [String: Any]) -> [CodexAgentFileChange] {
+        guard let changes = object["changes"] as? [[String: Any]] else { return [] }
+        return changes.compactMap { change in
+            guard let path = stringValue(in: change, keys: ["path"]) else { return nil }
+            return CodexAgentFileChange(
+                path: path,
+                kind: stringValue(in: change, keys: ["kind"])
+            )
         }
     }
 
@@ -222,6 +255,45 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
         default:
             return nil
         }
+    }
+}
+
+nonisolated struct CodexAgentFileChange: Equatable, Sendable {
+    let path: String
+    let kind: String?
+
+    var diagnosticSummary: String {
+        if let kind, !kind.isEmpty {
+            return "\(CodexAgentStatusFormatter.displayText(kind) ?? kind) \(CodexAgentPathDisplay.compact(path))"
+        }
+        return CodexAgentPathDisplay.compact(path)
+    }
+}
+
+nonisolated enum CodexAgentStatusFormatter {
+    static func displayText(_ status: String?) -> String? {
+        guard let status, !status.isEmpty else { return nil }
+        switch status {
+        case "in_progress":
+            return "In progress"
+        default:
+            return status
+                .replacingOccurrences(of: "_", with: " ")
+                .split(separator: " ")
+                .map { word in
+                    word.prefix(1).uppercased() + word.dropFirst()
+                }
+                .joined(separator: " ")
+        }
+    }
+}
+
+nonisolated enum CodexAgentPathDisplay {
+    static func compact(_ path: String) -> String {
+        if let range = path.range(of: "/Sources/") {
+            return "Sources/" + String(path[range.upperBound...])
+        }
+        return URL(fileURLWithPath: path).lastPathComponent
     }
 }
 

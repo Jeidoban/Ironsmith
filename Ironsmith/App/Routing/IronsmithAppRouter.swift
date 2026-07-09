@@ -3,6 +3,7 @@ import Foundation
 import Observation
 
 enum IronsmithAppRoute: Equatable {
+    case agentOutput(UUID)
     case settings(IronsmithSettingsRoute)
     case store(IronsmithStoreRoute)
     case toolLibrary(IronsmithToolLibraryRoute)
@@ -105,6 +106,7 @@ enum IronsmithToolLibraryRoute: Equatable {
 @MainActor
 @Observable
 final class IronsmithRouteStore {
+    private let openAgentOutputWindow: @MainActor @Sendable (UUID) -> Void
     private let openSettingsWindow: @MainActor @Sendable () -> Void
     private let openStoreWindow: @MainActor @Sendable () -> Void
     private let openToolLibraryPopover: @MainActor @Sendable () -> Void
@@ -114,11 +116,13 @@ final class IronsmithRouteStore {
     private(set) var pendingToolLibraryRoute: IronsmithToolLibraryRoute?
 
     init(
+        openAgentOutputWindow: @escaping @MainActor @Sendable (UUID) -> Void = { _ in },
         openSettingsWindow: @escaping @MainActor @Sendable () -> Void,
         openStoreWindow: @escaping @MainActor @Sendable () -> Void = {},
         openToolLibraryPopover: @escaping @MainActor @Sendable () -> Void = {},
         isStoreFeatureEnabled: @escaping @MainActor @Sendable () -> Bool = { true }
     ) {
+        self.openAgentOutputWindow = openAgentOutputWindow
         self.openSettingsWindow = openSettingsWindow
         self.openStoreWindow = openStoreWindow
         self.openToolLibraryPopover = openToolLibraryPopover
@@ -127,6 +131,8 @@ final class IronsmithRouteStore {
 
     func open(_ route: IronsmithAppRoute) {
         switch route {
+        case .agentOutput(let toolID):
+            openAgentOutputWindow(toolID)
         case .settings(let settingsRoute):
             pendingSettingsRoute = settingsRoute
             openSettingsWindow()

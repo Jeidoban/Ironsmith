@@ -25,7 +25,8 @@ extension AgentPipelineTests {
                 await onStderrLine("useful stderr")
                 await onStdoutLine(#"{"type":"thread.started","thread_id":"thread-1"}"#)
                 await onStdoutLine(#"{"type":"item.completed","item":{"type":"agent_message","text":"I am editing ContentView."}}"#)
-                await onStdoutLine(#"{"type":"item.started","item":{"type":"command_execution","command":"swift build","status":"in_progress","aggregated_output":"hidden"}}"#)
+                await onStdoutLine(#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"swift build","status":"in_progress","aggregated_output":"hidden"}}"#)
+                await onStdoutLine(#"{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/Generated/Sources/MortgageMate/ContentView.swift","kind":"add"}],"status":"completed"}}"#)
                 await onStdoutLine(#"{"type":"turn.completed"}"#)
                 return CodexCLIProcessResult(stdout: "jsonl", stderr: "", terminationStatus: 0)
             }
@@ -103,7 +104,12 @@ extension AgentPipelineTests {
         #expect(events.contains(.threadStarted("thread-1")))
         #expect(events.contains(.error("useful stderr")))
         #expect(events.contains(.agentMessage("I am editing ContentView.")))
-        #expect(events.contains(.commandExecution(command: "swift build", status: "in_progress", exitCode: nil)))
+        #expect(events.contains(.commandExecution(id: "item_1", command: "swift build", status: "in_progress", exitCode: nil)))
+        #expect(events.contains(.fileChange(
+            id: "item_2",
+            changes: [CodexAgentFileChange(path: "/tmp/Generated/Sources/MortgageMate/ContentView.swift", kind: "add")],
+            status: "completed"
+        )))
         #expect(events.contains(.turnCompleted))
         #expect(!events.contains { event in
             if case .error(let message) = event {
@@ -111,6 +117,100 @@ extension AgentPipelineTests {
             }
             return false
         })
+    }
+
+    @Test
+    func codexAgentTranscriptReaderPicksNewestTranscriptAndParsesTimeline() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        let transcriptDirectory = CodexAgentTranscriptReader.transcriptDirectoryURL(for: packageRoot)
+        try FileManager.default.createDirectory(at: transcriptDirectory, withIntermediateDirectories: true)
+
+        let olderURL = transcriptDirectory.appendingPathComponent("agent-older.jsonl")
+        let newerURL = transcriptDirectory.appendingPathComponent("agent-newer.jsonl")
+        try #"{"type":"thread.started","thread_id":"old-thread"}"#
+            .write(to: olderURL, atomically: true, encoding: .utf8)
+        try """
+        {"type":"thread.started","thread_id":"thread-1"}
+        {"type":"turn.started"}
+        {"type":"item.completed","item":{"type":"agent_message","text":"I am editing ContentView.","aggregated_output":"hidden"}}
+        {"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"swift build","status":"in_progress","aggregated_output":"hidden"}}
+        {"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"swift build","status":"completed","exit_code":0,"aggregated_output":"hidden"}}
+        {"type":"item.started","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/Generated/Sources/Demo/ContentView.swift","kind":"add"}],"status":"in_progress"}}
+        {"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/Generated/Sources/Demo/ContentView.swift","kind":"add"}],"status":"completed"}}
+        {"type":"error","message":"apply_patch failed"}
+        {"type":"turn.completed"}
+        """
+        .write(to: newerURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 10)],
+            ofItemAtPath: olderURL.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 20)],
+            ofItemAtPath: newerURL.path
+        )
+
+        let snapshot = try CodexAgentTranscriptReader.snapshot(for: packageRoot)
+
+        #expect(snapshot.url?.resolvingSymlinksInPath() == newerURL.resolvingSymlinksInPath())
+        #expect(snapshot.entries.map(\.kind) == [
+            .threadStarted("thread-1"),
+            .turnStarted,
+            .agentMessage("I am editing ContentView."),
+            .commandExecution(command: "swift build", status: "completed", exitCode: 0),
+            .fileChange(
+                changes: [CodexAgentFileChange(path: "/tmp/Generated/Sources/Demo/ContentView.swift", kind: "add")],
+                status: "completed"
+            ),
+            .error("apply_patch failed"),
+            .turnCompleted,
+        ])
+    }
+
+    @Test
+    func codexAgentDiagnosticsLogCompletedFileChangesAndSuppressInProgressDuplicates() {
+        #expect(
+            CodexAgentEvent.commandExecution(
+                id: "item_1",
+                command: "swift build",
+                status: "in_progress",
+                exitCode: nil
+            ).diagnosticSummary == nil
+        )
+        #expect(
+            CodexAgentEvent.commandExecution(
+                id: "item_1",
+                command: "swift build",
+                status: "completed",
+                exitCode: 0
+            ).diagnosticSummary == "Codex command Completed (exit 0): swift build"
+        )
+        #expect(
+            CodexAgentEvent.fileChange(
+                id: "item_2",
+                changes: [
+                    CodexAgentFileChange(
+                        path: "/tmp/Generated/Sources/Demo/ContentView.swift",
+                        kind: "add"
+                    )
+                ],
+                status: "completed"
+            ).diagnosticSummary == "Codex file change Completed: Add Sources/Demo/ContentView.swift"
+        )
+    }
+
+    @Test
+    func codexAgentTranscriptReaderReturnsEmptySnapshotWhenMissing() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+
+        let snapshot = try CodexAgentTranscriptReader.snapshot(for: packageRoot)
+
+        #expect(snapshot == .empty)
+        #expect(!CodexAgentTranscriptReader.hasTranscript(for: packageRoot))
     }
 
     @Test
@@ -240,7 +340,7 @@ extension AgentPipelineTests {
                 atomically: true,
                 encoding: .utf8
             )
-            await request.onEvent(.commandExecution(command: "swift build", status: "completed", exitCode: 0))
+            await request.onEvent(.commandExecution(id: nil, command: "swift build", status: "completed", exitCode: 0))
             return CodexAgentResult(
                 stdout: "",
                 stderr: "",

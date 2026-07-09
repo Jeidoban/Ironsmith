@@ -16,6 +16,8 @@ struct ToolRowView: View {
     let canRevert: Bool
     let showsStoreActions: Bool
     let canUpdateStoreVersion: Bool
+    let activeCodingAgent: ToolCodingAgent?
+    let canShowAgentOutput: Bool
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onRun: () -> Void
@@ -26,6 +28,7 @@ struct ToolRowView: View {
     let onExport: () -> Void
     let onShowInFinder: () -> Void
     let onViewSource: () -> Void
+    let onShowAgentOutput: () -> Void
     let onContinue: () -> Void
     let onDiscard: () -> Void
     let onStop: () -> Void
@@ -173,6 +176,8 @@ struct ToolRowView: View {
             .disabled(!tool.isGenerationReady || isBusy)
         Button("View Source", action: onViewSource)
             .disabled(!tool.isGenerationReady)
+        Button("Show Agent Output", action: onShowAgentOutput)
+            .disabled(!canShowAgentOutput)
         Button("Show in Finder", action: onShowInFinder)
         Divider()
         if shouldDiscardFromMenu {
@@ -213,43 +218,16 @@ struct ToolRowView: View {
         case .ready:
             return nil
         case .generating:
-            return phaseStatusText
+            return ToolRowGenerationStatusResolver.statusText(
+                phase: tool.generationPhase,
+                repairErrorCount: tool.generationRepairErrorCount,
+                activeCodingAgent: activeCodingAgent
+            )
         case .stopped:
             return "Stopped"
         case .failed:
             return "Failed"
         }
-    }
-
-    private var phaseStatusText: String {
-        switch tool.generationPhase {
-        case .initializing:
-            return "Initializing"
-        case .planning:
-            return "Naming app"
-        case .generatingIcon:
-            return "Generating icon"
-        case .refiningPrompt:
-            return "Enhancing prompt"
-        case .generatingSource:
-            return "Generating source"
-        case .generatingEditDiff:
-            return "Editing source"
-        case .generatingRepairDiff:
-            return repairStatusText ?? "Repairing"
-        case .repairing:
-            return repairStatusText ?? "Building"
-        case .packaging:
-            return "Packaging"
-        case .completed, nil:
-            return "Finishing"
-        }
-    }
-
-    private var repairStatusText: String? {
-        guard let count = tool.generationRepairErrorCount, count > 0 else { return nil }
-        let errorLabel = count == 1 ? "error" : "errors"
-        return "Repairing \(count) \(errorLabel)"
     }
 
     private var canContinue: Bool {
@@ -315,6 +293,8 @@ struct ToolRowView: View {
         canRevert: true,
         showsStoreActions: true,
         canUpdateStoreVersion: false,
+        activeCodingAgent: nil,
+        canShowAgentOutput: false,
         onSelect: {},
         onEdit: {},
         onRun: {},
@@ -325,6 +305,7 @@ struct ToolRowView: View {
         onExport: {},
         onShowInFinder: {},
         onViewSource: {},
+        onShowAgentOutput: {},
         onContinue: {},
         onDiscard: {},
         onStop: {},
@@ -332,6 +313,56 @@ struct ToolRowView: View {
     )
     .padding()
     .frame(width: 360)
+}
+
+enum ToolRowGenerationStatusResolver {
+    nonisolated static func statusText(
+        phase: ToolGenerationPhase?,
+        repairErrorCount: Int?,
+        activeCodingAgent: ToolCodingAgent?
+    ) -> String {
+        if activeCodingAgent == .codex && isCodexOwnedPhase(phase) {
+            return "Codex is working"
+        }
+
+        switch phase {
+        case .initializing:
+            return "Initializing"
+        case .planning:
+            return "Naming app"
+        case .generatingIcon:
+            return "Generating icon"
+        case .refiningPrompt:
+            return "Enhancing prompt"
+        case .generatingSource:
+            return "Generating source"
+        case .generatingEditDiff:
+            return "Editing source"
+        case .generatingRepairDiff:
+            return repairStatusText(repairErrorCount) ?? "Repairing"
+        case .repairing:
+            return repairStatusText(repairErrorCount) ?? "Building"
+        case .packaging:
+            return "Packaging"
+        case .completed, nil:
+            return "Finishing"
+        }
+    }
+
+    nonisolated private static func isCodexOwnedPhase(_ phase: ToolGenerationPhase?) -> Bool {
+        switch phase {
+        case .generatingSource, .generatingEditDiff, .generatingRepairDiff, .repairing:
+            return true
+        case .initializing, .planning, .generatingIcon, .refiningPrompt, .packaging, .completed, nil:
+            return false
+        }
+    }
+
+    nonisolated private static func repairStatusText(_ count: Int?) -> String? {
+        guard let count, count > 0 else { return nil }
+        let errorLabel = count == 1 ? "error" : "errors"
+        return "Repairing \(count) \(errorLabel)"
+    }
 }
 
 @MainActor
