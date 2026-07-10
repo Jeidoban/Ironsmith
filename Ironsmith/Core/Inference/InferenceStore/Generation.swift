@@ -33,7 +33,10 @@ extension InferenceStore {
             pipelineConfiguration: pipelineConfiguration(for: selectedModel, provider: provider),
             promptRefinementEnabled: generationPreferences.generatedPromptRefinementEnabled,
             codingAgentModelIdentifier: selectedModel.identifier,
-            codexAgentAuthentication: try codexAgentAuthentication(for: selectedModel, provider: provider),
+            codexAgentAuthentication: try await codexAgentAuthentication(
+                for: selectedModel,
+                provider: provider
+            ),
             afterLanguageModelInvocation: { [weak self] in
                 guard shouldRefreshIronsmithCredits else { return }
                 await self?.refreshIronsmithAccountSummary()
@@ -140,23 +143,54 @@ extension InferenceStore {
     private func codexAgentAuthentication(
         for model: ModelConfig,
         provider: ProviderConfig?
-    ) throws -> CodexAgentAuthentication? {
+    ) async throws -> CodexAgentAuthentication? {
         guard resolvedToolCodingAgent(for: model, provider: provider) == .codex else {
             return nil
         }
-        guard provider?.kind == .openAI else {
+        guard let provider else {
             throw CodexAgentError.unsupportedProvider
         }
-        if model.openAICodexRawIdentifier != nil {
-            return .chatGPTLogin
+
+        switch provider.kind {
+        case .ironsmith:
+            let accessToken = try await dependencies.accountClient.generationAccessToken()
+            guard !accessToken.isEmpty else {
+                throw LanguageModelClientError.missingAccountSession
+            }
+            return .customResponsesProvider(
+                CodexAgentCustomResponsesProvider(
+                    identifier: "ironsmith",
+                    displayName: provider.displayName,
+                    baseURL: try codexProviderBaseURL(provider),
+                    authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
+                    authenticationToken: accessToken
+                )
+            )
+        case .openAI:
+            if model.openAICodexRawIdentifier != nil {
+                return .chatGPTLogin
+            }
+            guard let reference = provider.apiKeyReference,
+                  let apiKey = try dependencies.credentialClient.loadAPIKey(reference),
+                  !apiKey.isEmpty
+            else {
+                throw LanguageModelClientError.missingAPIKey
+            }
+            return .apiKey(apiKey)
+        case .local, .anthropic, .gemini, .ollama, .customOpenAICompatible:
+            throw CodexAgentError.unsupportedProvider
         }
-        guard let reference = provider?.apiKeyReference,
-              let apiKey = try dependencies.credentialClient.loadAPIKey(reference),
-              !apiKey.isEmpty
-        else {
-            throw LanguageModelClientError.missingAPIKey
+    }
+
+    private func codexProviderBaseURL(_ provider: ProviderConfig) throws -> URL {
+        let descriptor = ProviderCatalog.descriptor(for: provider.kind)
+        let baseURLString = provider.baseURLString.isEmpty
+            ? descriptor?.defaultBaseURLString ?? ""
+            : provider.baseURLString
+        guard let baseURL = try? ProviderBaseURLValidator.validatedURL(from: baseURLString) else {
+            throw LanguageModelClientError.invalidProviderURL
         }
-        return .apiKey(apiKey)
+        return baseURL
     }
 
     private func smallModelRepairStrategy(for model: ModelConfig) -> ToolRepairStrategy {

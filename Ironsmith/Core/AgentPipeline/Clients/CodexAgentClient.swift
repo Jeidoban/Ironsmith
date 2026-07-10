@@ -1,8 +1,17 @@
 import Foundation
 
+nonisolated struct CodexAgentCustomResponsesProvider: Equatable, Sendable {
+    let identifier: String
+    let displayName: String
+    let baseURL: URL
+    let authenticationEnvironmentVariable: String
+    let authenticationToken: String
+}
+
 enum CodexAgentAuthentication: Equatable, Sendable {
     case apiKey(String)
     case chatGPTLogin
+    case customResponsesProvider(CodexAgentCustomResponsesProvider)
 }
 
 nonisolated struct CodexAgentRequest: Sendable {
@@ -368,13 +377,14 @@ extension CodexAgentClient {
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
     ) -> Self {
         Self { request in
-            let openAIAPIKey: String?
+            var customProviderArguments: [String] = []
             switch request.authentication {
-            case .apiKey(let apiKey):
-                openAIAPIKey = apiKey
+            case .apiKey:
+                break
             case .chatGPTLogin:
                 _ = try await openAICodexAuthClient.validCredential()
-                openAIAPIKey = nil
+            case .customResponsesProvider(let provider):
+                customProviderArguments = configurationArguments(for: provider)
             }
 
             let resumeSessionID = CodexAgentTranscriptReader.latestThreadID(
@@ -390,19 +400,26 @@ extension CodexAgentClient {
                 try? swiftBuildWorkspace.remove()
             }
             var environment = swiftBuildWorkspace.environment
-            if let openAIAPIKey {
-                environment["OPENAI_API_KEY"] = openAIAPIKey
+            switch request.authentication {
+            case .apiKey(let apiKey):
+                environment["OPENAI_API_KEY"] = apiKey
+            case .chatGPTLogin:
+                break
+            case .customResponsesProvider(let provider):
+                environment[provider.authenticationEnvironmentVariable] =
+                    provider.authenticationToken
             }
 
-            var arguments = [
-                "exec",
+            var arguments = ["exec"]
+            arguments.append(contentsOf: customProviderArguments)
+            arguments.append(contentsOf: [
                 "--json",
                 "--sandbox",
                 "workspace-write",
                 "--cd",
                 request.packageRootURL.path,
                 "--skip-git-repo-check",
-            ]
+            ])
             if let model = modelArgument(from: request.modelIdentifier) {
                 arguments.append(contentsOf: ["--model", model])
             }
@@ -498,6 +515,27 @@ extension CodexAgentClient {
         return OpenAICodexBackend.rawCodexModelIdentifier(from: trimmed) ?? trimmed
     }
 
+    nonisolated private static func configurationArguments(
+        for provider: CodexAgentCustomResponsesProvider
+    ) -> [String] {
+        let prefix = "model_providers.\(provider.identifier)"
+        return [
+            "-c", "model_provider=\(tomlString(provider.identifier))",
+            "-c", "\(prefix).name=\(tomlString(provider.displayName))",
+            "-c", "\(prefix).base_url=\(tomlString(provider.baseURL.absoluteString))",
+            "-c", "\(prefix).wire_api=\(tomlString("responses"))",
+            "-c",
+            "\(prefix).env_key=\(tomlString(provider.authenticationEnvironmentVariable))",
+        ]
+    }
+
+    nonisolated private static func tomlString(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
     nonisolated private static func isIgnorableStderrLine(_ line: String) -> Bool {
         line.contains("FSEventsPurgeEventsForDeviceUpToEventId")
             || line.contains("f2d_purge_events_for_device_up_to_event_id_rpc() failed")
@@ -518,10 +556,14 @@ enum CodexAgentError: LocalizedError, Equatable {
         case .missingCodexClient:
             return "Codex is not configured."
         case .unsupportedProvider:
-            return "Codex currently supports OpenAI models only."
+            return "Codex currently supports OpenAI and Ironsmith models."
         case .missingAuthenticationForRuntime:
             return "Codex authentication was not prepared for this generation."
         case .commandFailed(let status, let stderr, let transcriptURL):
+            if status == 1 {
+                return
+                    "Codex couldn't continue. You might be out of Codex usage. Check your usage in Codex and try again after it resets. Transcript: \(transcriptURL.path)"
+            }
             let output = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             if output.isEmpty {
                 return "Codex exited with status \(status). Transcript: \(transcriptURL.path)"

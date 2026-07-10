@@ -59,7 +59,12 @@ enum ToolCodingAgentSupport {
         model _: ModelConfig?,
         provider: ProviderConfig?
     ) -> Bool {
-        provider?.kind == .openAI
+        switch provider?.kind {
+        case .ironsmith, .openAI:
+            return true
+        case .local, .anthropic, .gemini, .ollama, .customOpenAICompatible, nil:
+            return false
+        }
     }
 
     static func effectivePreference(

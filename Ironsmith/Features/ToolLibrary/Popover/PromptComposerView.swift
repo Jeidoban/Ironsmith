@@ -124,7 +124,7 @@ struct PromptComposerView: View {
                 codingAgentButton(.ironsmithFlame)
                 codingAgentButton(.codex)
                     .disabled(!isCodexAgentSupported)
-                    .help("Codex currently supports OpenAI models only.")
+                    .help("Codex currently supports OpenAI and Ironsmith models.")
             }
 
             if showsSandboxControl {

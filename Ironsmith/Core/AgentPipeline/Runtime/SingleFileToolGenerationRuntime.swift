@@ -535,7 +535,14 @@ struct SingleFileToolGenerationRuntime {
         }
 
         do {
-            let result = try await context.codexAgentClient.run(request)
+            let result: CodexAgentResult
+            do {
+                result = try await context.codexAgentClient.run(request)
+                await context.languageModelInvoker.recordInvocationCompleted()
+            } catch {
+                await context.languageModelInvoker.recordInvocationCompleted()
+                throw error
+            }
             try Task.checkCancellation()
             try validateCodexProtectedFiles(
                 layout: layout,

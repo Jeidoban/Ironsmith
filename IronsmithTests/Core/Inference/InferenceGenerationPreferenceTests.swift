@@ -270,4 +270,48 @@ extension InferenceTests {
         #expect(context.codingAgentModelIdentifier == "codex:gpt-5.5")
         #expect(context.codexAgentAuthentication == .chatGPTLogin)
     }
+
+    @MainActor
+    @Test
+    func selectedIronsmithModelUsesCodexCustomResponsesProviderWhenRequested() async throws {
+        let preferences = Self.generationPreferences()
+        preferences.codingAgentPreference = .codex
+        let accountClient = Self.accountClient()
+        let store = InferenceStore(
+            dependencies: Self.dependencies(accountClient: accountClient),
+            generationPreferences: preferences,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
+        let provider = ProviderCatalog.makeProvider(for: .ironsmith)!
+        provider.baseURLString = "https://api.ironsmith.test/api/v1"
+        let model = ModelConfig(
+            identifier: "deepseek/deepseek-v4-flash",
+            displayName: "DeepSeek V4 Flash",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        store.providers = [provider]
+        store.remoteModels = [model]
+        store.selectModel(model.selectionIdentifier)
+        try await store.prepareSelectedModelForGeneration()
+
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+
+        #expect(context.pipelineConfiguration.codingAgent == .codex)
+        #expect(context.codingAgentModelIdentifier == "deepseek/deepseek-v4-flash")
+        #expect(
+            context.codexAgentAuthentication
+                == .customResponsesProvider(
+                    CodexAgentCustomResponsesProvider(
+                        identifier: "ironsmith",
+                        displayName: "Ironsmith",
+                        baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
+                        authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
+                        authenticationToken: "access-token"
+                    )
+                )
+        )
+    }
 }

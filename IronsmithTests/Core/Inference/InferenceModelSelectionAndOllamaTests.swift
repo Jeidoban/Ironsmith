@@ -323,6 +323,7 @@ extension InferenceTests {
         preferences.codingAgentPreference = .codex
         let store = Self.dependenciesBackedStore(generationPreferences: preferences)
         let openAIProvider = ProviderCatalog.makeProvider(for: .openAI)!
+        let ironsmithProvider = ProviderCatalog.makeProvider(for: .ironsmith)!
         let ollamaProvider = ProviderCatalog.makeProvider(for: .ollama)!
         let openAIModel = ModelConfig(
             identifier: "gpt-test",
@@ -338,11 +339,23 @@ extension InferenceTests {
             source: .remote,
             installState: .installed
         )
+        let ironsmithModel = ModelConfig(
+            identifier: "deepseek/deepseek-v4-flash",
+            displayName: "DeepSeek V4 Flash",
+            providerIdentifier: ironsmithProvider.identifier,
+            source: .remote,
+            installState: .installed
+        )
 
-        store.providers = [openAIProvider, ollamaProvider]
-        store.remoteModels = [openAIModel, ollamaModel]
+        store.providers = [openAIProvider, ironsmithProvider, ollamaProvider]
+        store.remoteModels = [openAIModel, ironsmithModel, ollamaModel]
 
         store.selectModel(openAIModel.selectionIdentifier)
+
+        #expect(store.selectedModelSupportsCodingAgentPreference(.codex))
+        #expect(preferences.codingAgentPreference == .codex)
+
+        store.selectModel(ironsmithModel.selectionIdentifier)
 
         #expect(store.selectedModelSupportsCodingAgentPreference(.codex))
         #expect(preferences.codingAgentPreference == .codex)

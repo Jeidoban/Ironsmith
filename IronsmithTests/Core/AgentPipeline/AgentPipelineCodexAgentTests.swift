@@ -134,6 +134,73 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func codexAgentClientConfiguresCustomResponsesProvider() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+
+        let cliCapture = CodexAgentCLICapture()
+        let cliClient = CodexCLIClient(
+            run: { _ in
+                Issue.record("Codex agent should use streaming exec.")
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1)
+            },
+            runStreaming: { arguments, environment, _, _ in
+                await cliCapture.record(arguments: arguments, environment: environment)
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured,
+            temporaryDirectory: temporaryDirectory
+        )
+        let provider = CodexAgentCustomResponsesProvider(
+            identifier: "ironsmith",
+            displayName: "Ironsmith",
+            baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
+            authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
+            authenticationToken: "ironsmith-access-token"
+        )
+
+        _ = try await client.run(
+            CodexAgentRequest(
+                packageRootURL: packageRoot,
+                executableName: "Demo",
+                displayName: "Demo",
+                appKind: .window,
+                sandboxEnabled: true,
+                userPrompt: "Make a demo",
+                modelIdentifier: "deepseek/deepseek-v4-flash",
+                authentication: .customResponsesProvider(provider)
+            )
+        )
+
+        let arguments = try #require(await cliCapture.arguments)
+        let environment = try #require(await cliCapture.environment)
+        #expect(arguments.contains(#"model_provider="ironsmith""#))
+        #expect(arguments.contains(#"model_providers.ironsmith.name="Ironsmith""#))
+        #expect(
+            arguments.contains(
+                #"model_providers.ironsmith.base_url="https://api.ironsmith.test/api/v1""#
+            )
+        )
+        #expect(arguments.contains(#"model_providers.ironsmith.wire_api="responses""#))
+        #expect(
+            arguments.contains(
+                #"model_providers.ironsmith.env_key="IRONSMITH_CODEX_ACCESS_TOKEN""#
+            )
+        )
+        #expect(arguments.contains("deepseek/deepseek-v4-flash"))
+        #expect(!arguments.contains("ironsmith-access-token"))
+        #expect(environment["IRONSMITH_CODEX_ACCESS_TOKEN"] == "ironsmith-access-token")
+        #expect(environment["OPENAI_API_KEY"] == nil)
+    }
+
+    @Test
     func codexAgentClientResumesLatestToolTranscriptThreadWhenAvailable() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -424,6 +491,21 @@ extension AgentPipelineTests {
         #expect(remainingTemporaryItems.isEmpty)
     }
 
+    @Test
+    func codexAgentStatusOneSuggestsUsageLimit() {
+        let transcriptURL = URL(fileURLWithPath: "/tmp/agent.jsonl")
+        let error = CodexAgentError.commandFailed(
+            status: 1,
+            stderr: "noisy stderr",
+            transcriptURL: transcriptURL
+        )
+
+        #expect(
+            error.errorDescription
+                == "Codex couldn't continue. You might be out of Codex usage. Check your usage in Codex and try again after it resets. Transcript: /tmp/agent.jsonl"
+        )
+    }
+
     @MainActor
     @Test
     func codexRuntimeCreateFlowLetsCodexCreateContentView() async throws {
@@ -431,6 +513,7 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
         let requestCapture = CodexAgentRequestCapture()
+        let invocationCapture = LanguageModelInvocationCapture()
         let codexAgentClient = CodexAgentClient(run: { request in
             await requestCapture.record(request)
             let layout = ToolPackageLayout(
@@ -473,7 +556,10 @@ extension AgentPipelineTests {
             },
             codexAgentClient: codexAgentClient,
             codingAgentModelIdentifier: "gpt-5.5",
-            codexAgentAuthentication: .apiKey("sk-test")
+            codexAgentAuthentication: .apiKey("sk-test"),
+            afterLanguageModelInvocation: {
+                await invocationCapture.record()
+            }
         )
 
         let result = try await runtime.generateTool(
@@ -487,6 +573,7 @@ extension AgentPipelineTests {
         #expect(request.modelIdentifier == "gpt-5.5")
         #expect(request.authentication == .apiKey("sk-test"))
         #expect(contentView.contains(#"Text("codex generated")"#))
+        #expect(await invocationCapture.count == 1)
     }
 
     @MainActor
