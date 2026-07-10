@@ -27,6 +27,7 @@ extension AgentPipelineTests {
                 await onStdoutLine(#"{"type":"item.completed","item":{"type":"agent_message","text":"I am editing ContentView."}}"#)
                 await onStdoutLine(#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"swift build","status":"in_progress","aggregated_output":"hidden"}}"#)
                 await onStdoutLine(#"{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/Generated/Sources/MortgageMate/ContentView.swift","kind":"add"}],"status":"completed"}}"#)
+                await onStdoutLine(#"{"type":"item.completed","item":{"id":"item_3","type":"web_search","query":"lofi hip hop radio direct mp3 stream URL","action":{"type":"search","query":"lofi hip hop radio direct mp3 stream URL","queries":["lofi hip hop radio direct mp3 stream URL","SomaFM direct stream URLs"]}}}"#)
                 await onStdoutLine(#"{"type":"turn.completed"}"#)
                 return CodexCLIProcessResult(stdout: "jsonl", stderr: "", terminationStatus: 0)
             }
@@ -110,6 +111,19 @@ extension AgentPipelineTests {
             changes: [CodexAgentFileChange(path: "/tmp/Generated/Sources/MortgageMate/ContentView.swift", kind: "add")],
             status: "completed"
         )))
+        #expect(events.contains(.webSearch(
+            id: "item_3",
+            search: CodexAgentWebSearch(
+                query: "lofi hip hop radio direct mp3 stream URL",
+                actionType: "search",
+                actionQuery: "lofi hip hop radio direct mp3 stream URL",
+                queries: [
+                    "lofi hip hop radio direct mp3 stream URL",
+                    "SomaFM direct stream URLs",
+                ]
+            ),
+            status: "completed"
+        )))
         #expect(events.contains(.turnCompleted))
         #expect(!events.contains { event in
             if case .error(let message) = event {
@@ -117,6 +131,65 @@ extension AgentPipelineTests {
             }
             return false
         })
+    }
+
+    @Test
+    func codexAgentClientResumesLatestToolTranscriptThreadWhenAvailable() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        let transcriptDirectory = CodexAgentTranscriptReader.transcriptDirectoryURL(
+            for: packageRoot
+        )
+        try FileManager.default.createDirectory(at: transcriptDirectory, withIntermediateDirectories: true)
+        let previousTranscriptURL = transcriptDirectory.appendingPathComponent("agent-previous.jsonl")
+        try """
+        {"type":"thread.started","thread_id":"019f4340-9398-71b2-928f-b6e5164d5da6"}
+        {"type":"turn.completed"}
+        """
+        .write(to: previousTranscriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+
+        let cliCapture = CodexAgentCLICapture()
+        let cliClient = CodexCLIClient(
+            run: { _ in
+                Issue.record("Codex agent should use streaming exec.")
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1)
+            },
+            runStreaming: { arguments, environment, onStdoutLine, _ in
+                await cliCapture.record(arguments: arguments, environment: environment)
+                await onStdoutLine(#"{"type":"thread.started","thread_id":"019f4340-9398-71b2-928f-b6e5164d5da6"}"#)
+                await onStdoutLine(#"{"type":"turn.completed"}"#)
+                return CodexCLIProcessResult(stdout: "jsonl", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured,
+            temporaryDirectory: temporaryDirectory
+        )
+
+        let result = try await client.run(
+            CodexAgentRequest(
+                packageRootURL: packageRoot,
+                executableName: "MortgageMate",
+                displayName: "Mortgage Mate",
+                appKind: .window,
+                sandboxEnabled: true,
+                userPrompt: "Improve the mortgage calculator",
+                modelIdentifier: "codex:gpt-5.5",
+                authentication: .apiKey("sk-test")
+            )
+        )
+
+        let arguments = try #require(await cliCapture.arguments)
+        let resumeIndex = try #require(arguments.firstIndex(of: "resume"))
+        #expect(arguments[resumeIndex + 1] == "019f4340-9398-71b2-928f-b6e5164d5da6")
+        #expect(arguments.last?.contains("Improve the mortgage calculator") == true)
+        #expect(result.transcriptURL != previousTranscriptURL)
+        #expect(FileManager.default.fileExists(atPath: result.transcriptURL.path))
     }
 
     @Test
@@ -139,6 +212,8 @@ extension AgentPipelineTests {
         {"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"swift build","status":"completed","exit_code":0,"aggregated_output":"hidden"}}
         {"type":"item.started","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/Generated/Sources/Demo/ContentView.swift","kind":"add"}],"status":"in_progress"}}
         {"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/Generated/Sources/Demo/ContentView.swift","kind":"add"}],"status":"completed"}}
+        {"type":"item.started","item":{"id":"item_3","type":"web_search","query":"","action":{"type":"other"}}}
+        {"type":"item.completed","item":{"id":"item_3","type":"web_search","query":"lofi hip hop radio direct mp3 stream URL","action":{"type":"search","query":"lofi hip hop radio direct mp3 stream URL","queries":["lofi hip hop radio direct mp3 stream URL","SomaFM direct stream URLs"]}}}
         {"type":"error","message":"apply_patch failed"}
         {"type":"turn.completed"}
         """
@@ -155,6 +230,7 @@ extension AgentPipelineTests {
         let snapshot = try CodexAgentTranscriptReader.snapshot(for: packageRoot)
 
         #expect(snapshot.url?.resolvingSymlinksInPath() == newerURL.resolvingSymlinksInPath())
+        #expect(CodexAgentTranscriptReader.latestThreadID(for: packageRoot) == "thread-1")
         #expect(snapshot.entries.map(\.kind) == [
             .threadStarted("thread-1"),
             .turnStarted,
@@ -162,6 +238,18 @@ extension AgentPipelineTests {
             .commandExecution(command: "swift build", status: "completed", exitCode: 0),
             .fileChange(
                 changes: [CodexAgentFileChange(path: "/tmp/Generated/Sources/Demo/ContentView.swift", kind: "add")],
+                status: "completed"
+            ),
+            .webSearch(
+                search: CodexAgentWebSearch(
+                    query: "lofi hip hop radio direct mp3 stream URL",
+                    actionType: "search",
+                    actionQuery: "lofi hip hop radio direct mp3 stream URL",
+                    queries: [
+                        "lofi hip hop radio direct mp3 stream URL",
+                        "SomaFM direct stream URLs",
+                    ]
+                ),
                 status: "completed"
             ),
             .error("apply_patch failed"),
@@ -198,6 +286,30 @@ extension AgentPipelineTests {
                 ],
                 status: "completed"
             ).diagnosticSummary == "Codex file change Completed: Add Sources/Demo/ContentView.swift"
+        )
+        #expect(
+            CodexAgentEvent.webSearch(
+                id: "item_3",
+                search: CodexAgentWebSearch(
+                    query: "",
+                    actionType: "other",
+                    actionQuery: nil,
+                    queries: []
+                ),
+                status: "in_progress"
+            ).diagnosticSummary == nil
+        )
+        #expect(
+            CodexAgentEvent.webSearch(
+                id: "item_3",
+                search: CodexAgentWebSearch(
+                    query: "lofi hip hop radio direct mp3 stream URL",
+                    actionType: "search",
+                    actionQuery: "lofi hip hop radio direct mp3 stream URL",
+                    queries: ["lofi hip hop radio direct mp3 stream URL"]
+                ),
+                status: "completed"
+            ).diagnosticSummary == "Codex web search Completed: lofi hip hop radio direct mp3 stream URL"
         )
     }
 

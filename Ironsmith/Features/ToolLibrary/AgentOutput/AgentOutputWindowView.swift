@@ -293,6 +293,8 @@ private struct AgentOutputEventRow: View {
                     commandRow(command: command, status: status, exitCode: exitCode)
                 case .fileChange(let changes, let status):
                     fileChangeRow(changes: changes, status: status)
+                case .webSearch(let search, let status):
+                    webSearchRow(search: search, status: status)
                 case .error(let message):
                     Text(message)
                         .font(.callout)
@@ -323,6 +325,8 @@ private struct AgentOutputEventRow: View {
             return "terminal"
         case .fileChange:
             return "doc.text"
+        case .webSearch:
+            return "magnifyingglass"
         case .error:
             return "exclamationmark.triangle.fill"
         case .threadStarted, .turnStarted, .turnCompleted:
@@ -340,6 +344,10 @@ private struct AgentOutputEventRow: View {
             if status == "completed" { return .green }
             return .secondary
         case .fileChange(_, let status):
+            if status == "failed" { return .red }
+            if status == "completed" { return .green }
+            return .secondary
+        case .webSearch(_, let status):
             if status == "failed" { return .red }
             if status == "completed" { return .green }
             return .secondary
@@ -426,6 +434,34 @@ private struct AgentOutputEventRow: View {
                     }
                 }
             }
+        }
+    }
+
+    private func webSearchRow(search: CodexAgentWebSearch, status: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Web search")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                if let statusText = CodexAgentStatusFormatter.displayText(status) {
+                    Text(statusText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(statusStyle(status: status, exitCode: nil))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            statusStyle(status: status, exitCode: nil).opacity(0.12),
+                            in: Capsule()
+                        )
+                }
+            }
+
+            Text(search.displayText)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .lineLimit(4)
         }
     }
 

@@ -15,6 +15,7 @@ nonisolated struct CodexAgentTranscriptEntry: Equatable, Identifiable, Sendable 
         case agentMessage(String)
         case commandExecution(command: String, status: String?, exitCode: Int?)
         case fileChange(changes: [CodexAgentFileChange], status: String?)
+        case webSearch(search: CodexAgentWebSearch, status: String?)
         case error(String)
     }
 
@@ -80,6 +81,28 @@ enum CodexAgentTranscriptReader {
             .timelineEntries()
         return CodexAgentTranscriptSnapshot(url: url, entries: entries)
     }
+
+    nonisolated static func latestThreadID(
+        for packageRootURL: URL,
+        fileManager: FileManager = .default
+    ) -> String? {
+        guard let url = latestTranscriptURL(for: packageRootURL, fileManager: fileManager) else {
+            return nil
+        }
+        return try? threadID(from: url)
+    }
+
+    nonisolated static func threadID(from url: URL) throws -> String? {
+        let text = try String(contentsOf: url, encoding: .utf8)
+        return text
+            .split(whereSeparator: \.isNewline)
+            .compactMap { CodexAgentEvent.parse(jsonLine: String($0)) }
+            .compactMap { event -> String? in
+                guard case .threadStarted(let id) = event else { return nil }
+                return id?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .last { !$0.isEmpty }
+    }
 }
 
 private extension Array where Element == CodexAgentEvent {
@@ -115,6 +138,8 @@ private extension CodexAgentEvent {
         case .fileChange(let id, let changes, _):
             let fallbackKey = changes.map { "\($0.kind ?? ""):\($0.path)" }.joined(separator: "|")
             return id.map { "file:\($0)" } ?? "file:\(fallbackKey)"
+        case .webSearch(let id, let search, _):
+            return id.map { "web-search:\($0)" } ?? "web-search:\(search.displayText)"
         case .threadStarted, .turnStarted, .turnCompleted, .agentMessage, .error:
             return nil
         }
@@ -136,6 +161,8 @@ private extension CodexAgentTranscriptEntry.Kind {
             self = .commandExecution(command: command, status: status, exitCode: exitCode)
         case .fileChange(_, let changes, let status):
             self = .fileChange(changes: changes, status: status)
+        case .webSearch(_, let search, let status):
+            self = .webSearch(search: search, status: status)
         case .error(let message):
             self = .error(message)
         }

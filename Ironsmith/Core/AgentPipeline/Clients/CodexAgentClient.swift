@@ -121,6 +121,7 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
     case agentMessage(String)
     case commandExecution(id: String?, command: String, status: String?, exitCode: Int?)
     case fileChange(id: String?, changes: [CodexAgentFileChange], status: String?)
+    case webSearch(id: String?, search: CodexAgentWebSearch, status: String?)
     case error(String)
 
     var diagnosticSummary: String? {
@@ -156,6 +157,13 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
                 summary += " \(status)"
             }
             return "\(summary): \(AgentDiagnosticsLog.compact(changeSummary, limit: 500))"
+        case .webSearch(_, let search, let status):
+            guard status != "in_progress" else { return nil }
+            var summary = "Codex web search"
+            if let status = CodexAgentStatusFormatter.displayText(status) {
+                summary += " \(status)"
+            }
+            return "\(summary): \(AgentDiagnosticsLog.compact(search.diagnosticSummary, limit: 500))"
         case .error(let message):
             return "Codex error: \(AgentDiagnosticsLog.compact(message, limit: 500))"
         }
@@ -215,6 +223,12 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
                 changes: changes,
                 status: stringValue(in: item, keys: ["status"])
             )
+        case "web_search":
+            return .webSearch(
+                id: stringValue(in: item, keys: ["id"]),
+                search: webSearch(in: item),
+                status: stringValue(in: item, keys: ["status"]) ?? status(fromEnvelope: object)
+            )
         default:
             return nil
         }
@@ -231,8 +245,30 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
         }
     }
 
+    private static func webSearch(in object: [String: Any]) -> CodexAgentWebSearch {
+        let action = object["action"] as? [String: Any]
+        let queries = action?["queries"] as? [String] ?? []
+        return CodexAgentWebSearch(
+            query: stringValue(in: object, keys: ["query"]),
+            actionType: action.flatMap { stringValue(in: $0, keys: ["type"]) },
+            actionQuery: action.flatMap { stringValue(in: $0, keys: ["query"]) },
+            queries: queries
+        )
+    }
+
     private static func message(in object: [String: Any]) -> String? {
         stringValue(in: object, keys: ["message", "text", "detail", "error"])
+    }
+
+    private static func status(fromEnvelope object: [String: Any]) -> String? {
+        switch stringValue(in: object, keys: ["type"]) {
+        case "item.started":
+            return "in_progress"
+        case "item.completed":
+            return "completed"
+        default:
+            return nil
+        }
     }
 
     private static func stringValue(in object: [String: Any], keys: [String]) -> String? {
@@ -267,6 +303,30 @@ nonisolated struct CodexAgentFileChange: Equatable, Sendable {
             return "\(CodexAgentStatusFormatter.displayText(kind) ?? kind) \(CodexAgentPathDisplay.compact(path))"
         }
         return CodexAgentPathDisplay.compact(path)
+    }
+}
+
+nonisolated struct CodexAgentWebSearch: Equatable, Sendable {
+    let query: String?
+    let actionType: String?
+    let actionQuery: String?
+    let queries: [String]
+
+    var displayText: String {
+        normalized(actionQuery)
+            ?? normalized(query)
+            ?? queries.first.flatMap { normalized($0) }
+            ?? "Web search"
+    }
+
+    var diagnosticSummary: String {
+        displayText
+    }
+
+    private func normalized(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -317,6 +377,9 @@ extension CodexAgentClient {
                 openAIAPIKey = nil
             }
 
+            let resumeSessionID = CodexAgentTranscriptReader.latestThreadID(
+                for: request.packageRootURL
+            )
             let transcriptFile = try CodexAgentTranscriptFile(
                 packageRootURL: request.packageRootURL
             )
@@ -342,6 +405,9 @@ extension CodexAgentClient {
             ]
             if let model = modelArgument(from: request.modelIdentifier) {
                 arguments.append(contentsOf: ["--model", model])
+            }
+            if let resumeSessionID {
+                arguments.append(contentsOf: ["resume", resumeSessionID])
             }
             arguments.append(
                 prompt(for: request, temporaryWorkspaceURL: swiftBuildWorkspace.rootURL)
