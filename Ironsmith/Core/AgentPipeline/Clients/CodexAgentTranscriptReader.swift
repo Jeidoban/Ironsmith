@@ -22,6 +22,7 @@ nonisolated struct CodexAgentTranscriptEntry: Equatable, Identifiable, Sendable 
         case commandExecution(command: String, status: String?, exitCode: Int?)
         case fileChange(changes: [CodexAgentFileChange], status: String?)
         case webSearch(search: CodexAgentWebSearch, status: String?)
+        case todoList(items: [CodexAgentTodoItem], status: String?)
         case error(String)
     }
 
@@ -189,6 +190,9 @@ private extension CodexAgentEvent {
             return id.map { "file:\($0)" } ?? "file:\(fallbackKey)"
         case .webSearch(let id, let search, _):
             return id.map { "web-search:\($0)" } ?? "web-search:\(search.displayText)"
+        case .todoList(let id, let items, _):
+            let fallbackKey = items.map(\.text).joined(separator: "|")
+            return id.map { "todo-list:\($0)" } ?? "todo-list:\(fallbackKey)"
         case .threadStarted, .turnStarted, .turnCompleted, .agentMessage, .error:
             return nil
         }
@@ -212,6 +216,8 @@ private extension CodexAgentTranscriptEntry.Kind {
             self = .fileChange(changes: changes, status: status)
         case .webSearch(_, let search, let status):
             self = .webSearch(search: search, status: status)
+        case .todoList(_, let items, let status):
+            self = .todoList(items: items, status: status)
         case .error(let message):
             self = .error(message)
         }

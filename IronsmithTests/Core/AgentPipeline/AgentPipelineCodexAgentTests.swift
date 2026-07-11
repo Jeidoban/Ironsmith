@@ -28,6 +28,9 @@ extension AgentPipelineTests {
                 await onStdoutLine(#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"swift build","status":"in_progress","aggregated_output":"hidden"}}"#)
                 await onStdoutLine(#"{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/Generated/Sources/MortgageMate/ContentView.swift","kind":"add"}],"status":"completed"}}"#)
                 await onStdoutLine(#"{"type":"item.completed","item":{"id":"item_3","type":"web_search","query":"lofi hip hop radio direct mp3 stream URL","action":{"type":"search","query":"lofi hip hop radio direct mp3 stream URL","queries":["lofi hip hop radio direct mp3 stream URL","SomaFM direct stream URLs"]}}}"#)
+                await onStdoutLine(#"{"type":"item.started","item":{"id":"item_4","type":"todo_list","items":[{"text":"Create ContentView.swift","completed":false},{"text":"Build and verify","completed":false}]}}"#)
+                await onStdoutLine(#"{"type":"item.updated","item":{"id":"item_4","type":"todo_list","items":[{"text":"Create ContentView.swift","completed":true},{"text":"Build and verify","completed":false}]}}"#)
+                await onStdoutLine(#"{"type":"item.completed","item":{"id":"item_4","type":"todo_list","items":[{"text":"Create ContentView.swift","completed":true},{"text":"Build and verify","completed":true}]}}"#)
                 await onStdoutLine(#"{"type":"turn.completed"}"#)
                 return CodexCLIProcessResult(stdout: "jsonl", stderr: "", terminationStatus: 0)
             }
@@ -132,6 +135,14 @@ extension AgentPipelineTests {
                     "SomaFM direct stream URLs",
                 ]
             ),
+            status: "completed"
+        )))
+        #expect(events.contains(.todoList(
+            id: "item_4",
+            items: [
+                CodexAgentTodoItem(text: "Create ContentView.swift", completed: true),
+                CodexAgentTodoItem(text: "Build and verify", completed: true),
+            ],
             status: "completed"
         )))
         #expect(events.contains(.turnCompleted))
@@ -406,6 +417,9 @@ extension AgentPipelineTests {
         {"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/Generated/Sources/Demo/ContentView.swift","kind":"add"}],"status":"completed"}}
         {"type":"item.started","item":{"id":"item_3","type":"web_search","query":"","action":{"type":"other"}}}
         {"type":"item.completed","item":{"id":"item_3","type":"web_search","query":"lofi hip hop radio direct mp3 stream URL","action":{"type":"search","query":"lofi hip hop radio direct mp3 stream URL","queries":["lofi hip hop radio direct mp3 stream URL","SomaFM direct stream URLs"]}}}
+        {"type":"item.started","item":{"id":"item_4","type":"todo_list","items":[{"text":"Create ContentView.swift","completed":false},{"text":"Build and verify","completed":false}]}}
+        {"type":"item.updated","item":{"id":"item_4","type":"todo_list","items":[{"text":"Create ContentView.swift","completed":true},{"text":"Build and verify","completed":false}]}}
+        {"type":"item.completed","item":{"id":"item_4","type":"todo_list","items":[{"text":"Create ContentView.swift","completed":true},{"text":"Build and verify","completed":true}]}}
         {"type":"error","message":"apply_patch failed"}
         {"type":"turn.completed"}
         """
@@ -442,6 +456,13 @@ extension AgentPipelineTests {
                         "SomaFM direct stream URLs",
                     ]
                 ),
+                status: "completed"
+            ),
+            .todoList(
+                items: [
+                    CodexAgentTodoItem(text: "Create ContentView.swift", completed: true),
+                    CodexAgentTodoItem(text: "Build and verify", completed: true),
+                ],
                 status: "completed"
             ),
             .error("apply_patch failed"),
@@ -548,6 +569,16 @@ extension AgentPipelineTests {
                 ),
                 status: "completed"
             ).diagnosticSummary == "Codex web search Completed: lofi hip hop radio direct mp3 stream URL"
+        )
+        #expect(
+            CodexAgentEvent.todoList(
+                id: "item_4",
+                items: [
+                    CodexAgentTodoItem(text: "Create ContentView.swift", completed: true),
+                    CodexAgentTodoItem(text: "Build and verify", completed: true),
+                ],
+                status: "completed"
+            ).diagnosticSummary == "Codex todo list Completed: 2/2 completed"
         )
     }
 

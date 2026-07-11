@@ -596,7 +596,7 @@ struct SingleFileToolGenerationRuntime {
 
         do {
             switch event {
-            case .commandExecution, .fileChange, .webSearch:
+            case .commandExecution, .fileChange, .webSearch, .todoList:
                 try await lifecycle.updatePhase(.generating, .repairing, nil)
             case .agentMessage:
                 try await lifecycle.updatePhase(.generating, .generatingSource, nil)

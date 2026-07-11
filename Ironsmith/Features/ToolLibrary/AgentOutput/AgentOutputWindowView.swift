@@ -295,6 +295,8 @@ private struct AgentOutputEventRow: View {
                     fileChangeRow(changes: changes, status: status)
                 case .webSearch(let search, let status):
                     webSearchRow(search: search, status: status)
+                case .todoList(let items, let status):
+                    todoListRow(items: items, status: status)
                 case .error(let message):
                     Text(message)
                         .font(.callout)
@@ -327,6 +329,8 @@ private struct AgentOutputEventRow: View {
             return "doc.text"
         case .webSearch:
             return "magnifyingglass"
+        case .todoList:
+            return "checklist"
         case .error:
             return "exclamationmark.triangle.fill"
         case .threadStarted, .turnStarted, .turnCompleted:
@@ -348,6 +352,10 @@ private struct AgentOutputEventRow: View {
             if status == "completed" { return .green }
             return .secondary
         case .webSearch(_, let status):
+            if status == "failed" { return .red }
+            if status == "completed" { return .green }
+            return .secondary
+        case .todoList(_, let status):
             if status == "failed" { return .red }
             if status == "completed" { return .green }
             return .secondary
@@ -462,6 +470,43 @@ private struct AgentOutputEventRow: View {
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .lineLimit(4)
+        }
+    }
+
+    private func todoListRow(items: [CodexAgentTodoItem], status: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Tasks")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                if let statusText = CodexAgentStatusFormatter.displayText(status) {
+                    Text(statusText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(statusStyle(status: status, exitCode: nil))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            statusStyle(status: status, exitCode: nil).opacity(0.12),
+                            in: Capsule()
+                        )
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Image(systemName: item.completed ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(item.completed ? .green : .secondary)
+
+                        Text(item.text)
+                            .font(.callout)
+                            .foregroundStyle(item.completed ? .secondary : .primary)
+                            .strikethrough(item.completed, color: .secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
         }
     }
 

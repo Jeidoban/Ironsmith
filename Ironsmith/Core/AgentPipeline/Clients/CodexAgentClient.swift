@@ -174,6 +174,7 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
     case commandExecution(id: String?, command: String, status: String?, exitCode: Int?)
     case fileChange(id: String?, changes: [CodexAgentFileChange], status: String?)
     case webSearch(id: String?, search: CodexAgentWebSearch, status: String?)
+    case todoList(id: String?, items: [CodexAgentTodoItem], status: String?)
     case error(String)
 
     var diagnosticSummary: String? {
@@ -216,6 +217,14 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
                 summary += " \(status)"
             }
             return "\(summary): \(AgentDiagnosticsLog.compact(search.diagnosticSummary, limit: 500))"
+        case .todoList(_, let items, let status):
+            guard status != "in_progress" else { return nil }
+            let completedCount = items.count(where: \.completed)
+            var summary = "Codex todo list"
+            if let status = CodexAgentStatusFormatter.displayText(status) {
+                summary += " \(status)"
+            }
+            return "\(summary): \(completedCount)/\(items.count) completed"
         case .error(let message):
             return "Codex error: \(AgentDiagnosticsLog.compact(message, limit: 500))"
         }
@@ -242,6 +251,13 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
         case "error":
             return .error(message(in: object) ?? "Codex reported an error.")
         case "item.started", "item.completed":
+            return itemEvent(object)
+        case "item.updated":
+            guard let item = object["item"] as? [String: Any],
+                  stringValue(in: item, keys: ["type"]) == "todo_list"
+            else {
+                return nil
+            }
             return itemEvent(object)
         default:
             return nil
@@ -281,6 +297,14 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
                 search: webSearch(in: item),
                 status: stringValue(in: item, keys: ["status"]) ?? status(fromEnvelope: object)
             )
+        case "todo_list":
+            let items = todoItems(in: item)
+            guard !items.isEmpty else { return nil }
+            return .todoList(
+                id: stringValue(in: item, keys: ["id"]),
+                items: items,
+                status: stringValue(in: item, keys: ["status"]) ?? status(fromEnvelope: object)
+            )
         default:
             return nil
         }
@@ -308,13 +332,24 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
         )
     }
 
+    private static func todoItems(in object: [String: Any]) -> [CodexAgentTodoItem] {
+        guard let items = object["items"] as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let text = stringValue(in: item, keys: ["text"]) else { return nil }
+            return CodexAgentTodoItem(
+                text: text,
+                completed: item["completed"] as? Bool ?? false
+            )
+        }
+    }
+
     private static func message(in object: [String: Any]) -> String? {
         stringValue(in: object, keys: ["message", "text", "detail", "error"])
     }
 
     private static func status(fromEnvelope object: [String: Any]) -> String? {
         switch stringValue(in: object, keys: ["type"]) {
-        case "item.started":
+        case "item.started", "item.updated":
             return "in_progress"
         case "item.completed":
             return "completed"
@@ -344,6 +379,11 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             return nil
         }
     }
+}
+
+nonisolated struct CodexAgentTodoItem: Equatable, Sendable {
+    let text: String
+    let completed: Bool
 }
 
 nonisolated struct CodexAgentFileChange: Equatable, Sendable {
