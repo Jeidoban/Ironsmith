@@ -7,6 +7,12 @@ nonisolated struct CodexAgentTranscriptSnapshot: Equatable, Sendable {
     static let empty = Self(url: nil, entries: [])
 }
 
+nonisolated struct CodexAgentSessionMetadata: Codable, Equatable, Sendable {
+    let providerIdentifier: String
+    let toolCompatibility: CodexAgentToolCompatibility
+    let transcriptFileName: String
+}
+
 nonisolated struct CodexAgentTranscriptEntry: Equatable, Identifiable, Sendable {
     enum Kind: Equatable, Sendable {
         case threadStarted(String?)
@@ -32,13 +38,20 @@ enum CodexAgentTranscriptReader {
         for packageRootURL: URL,
         fileManager: FileManager = .default
     ) -> URL? {
+        transcriptURLsByNewest(for: packageRootURL, fileManager: fileManager).first
+    }
+
+    nonisolated private static func transcriptURLsByNewest(
+        for packageRootURL: URL,
+        fileManager: FileManager
+    ) -> [URL] {
         let directoryURL = transcriptDirectoryURL(for: packageRootURL)
         guard let urls = try? fileManager.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else {
-            return nil
+            return []
         }
 
         return urls
@@ -52,8 +65,8 @@ enum CodexAgentTranscriptReader {
                 let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 return (url, date)
             }
-            .max { lhs, rhs in lhs.date < rhs.date }?
-            .url
+            .sorted { lhs, rhs in lhs.date > rhs.date }
+            .map(\.url)
     }
 
     nonisolated static func hasTranscript(
@@ -84,12 +97,48 @@ enum CodexAgentTranscriptReader {
 
     nonisolated static func latestThreadID(
         for packageRootURL: URL,
+        providerIdentifier: String,
+        toolCompatibility: CodexAgentToolCompatibility,
         fileManager: FileManager = .default
     ) -> String? {
-        guard let url = latestTranscriptURL(for: packageRootURL, fileManager: fileManager) else {
-            return nil
+        for transcriptURL in transcriptURLsByNewest(
+            for: packageRootURL,
+            fileManager: fileManager
+        ) {
+            guard let metadata = try? metadata(for: transcriptURL),
+                  metadata.providerIdentifier == providerIdentifier,
+                  metadata.toolCompatibility == toolCompatibility,
+                  metadata.transcriptFileName == transcriptURL.lastPathComponent
+            else {
+                continue
+            }
+
+            if let resolvedThreadID = try? threadID(from: transcriptURL) {
+                return resolvedThreadID
+            }
         }
-        return try? threadID(from: url)
+        return nil
+    }
+
+    nonisolated static func metadataURL(for transcriptURL: URL) -> URL {
+        transcriptURL
+            .deletingPathExtension()
+            .appendingPathExtension("metadata.json")
+    }
+
+    nonisolated static func writeMetadata(
+        _ metadata: CodexAgentSessionMetadata,
+        for transcriptURL: URL
+    ) throws {
+        let data = try JSONEncoder().encode(metadata)
+        try data.write(to: metadataURL(for: transcriptURL), options: .atomic)
+    }
+
+    nonisolated static func metadata(
+        for transcriptURL: URL
+    ) throws -> CodexAgentSessionMetadata {
+        let data = try Data(contentsOf: metadataURL(for: transcriptURL))
+        return try JSONDecoder().decode(CodexAgentSessionMetadata.self, from: data)
     }
 
     nonisolated static func threadID(from url: URL) throws -> String? {

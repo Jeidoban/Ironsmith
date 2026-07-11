@@ -8,6 +8,31 @@ nonisolated struct CodexAgentCustomResponsesProvider: Equatable, Sendable {
     let authenticationToken: String
 }
 
+nonisolated enum CodexAgentToolCompatibility: String, Codable, Equatable, Sendable {
+    case openAINative = "openai_native"
+    case portable
+
+    static func resolved(
+        modelIdentifier: String,
+        authentication: CodexAgentAuthentication
+    ) -> Self {
+        switch authentication {
+        case .apiKey, .chatGPTLogin:
+            return .openAINative
+        case .customResponsesProvider:
+            return isOpenAIModelIdentifier(modelIdentifier) ? .openAINative : .portable
+        }
+    }
+
+    private static func isOpenAIModelIdentifier(_ identifier: String) -> Bool {
+        let normalized = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.hasPrefix(OpenAICodexBackend.modelIdentifierPrefix)
+            || normalized.hasPrefix("openai/")
+            || normalized.hasPrefix("openai.")
+            || normalized.hasPrefix("openai:")
+    }
+}
+
 enum CodexAgentAuthentication: Equatable, Sendable {
     case apiKey(String)
     case chatGPTLogin
@@ -24,6 +49,24 @@ nonisolated struct CodexAgentRequest: Sendable {
     let modelIdentifier: String
     let authentication: CodexAgentAuthentication
     let onEvent: @Sendable (CodexAgentEvent) async -> Void
+
+    var toolCompatibility: CodexAgentToolCompatibility {
+        CodexAgentToolCompatibility.resolved(
+            modelIdentifier: modelIdentifier,
+            authentication: authentication
+        )
+    }
+
+    var sessionProviderIdentifier: String {
+        switch authentication {
+        case .apiKey:
+            return "openai-api"
+        case .chatGPTLogin:
+            return "openai-chatgpt"
+        case .customResponsesProvider(let provider):
+            return provider.identifier
+        }
+    }
 
     init(
         packageRootURL: URL,
@@ -371,6 +414,19 @@ nonisolated struct CodexAgentClient: Sendable {
 }
 
 extension CodexAgentClient {
+    nonisolated private static let portableToolArguments = [
+        "-c", #"web_search="disabled""#,
+        "-c", "apps._default.enabled=false",
+        "--disable", "apps",
+        "--disable", "tool_suggest",
+        "--disable", "multi_agent",
+        "--disable", "image_generation",
+        "--disable", "computer_use",
+        "--disable", "browser_use",
+        "--disable", "browser_use_external",
+        "--disable", "in_app_browser",
+    ]
+
     nonisolated static func live(
         cliClient: CodexCLIClient = .live(),
         openAICodexAuthClient: OpenAICodexAuthClient = .live(),
@@ -388,10 +444,14 @@ extension CodexAgentClient {
             }
 
             let resumeSessionID = CodexAgentTranscriptReader.latestThreadID(
-                for: request.packageRootURL
+                for: request.packageRootURL,
+                providerIdentifier: request.sessionProviderIdentifier,
+                toolCompatibility: request.toolCompatibility
             )
             let transcriptFile = try CodexAgentTranscriptFile(
-                packageRootURL: request.packageRootURL
+                packageRootURL: request.packageRootURL,
+                providerIdentifier: request.sessionProviderIdentifier,
+                toolCompatibility: request.toolCompatibility
             )
             let swiftBuildWorkspace = try CodexAgentSwiftBuildWorkspace.create(
                 temporaryDirectory: temporaryDirectory
@@ -412,6 +472,9 @@ extension CodexAgentClient {
 
             var arguments = ["exec"]
             arguments.append(contentsOf: customProviderArguments)
+            if request.toolCompatibility == .portable {
+                arguments.append(contentsOf: portableToolArguments)
+            }
             arguments.append(contentsOf: [
                 "--json",
                 "--sandbox",
@@ -427,7 +490,11 @@ extension CodexAgentClient {
                 arguments.append(contentsOf: ["resume", resumeSessionID])
             }
             arguments.append(
-                prompt(for: request, temporaryWorkspaceURL: swiftBuildWorkspace.rootURL)
+                prompt(
+                    for: request,
+                    temporaryWorkspaceURL: swiftBuildWorkspace.rootURL,
+                    toolCompatibility: request.toolCompatibility
+                )
             )
 
             let result = try await cliClient.runStreamingToFile(
@@ -471,9 +538,19 @@ extension CodexAgentClient {
 
     nonisolated static func prompt(
         for request: CodexAgentRequest,
-        temporaryWorkspaceURL: URL
+        temporaryWorkspaceURL: URL,
+        toolCompatibility: CodexAgentToolCompatibility? = nil
     ) -> String {
-        """
+        let resolvedToolCompatibility = toolCompatibility ?? request.toolCompatibility
+        let finalRules = [
+            resolvedToolCompatibility == .openAINative
+                ? "- Internet searches are encouraged if you need extra context to complete the user's request, especially for apple documentation."
+                : nil,
+            "- Use // MARK: - to separate sections of code.",
+        ]
+        .compactMap { $0 }
+        .joined(separator: "\n")
+        return """
         You are Codex running inside Ironsmith.
         Build the requested macOS SwiftUI app by editing this generated Swift package.
 
@@ -504,8 +581,7 @@ extension CodexAgentClient {
         - Make the app feel native to macOS.
         - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and local-only state.
         - Apple frameworks and APIs are allowed and encouraged over custom solutions, but do not add any third-party dependencies.
-        - Internet searches are encouraged if you need extra context to complete the user's request, especially for apple documentation.
-        - Use // MARK: - to separate sections of code.
+        \(finalRules)
         """
     }
 
@@ -597,7 +673,9 @@ nonisolated private struct CodexAgentTranscriptFile: Sendable {
     let url: URL
 
     init(
-        packageRootURL: URL
+        packageRootURL: URL,
+        providerIdentifier: String,
+        toolCompatibility: CodexAgentToolCompatibility
     ) throws {
         let directoryURL = packageRootURL.appendingPathComponent(".codex", isDirectory: true)
         let fileManager = FileManager.default
@@ -605,6 +683,14 @@ nonisolated private struct CodexAgentTranscriptFile: Sendable {
         let fileName = "agent-\(Self.timestamp())-\(UUID().uuidString.lowercased()).jsonl"
         let url = directoryURL.appendingPathComponent(fileName)
         try Data().write(to: url, options: .atomic)
+        try CodexAgentTranscriptReader.writeMetadata(
+            CodexAgentSessionMetadata(
+                providerIdentifier: providerIdentifier,
+                toolCompatibility: toolCompatibility,
+                transcriptFileName: fileName
+            ),
+            for: url
+        )
         self.url = url
     }
 

@@ -83,6 +83,8 @@ extension AgentPipelineTests {
         #expect(prompt.contains("for any temporary scratch files you deliberately create."))
         #expect(prompt.contains("Do not write deliberate scratch files directly in the top-level system temp directory."))
         #expect(prompt.contains("Ironsmith will clean up the temporary workspace after Codex exits."))
+        #expect(prompt.contains("Internet searches are encouraged"))
+        #expect(!arguments.contains("--disable"))
         #expect(environment["OPENAI_API_KEY"] == "sk-test")
         let codexHomeDirectory = try #require(environment["HOME"])
         #expect(codexHomeDirectory.hasPrefix("\(temporaryDirectory.path)/ironsmith-codex-swift-"))
@@ -98,6 +100,14 @@ extension AgentPipelineTests {
         )
         #expect(remainingTemporaryItems.isEmpty)
         #expect(FileManager.default.fileExists(atPath: result.transcriptURL.path))
+        let metadata = try CodexAgentTranscriptReader.metadata(for: result.transcriptURL)
+        #expect(
+            metadata == CodexAgentSessionMetadata(
+                providerIdentifier: "openai-api",
+                toolCompatibility: .openAINative,
+                transcriptFileName: result.transcriptURL.lastPathComponent
+            )
+        )
         let transcript = try String(contentsOf: result.transcriptURL, encoding: .utf8)
         #expect(transcript.contains(#""thread_id":"thread-1""#))
         #expect(transcript.contains(#""aggregated_output":"hidden""#))
@@ -198,6 +208,113 @@ extension AgentPipelineTests {
         #expect(!arguments.contains("ironsmith-access-token"))
         #expect(environment["IRONSMITH_CODEX_ACCESS_TOKEN"] == "ironsmith-access-token")
         #expect(environment["OPENAI_API_KEY"] == nil)
+        #expect(arguments.contains(#"web_search="disabled""#))
+        #expect(arguments.contains("apps._default.enabled=false"))
+        for feature in [
+            "apps",
+            "tool_suggest",
+            "multi_agent",
+            "image_generation",
+            "computer_use",
+            "browser_use",
+            "browser_use_external",
+            "in_app_browser",
+        ] {
+            let featureIndex = try #require(arguments.firstIndex(of: feature))
+            #expect(arguments[featureIndex - 1] == "--disable")
+        }
+        #expect(!arguments.contains("plugins"))
+        #expect(!arguments.contains("--ignore-user-config"))
+        #expect(arguments.last?.contains("Internet searches are encouraged") == false)
+    }
+
+    @Test
+    func codexAgentClientKeepsNativeToolsForManagedOpenAIModel() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+
+        let cliCapture = CodexAgentCLICapture()
+        let cliClient = CodexCLIClient(
+            run: { _ in CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0) },
+            runStreaming: { arguments, environment, _, _ in
+                await cliCapture.record(arguments: arguments, environment: environment)
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured
+        )
+        let provider = CodexAgentCustomResponsesProvider(
+            identifier: "ironsmith",
+            displayName: "Ironsmith",
+            baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
+            authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
+            authenticationToken: "ironsmith-access-token"
+        )
+
+        _ = try await client.run(
+            CodexAgentRequest(
+                packageRootURL: packageRoot,
+                executableName: "Demo",
+                displayName: "Demo",
+                appKind: .window,
+                sandboxEnabled: true,
+                userPrompt: "Make a demo",
+                modelIdentifier: "openai/gpt-5.4",
+                authentication: .customResponsesProvider(provider)
+            )
+        )
+
+        let arguments = try #require(await cliCapture.arguments)
+        #expect(!arguments.contains(#"web_search="disabled""#))
+        #expect(!arguments.contains("--disable"))
+        #expect(arguments.last?.contains("Internet searches are encouraged") == true)
+    }
+
+    @Test
+    func codexAgentToolCompatibilityDefaultsUnknownManagedModelsToPortable() {
+        let provider = CodexAgentCustomResponsesProvider(
+            identifier: "ironsmith",
+            displayName: "Ironsmith",
+            baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
+            authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
+            authenticationToken: "token"
+        )
+
+        for identifier in [
+            "google/gemini-3.1-flash-lite",
+            "anthropic/claude-sonnet",
+            "deepseek/deepseek-v4-flash",
+            "future-model",
+        ] {
+            #expect(
+                CodexAgentToolCompatibility.resolved(
+                    modelIdentifier: identifier,
+                    authentication: .customResponsesProvider(provider)
+                ) == .portable
+            )
+        }
+        #expect(
+            CodexAgentToolCompatibility.resolved(
+                modelIdentifier: "openai.gpt-5",
+                authentication: .customResponsesProvider(provider)
+            ) == .openAINative
+        )
+        #expect(
+            CodexAgentToolCompatibility.resolved(
+                modelIdentifier: "gpt-5.5",
+                authentication: .apiKey("key")
+            ) == .openAINative
+        )
+        #expect(
+            CodexAgentToolCompatibility.resolved(
+                modelIdentifier: "codex:gpt-5.5",
+                authentication: .chatGPTLogin
+            ) == .openAINative
+        )
     }
 
     @Test
@@ -215,6 +332,14 @@ extension AgentPipelineTests {
         {"type":"turn.completed"}
         """
         .write(to: previousTranscriptURL, atomically: true, encoding: .utf8)
+        try CodexAgentTranscriptReader.writeMetadata(
+            CodexAgentSessionMetadata(
+                providerIdentifier: "openai-api",
+                toolCompatibility: .openAINative,
+                transcriptFileName: previousTranscriptURL.lastPathComponent
+            ),
+            for: previousTranscriptURL
+        )
         try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
         let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
         try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
@@ -297,7 +422,7 @@ extension AgentPipelineTests {
         let snapshot = try CodexAgentTranscriptReader.snapshot(for: packageRoot)
 
         #expect(snapshot.url?.resolvingSymlinksInPath() == newerURL.resolvingSymlinksInPath())
-        #expect(CodexAgentTranscriptReader.latestThreadID(for: packageRoot) == "thread-1")
+        #expect(try CodexAgentTranscriptReader.threadID(from: newerURL) == "thread-1")
         #expect(snapshot.entries.map(\.kind) == [
             .threadStarted("thread-1"),
             .turnStarted,
@@ -322,6 +447,52 @@ extension AgentPipelineTests {
             .error("apply_patch failed"),
             .turnCompleted,
         ])
+    }
+
+    @Test
+    func codexAgentTranscriptReaderResumesOnlyMatchingProviderAndToolProfile() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        let transcriptDirectory = CodexAgentTranscriptReader.transcriptDirectoryURL(for: packageRoot)
+        try FileManager.default.createDirectory(at: transcriptDirectory, withIntermediateDirectories: true)
+
+        let portableURL = transcriptDirectory.appendingPathComponent("agent-portable.jsonl")
+        try #"{"type":"thread.started","thread_id":"portable-thread"}"#
+            .write(to: portableURL, atomically: true, encoding: .utf8)
+        try CodexAgentTranscriptReader.writeMetadata(
+            CodexAgentSessionMetadata(
+                providerIdentifier: "ironsmith",
+                toolCompatibility: .portable,
+                transcriptFileName: portableURL.lastPathComponent
+            ),
+            for: portableURL
+        )
+        let metadataFreeURL = transcriptDirectory.appendingPathComponent("agent-metadata-free.jsonl")
+        try #"{"type":"thread.started","thread_id":"metadata-free-thread"}"#
+            .write(to: metadataFreeURL, atomically: true, encoding: .utf8)
+
+        #expect(
+            CodexAgentTranscriptReader.latestThreadID(
+                for: packageRoot,
+                providerIdentifier: "ironsmith",
+                toolCompatibility: .portable
+            ) == "portable-thread"
+        )
+        #expect(
+            CodexAgentTranscriptReader.latestThreadID(
+                for: packageRoot,
+                providerIdentifier: "ironsmith",
+                toolCompatibility: .openAINative
+            ) == nil
+        )
+        #expect(
+            CodexAgentTranscriptReader.latestThreadID(
+                for: packageRoot,
+                providerIdentifier: "other-provider",
+                toolCompatibility: .portable
+            ) == nil
+        )
     }
 
     @Test
