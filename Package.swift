@@ -52,6 +52,7 @@ let package = Package(
                 "Ironsmith",
                 .product(name: "AnyLanguageModel", package: "AnyLanguageModel"),
                 .product(name: "Supabase", package: "supabase-swift"),
+                .product(name: "AcknowList", package: "AcknowList"),
             ],
             path: "IronsmithTests",
             swiftSettings: swiftSettings

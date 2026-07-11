@@ -79,7 +79,7 @@ final class IronsmithApplicationController {
     private let settingsWindowController: IronsmithSettingsWindowController?
     private let storeWindowController: IronsmithStoreWindowController?
 
-    init() {
+    init(codexPluginInstaller: CodexPluginInstaller = .live()) {
         let isRunningTests = IronsmithRuntimeEnvironment.isRunningTests
         let inferenceStore = InferenceStore()
         var appKitAgentOutputWindowController: IronsmithAgentOutputWindowController?
@@ -155,6 +155,10 @@ final class IronsmithApplicationController {
             )
             appKitMenuBarController = menuBarController
             self.menuBarController = menuBarController
+        }
+
+        Task {
+            await codexPluginInstaller.install()
         }
     }
 

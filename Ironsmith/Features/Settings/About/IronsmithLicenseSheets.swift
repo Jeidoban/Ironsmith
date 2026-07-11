@@ -16,10 +16,30 @@ enum IronsmithLicenseAcknowledgements {
 
     static func all(
         metadata: IronsmithAboutMetadata = .current(),
-        document: IronsmithLegalDocument = .gplv3
+        document: IronsmithLegalDocument = .gplv3,
+        codexLicenseText: String = IronsmithLegalDocument.codexApache2.text(),
+        codexNoticeText: String = IronsmithLegalDocument.codexNotice.text()
     ) -> [Acknow] {
-        [appAcknowledgement(metadata: metadata, document: document)]
+        [
+            appAcknowledgement(metadata: metadata, document: document),
+            codexAcknowledgement(
+                licenseText: codexLicenseText,
+                noticeText: codexNoticeText
+            ),
+        ]
             + (AcknowParser.defaultAcknowList()?.acknowledgements ?? [])
+    }
+
+    static func codexAcknowledgement(
+        licenseText: String = IronsmithLegalDocument.codexApache2.text(),
+        noticeText: String = IronsmithLegalDocument.codexNotice.text()
+    ) -> Acknow {
+        Acknow(
+            title: "OpenAI Codex",
+            text: "\(licenseText)\n\nNOTICE\n\n\(noticeText)",
+            license: "Apache 2.0",
+            repository: URL(string: "https://github.com/openai/codex")!
+        )
     }
 }
 
