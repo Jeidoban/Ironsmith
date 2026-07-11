@@ -419,7 +419,12 @@ final class ToolLibraryStore {
             }
 
             try await inferenceStore.prepareSelectedModelForGeneration()
-            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext()
+            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
+                resolutionContext: codingAgentResolutionContext(
+                    for: selectedTool,
+                    generationMode: selectedTool == nil ? .create : .edit
+                )
+            )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
             if let selectedTool {
                 setActiveCodingAgent(activeCodingAgent, for: selectedTool)
@@ -711,7 +716,12 @@ final class ToolLibraryStore {
 
         do {
             try await inferenceStore.prepareSelectedModelForGeneration()
-            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext()
+            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
+                resolutionContext: codingAgentResolutionContext(
+                    for: tool,
+                    generationMode: tool.generationMode ?? .create
+                )
+            )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
             setActiveCodingAgent(activeCodingAgent, for: tool)
             let settings = tool.generationSettings(
@@ -1009,6 +1019,35 @@ final class ToolLibraryStore {
 
     private static func contentViewURL(for tool: Tool) throws -> URL {
         try ToolPackageLayout.packageFileURL(for: tool.contentViewSourcePath, packageRootURL: tool.packageRootURL)
+    }
+
+    func codingAgentResolutionContext(
+        for tool: Tool?,
+        generationMode: ToolGenerationMode
+    ) -> ToolCodingAgentResolutionContext {
+        guard generationMode == .edit,
+              let tool,
+              let contentViewURL = try? Self.contentViewURL(for: tool),
+              let source = try? String(contentsOf: contentViewURL, encoding: .utf8)
+        else {
+            return ToolCodingAgentResolutionContext(
+                generationMode: generationMode,
+                existingSourceLineCount: nil
+            )
+        }
+
+        var lineCount = source.split(
+            omittingEmptySubsequences: false,
+            whereSeparator: \Character.isNewline
+        ).count
+        if source.last?.isNewline == true {
+            lineCount -= 1
+        }
+
+        return ToolCodingAgentResolutionContext(
+            generationMode: generationMode,
+            existingSourceLineCount: lineCount
+        )
     }
 
     private static var defaultPrompt: String {

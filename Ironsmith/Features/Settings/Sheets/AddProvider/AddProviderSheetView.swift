@@ -12,6 +12,7 @@ struct AddProviderSheetView: View {
     @State private var displayName = ""
     @State private var baseURLString = ""
     @State private var apiKey = ""
+    @State private var openAICompatibleAPIVariant: OpenAICompatibleAPIVariant = .chatCompletions
     @State private var isSaving = false
     @State private var isSigningInToChatGPT = false
 
@@ -158,6 +159,15 @@ struct AddProviderSheetView: View {
                         )
                     }
 
+                    if isCustomOpenAICompatible {
+                        Picker("API", selection: $openAICompatibleAPIVariant) {
+                            ForEach(OpenAICompatibleAPIVariant.allCases) { variant in
+                                Text(variant.displayName).tag(variant)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
                     SecureField(
                         "API Key",
                         text: $apiKey,
@@ -201,6 +211,7 @@ struct AddProviderSheetView: View {
 
     private func configureFields(for choice: InferenceStore.ProviderChoice?) {
         guard let choice else { return }
+        openAICompatibleAPIVariant = .chatCompletions
 
         switch choice.kind {
         case .ironsmith:
@@ -261,7 +272,8 @@ struct AddProviderSheetView: View {
                 choice: selectedChoice,
                 apiKey: apiKey,
                 displayName: displayName,
-                baseURLString: baseURLString
+                baseURLString: baseURLString,
+                openAICompatibleAPIVariant: openAICompatibleAPIVariant
             )
 
             await MainActor.run {
@@ -290,7 +302,8 @@ struct AddProviderSheetView: View {
                     choice: selectedChoice,
                     apiKey: apiKey,
                     displayName: displayName,
-                    baseURLString: baseURLString
+                    baseURLString: baseURLString,
+                    openAICompatibleAPIVariant: openAICompatibleAPIVariant
                 )
                 await MainActor.run {
                     isSaving = false

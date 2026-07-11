@@ -28,7 +28,23 @@ enum ProviderAuthMode: String, Codable, CaseIterable {
     case platformCredits = "platform_credits"
 }
 
-typealias ProviderConfig = IronsmithSchemaV3.ProviderConfig
+enum OpenAICompatibleAPIVariant: String, Codable, CaseIterable, Identifiable {
+    case chatCompletions = "chat_completions"
+    case responses
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .chatCompletions:
+            return "Chat Completions"
+        case .responses:
+            return "Responses"
+        }
+    }
+}
+
+typealias ProviderConfig = IronsmithSchemaV4.ProviderConfig
 
 extension ProviderConfig {
     static let localProviderIdentifier = "local"

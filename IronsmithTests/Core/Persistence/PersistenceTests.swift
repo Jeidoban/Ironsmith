@@ -36,6 +36,7 @@ struct PersistenceTests {
         #expect(try context.fetch(FetchDescriptor<Tool>()).count == 1)
         #expect(try context.fetch(FetchDescriptor<ModelConfig>()).count == 1)
         #expect(try context.fetch(FetchDescriptor<ProviderConfig>()).count == 1)
+        #expect(provider.openAICompatibleAPIVariant == .chatCompletions)
         #expect(tool.executableName == "ClipboardCleaner")
         #expect(tool.bundleIdentifier.hasPrefix("com.ironsmith.generated.clipboardcleaner."))
         #expect(tool.sandboxEnabled)
@@ -79,7 +80,7 @@ struct PersistenceTests {
             #expect(tool.generationPhase == ToolGenerationPhase.generatingSource)
             #expect(tool.generationMode == ToolGenerationMode.create)
             #expect(tool.pendingPrompt == "Build a resumable app")
-            #expect(container.schema.version == IronsmithSchemaV3.versionIdentifier)
+            #expect(container.schema.version == IronsmithSchemaV4.versionIdentifier)
             #expect(container.migrationPlan != nil)
         }
     }
@@ -140,7 +141,7 @@ struct PersistenceTests {
         let tool = try #require(try context.fetch(FetchDescriptor<Tool>()).first)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV3.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV4.versionIdentifier)
         #expect(tool.id == toolID)
         #expect(tool.appKind == .menuBar)
         #expect(tool.generationState == .stopped)
@@ -161,7 +162,7 @@ struct PersistenceTests {
 
     @MainActor
     @Test
-    func v2StoreMigratesToV3ByDeletingLegacyLocalModels() throws {
+    func v2StoreMigratesToCurrentSchemaByDeletingLegacyLocalModels() throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let storeURL = root.appendingPathComponent("ironsmith.sqlite")
@@ -208,9 +209,45 @@ struct PersistenceTests {
         let context = ModelContext(container)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV3.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV4.versionIdentifier)
         #expect(!(models.contains { $0.id == legacyModelID }))
         #expect(models.contains { $0.id == foundationModelID })
+    }
+
+    @MainActor
+    @Test
+    func v3CustomProviderMigratesWithChatCompletionsDefault() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = ModelConfiguration(url: root.appendingPathComponent("ironsmith.sqlite"))
+        let providerID = UUID()
+
+        do {
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: IronsmithSchemaV3.self),
+                configurations: config
+            )
+            let context = ModelContext(container)
+            context.insert(
+                IronsmithSchemaV3.ProviderConfig(
+                    id: providerID,
+                    identifier: "custom.test",
+                    displayName: "Test Server",
+                    baseURLString: "http://localhost:1234/v1",
+                    authMode: .apiKey,
+                    origin: .custom
+                )
+            )
+            try context.save()
+        }
+
+        let container = try IronsmithModelContainerFactory.make(configuration: config)
+        let context = ModelContext(container)
+        let provider = try #require(
+            try context.fetch(FetchDescriptor<ProviderConfig>()).first { $0.id == providerID }
+        )
+
+        #expect(provider.openAICompatibleAPIVariant == .chatCompletions)
     }
 
     @MainActor

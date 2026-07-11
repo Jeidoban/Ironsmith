@@ -36,7 +36,8 @@ extension InferenceStore {
         choice: ProviderChoice,
         apiKey: String,
         displayName: String = "",
-        baseURLString: String = ""
+        baseURLString: String = "",
+        openAICompatibleAPIVariant: OpenAICompatibleAPIVariant = .chatCompletions
     ) async -> Bool {
         guard let repository else { return false }
 
@@ -45,7 +46,8 @@ extension InferenceStore {
                 choice: choice,
                 apiKey: apiKey,
                 displayName: displayName,
-                baseURLString: baseURLString
+                baseURLString: baseURLString,
+                openAICompatibleAPIVariant: openAICompatibleAPIVariant
             )
             try await validateProviderCanBeAdded(provider)
             repository.insertProvider(provider)
@@ -90,16 +92,22 @@ extension InferenceStore {
         provider: ProviderConfig,
         apiKey: String,
         displayName: String? = nil,
-        baseURLString: String? = nil
+        baseURLString: String? = nil,
+        openAICompatibleAPIVariant: OpenAICompatibleAPIVariant? = nil
     ) async -> Bool {
         guard let repository else { return false }
         let originalDisplayName = provider.displayName
         let originalBaseURLString = provider.baseURLString
+        let originalOpenAICompatibleAPIVariant = provider.openAICompatibleAPIVariant
 
         if provider.kind == .customOpenAICompatible || provider.kind == .ollama {
             do {
                 try updateConfigurableProvider(
-                    provider, displayName: displayName, baseURLString: baseURLString)
+                    provider,
+                    displayName: displayName,
+                    baseURLString: baseURLString,
+                    openAICompatibleAPIVariant: openAICompatibleAPIVariant
+                )
             } catch {
                 presentError(error)
                 return false
@@ -118,6 +126,7 @@ extension InferenceStore {
                 if provider.kind == .customOpenAICompatible || provider.kind == .ollama {
                     provider.displayName = originalDisplayName
                     provider.baseURLString = originalBaseURLString
+                    provider.openAICompatibleAPIVariant = originalOpenAICompatibleAPIVariant
                 }
                 presentError(error)
                 return false
@@ -127,6 +136,7 @@ extension InferenceStore {
         do {
             try repository.save()
             try refreshData(reconcileSelection: false)
+            reconcileSelectedCodingAgentPreference()
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await refreshDiscoveredModels(for: provider)
@@ -269,7 +279,8 @@ extension InferenceStore {
         choice: ProviderChoice,
         apiKey: String,
         displayName: String,
-        baseURLString: String
+        baseURLString: String,
+        openAICompatibleAPIVariant: OpenAICompatibleAPIVariant
     ) throws -> ProviderConfig {
         guard let provider = ProviderCatalog.makeProvider(for: choice.kind) else {
             throw ProviderCreationError.unsupportedProvider
@@ -278,7 +289,11 @@ extension InferenceStore {
         if provider.kind == .customOpenAICompatible {
             provider.identifier = "custom.\(UUID().uuidString.lowercased())"
             try updateConfigurableProvider(
-                provider, displayName: displayName, baseURLString: baseURLString)
+                provider,
+                displayName: displayName,
+                baseURLString: baseURLString,
+                openAICompatibleAPIVariant: openAICompatibleAPIVariant
+            )
             return provider
         }
 
@@ -288,7 +303,8 @@ extension InferenceStore {
                 displayName: nil,
                 baseURLString: baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? provider.baseURLString
-                    : baseURLString
+                    : baseURLString,
+                openAICompatibleAPIVariant: nil
             )
             return provider
         }
@@ -318,7 +334,8 @@ extension InferenceStore {
     private func updateConfigurableProvider(
         _ provider: ProviderConfig,
         displayName: String?,
-        baseURLString: String?
+        baseURLString: String?,
+        openAICompatibleAPIVariant: OpenAICompatibleAPIVariant?
     ) throws {
         let proposedDisplayName =
             provider.kind == .customOpenAICompatible
@@ -340,6 +357,9 @@ extension InferenceStore {
 
         provider.displayName = trimmedDisplayName
         provider.baseURLString = baseURL.absoluteString
+        if provider.kind == .customOpenAICompatible, let openAICompatibleAPIVariant {
+            provider.openAICompatibleAPIVariant = openAICompatibleAPIVariant
+        }
     }
 }
 

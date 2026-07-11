@@ -8,11 +8,11 @@ import Testing
 extension InferenceTests {
     @MainActor
     @Test
-    func openAIModelsDefaultToLargeModelPatchRepairStrategy() async throws {
+    func openAIModelsDefaultToCodex() async throws {
         let store = Self.dependenciesBackedStore()
         let provider = ProviderCatalog.makeProvider(for: .openAI)!
         let model = ModelConfig(
-            identifier: "gpt-test",
+            identifier: "codex:gpt-test",
             displayName: "GPT Test",
             providerIdentifier: ProviderKind.openAI.rawValue,
             source: .remote,
@@ -24,12 +24,8 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.pipelineConfiguration.codingAgent == .ironsmithFlame)
-        #expect(
-            context.repairStrategy == .modelSearchReplace(
-                maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
-            )
-        )
+        #expect(context.pipelineConfiguration.codingAgent == .codex)
+        #expect(context.repairStrategy == .deterministicOnly)
     }
 
     @MainActor
@@ -130,6 +126,41 @@ extension InferenceTests {
 
         #expect(ollamaModel.model == "gemma4:e2b")
         #expect(ollamaModel.baseURL.absoluteString == "http://localhost:11435/")
+    }
+
+    @MainActor
+    @Test
+    func languageModelClientUsesConfiguredCustomOpenAIAPIVariant() async throws {
+        let provider = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        provider.identifier = "custom.test"
+        provider.baseURLString = "http://localhost:1234/v1"
+        let model = ModelConfig(
+            identifier: "test-model",
+            displayName: "Test Model",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let client = LanguageModelClient.live(
+            credentialClient: CredentialClient(
+                loadAPIKey: { _ in nil },
+                saveAPIKey: { _, _ in },
+                deleteAPIKey: { _ in }
+            ),
+            localModelClient: Self.fakeLocalModelClient()
+        )
+
+        provider.openAICompatibleAPIVariant = .chatCompletions
+        let chatModel = try #require(
+            try await client.makeLanguageModel(model, provider) as? OpenAILanguageModel
+        )
+        #expect(chatModel.apiVariant == .chatCompletions)
+
+        provider.openAICompatibleAPIVariant = .responses
+        let responsesModel = try #require(
+            try await client.makeLanguageModel(model, provider) as? OpenAILanguageModel
+        )
+        #expect(responsesModel.apiVariant == .responses)
     }
 
     @MainActor
@@ -325,6 +356,8 @@ extension InferenceTests {
         let openAIProvider = ProviderCatalog.makeProvider(for: .openAI)!
         let ironsmithProvider = ProviderCatalog.makeProvider(for: .ironsmith)!
         let ollamaProvider = ProviderCatalog.makeProvider(for: .ollama)!
+        let customProvider = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        customProvider.identifier = "custom.test"
         let openAIModel = ModelConfig(
             identifier: "gpt-test",
             displayName: "GPT Test",
@@ -346,9 +379,16 @@ extension InferenceTests {
             source: .remote,
             installState: .installed
         )
+        let customModel = ModelConfig(
+            identifier: "openai/gpt-5.4",
+            displayName: "GPT 5.4",
+            providerIdentifier: customProvider.identifier,
+            source: .remote,
+            installState: .installed
+        )
 
-        store.providers = [openAIProvider, ironsmithProvider, ollamaProvider]
-        store.remoteModels = [openAIModel, ironsmithModel, ollamaModel]
+        store.providers = [openAIProvider, ironsmithProvider, ollamaProvider, customProvider]
+        store.remoteModels = [openAIModel, ironsmithModel, ollamaModel, customModel]
 
         store.selectModel(openAIModel.selectionIdentifier)
 
@@ -361,6 +401,11 @@ extension InferenceTests {
         #expect(preferences.codingAgentPreference == .codex)
 
         store.selectModel(ollamaModel.selectionIdentifier)
+
+        #expect(store.selectedModelSupportsCodingAgentPreference(.codex))
+        #expect(preferences.codingAgentPreference == .codex)
+
+        store.selectModel(customModel.selectionIdentifier)
 
         #expect(!store.selectedModelSupportsCodingAgentPreference(.codex))
         #expect(preferences.codingAgentPreference == .automatic)

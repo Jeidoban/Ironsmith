@@ -95,7 +95,7 @@ extension LanguageModelClient {
                     baseURL: baseURL,
                     apiKey: token,
                     model: model.identifier,
-                    apiVariant: .chatCompletions,
+                    apiVariant: provider.openAICompatibleAPIVariant.openAILanguageModelVariant,
                     session: remoteGenerationSession(for: baseURL)
                 )
 
@@ -182,6 +182,17 @@ extension LanguageModelClient {
             return ""
         }
         return try credentialClient.loadAPIKey(reference) ?? ""
+    }
+}
+
+private extension OpenAICompatibleAPIVariant {
+    var openAILanguageModelVariant: OpenAILanguageModel.APIVariant {
+        switch self {
+        case .chatCompletions:
+            return .chatCompletions
+        case .responses:
+            return .responses
+        }
     }
 }
 

@@ -310,11 +310,13 @@ extension InferenceTests {
             baseURLString: "http://localhost:11434/v1"
         )
         let provider = try #require(inferenceStore.providers.first { $0.kind == .customOpenAICompatible })
+        #expect(provider.openAICompatibleAPIVariant == .chatCompletions)
         let didSave = await inferenceStore.saveProviderEdits(
             provider: provider,
             apiKey: "",
             displayName: "Local LM Studio",
-            baseURLString: "http://localhost:1234/v1"
+            baseURLString: "http://localhost:1234/v1",
+            openAICompatibleAPIVariant: .responses
         )
 
         let savedProvider = try #require(inferenceStore.providers.first { $0.identifier == provider.identifier })
@@ -322,10 +324,55 @@ extension InferenceTests {
         #expect(didSave)
         #expect(savedProvider.displayName == "Local LM Studio")
         #expect(savedProvider.baseURLString == "http://localhost:1234/v1")
+        #expect(savedProvider.openAICompatibleAPIVariant == .responses)
         await Self.eventually {
             inferenceStore.remoteModels.contains { $0.identifier == "qwen2.5-coder" }
         }
         #expect(inferenceStore.remoteModels.contains { $0.identifier == "qwen2.5-coder" })
+    }
+
+    @MainActor
+    @Test
+    func changingSelectedCustomProviderToChatCompletionsResetsCodexPreference() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let preferences = Self.generationPreferences()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(remoteModelIDs: ["openai/gpt-5.4"]),
+            generationPreferences: preferences
+        )
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        let didAdd = await inferenceStore.addProvider(
+            choice: InferenceStore.ProviderChoice(
+                descriptor: ProviderCatalog.descriptor(for: .customOpenAICompatible)!
+            ),
+            apiKey: "",
+            displayName: "Responses Server",
+            baseURLString: "http://localhost:1234/v1",
+            openAICompatibleAPIVariant: .responses
+        )
+        let provider = try #require(
+            inferenceStore.providers.first { $0.kind == .customOpenAICompatible }
+        )
+        await Self.eventually {
+            inferenceStore.remoteModels.contains { $0.providerIdentifier == provider.identifier }
+        }
+        let model = try #require(
+            inferenceStore.remoteModels.first { $0.providerIdentifier == provider.identifier }
+        )
+        inferenceStore.selectModel(model.selectionIdentifier)
+        preferences.codingAgentPreference = .codex
+
+        let didSave = await inferenceStore.saveProviderEdits(
+            provider: provider,
+            apiKey: "",
+            openAICompatibleAPIVariant: .chatCompletions
+        )
+
+        #expect(didAdd)
+        #expect(didSave)
+        #expect(preferences.codingAgentPreference == .automatic)
     }
 
     @MainActor

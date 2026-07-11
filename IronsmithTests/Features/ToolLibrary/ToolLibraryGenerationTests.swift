@@ -250,10 +250,13 @@ extension ToolLibraryTests {
             source: .remote,
             installState: .installed
         )
+        let preferences = GenerationPreferencesStore(userDefaults: try Self.makeIsolatedUserDefaults())
+        preferences.codingAgentPreference = .ironsmithFlame
         let inferenceStore = InferenceStore(
             dependencies: Self.inferenceDependencies(
                 accountClient: Self.ironsmithAccountClient(balanceCredits: 12)
-            )
+            ),
+            generationPreferences: preferences
         )
         inferenceStore.providers = [provider]
         inferenceStore.remoteModels = [model]
@@ -432,11 +435,14 @@ extension ToolLibraryTests {
             source: .remote,
             installState: .installed
         )
+        let preferences = GenerationPreferencesStore(userDefaults: try Self.makeIsolatedUserDefaults())
+        preferences.codingAgentPreference = .ironsmithFlame
         let accountCapture = IronsmithAccountFetchCapture(balances: [100, 91, 84, 84])
         let inferenceStore = InferenceStore(
             dependencies: Self.inferenceDependencies(
                 accountClient: Self.ironsmithAccountClient(fetchCapture: accountCapture)
-            )
+            ),
+            generationPreferences: preferences
         )
         inferenceStore.providers = [provider]
         inferenceStore.remoteModels = [model]
@@ -703,6 +709,49 @@ private actor LateGenerationCompletionGate {
 }
 
 extension ToolLibraryTests {
+    @MainActor
+    @Test
+    func toolLibraryCodingAgentContextCountsExistingEditSourceLines() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tool = Tool(
+            name: "Large Editor",
+            executableName: "LargeEditor",
+            packageRootPath: root.path
+        )
+        let contentViewURL = try ToolPackageLayout.packageFileURL(
+            for: tool.contentViewSourcePath,
+            packageRootURL: root
+        )
+        try FileManager.default.createDirectory(
+            at: contentViewURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let store = ToolLibraryStore()
+
+        try Array(repeating: "line", count: 600)
+            .joined(separator: "\n")
+            .appending("\n")
+            .write(to: contentViewURL, atomically: true, encoding: .utf8)
+        let sixHundred = store.codingAgentResolutionContext(
+            for: tool,
+            generationMode: .edit
+        )
+        #expect(sixHundred.existingSourceLineCount == 600)
+        #expect(!sixHundred.isLargeEdit)
+
+        try Array(repeating: "line", count: 601)
+            .joined(separator: "\n")
+            .appending("\n")
+            .write(to: contentViewURL, atomically: true, encoding: .utf8)
+        let sixHundredOne = store.codingAgentResolutionContext(
+            for: tool,
+            generationMode: .edit
+        )
+        #expect(sixHundredOne.existingSourceLineCount == 601)
+        #expect(sixHundredOne.isLargeEdit)
+    }
+
     @MainActor
     static func waitForIdle(_ store: ToolLibraryStore) async {
         let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000

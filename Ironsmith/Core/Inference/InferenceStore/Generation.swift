@@ -1,7 +1,9 @@
 import Foundation
 
 extension InferenceStore {
-    func makeSelectedAgentLanguageModelContext() async throws -> AgentLanguageModelContext {
+    func makeSelectedAgentLanguageModelContext(
+        resolutionContext: ToolCodingAgentResolutionContext = .create
+    ) async throws -> AgentLanguageModelContext {
         guard let selectedModel else {
             throw InferenceStoreError.missingSelectedModel
         }
@@ -10,6 +12,12 @@ extension InferenceStore {
         try validateSelectedModelCanGenerate(selectedModel, provider: provider)
         let languageModel = try await dependencies.languageModelClient.makeLanguageModel(
             selectedModel, provider)
+        let codingAgent = ToolCodingAgentResolver.resolve(
+            requested: generationPreferences.codingAgentPreference,
+            model: selectedModel,
+            provider: provider,
+            context: resolutionContext
+        )
         let shouldRefreshIronsmithCredits = provider?.kind == .ironsmith
         return AgentLanguageModelContext(
             codingAgent: ToolGenerationOptionsResolver.stageConfiguration(
@@ -30,12 +38,13 @@ extension InferenceStore {
                 provider: provider,
                 languageModel: languageModel
             ),
-            pipelineConfiguration: pipelineConfiguration(for: selectedModel, provider: provider),
+            pipelineConfiguration: pipelineConfiguration(for: selectedModel, codingAgent: codingAgent),
             promptRefinementEnabled: generationPreferences.generatedPromptRefinementEnabled,
             codingAgentModelIdentifier: selectedModel.identifier,
             codexAgentAuthentication: try await codexAgentAuthentication(
                 for: selectedModel,
-                provider: provider
+                provider: provider,
+                codingAgent: codingAgent
             ),
             afterLanguageModelInvocation: { [weak self] in
                 guard shouldRefreshIronsmithCredits else { return }
@@ -87,9 +96,8 @@ extension InferenceStore {
 
     private func pipelineConfiguration(
         for model: ModelConfig,
-        provider: ProviderConfig?
+        codingAgent: ToolCodingAgent
     ) -> ToolGenerationPipelineConfiguration {
-        let codingAgent = resolvedToolCodingAgent(for: model, provider: provider)
         switch codingAgent {
         case .ironsmithSpark:
             return .ironsmithSpark(repairStrategy: smallModelRepairStrategy(for: model))
@@ -104,47 +112,12 @@ extension InferenceStore {
         }
     }
 
-    private func resolvedToolCodingAgent(
-        for model: ModelConfig,
-        provider: ProviderConfig?
-    ) -> ToolCodingAgent {
-        switch ToolCodingAgentSupport.effectivePreference(
-            requested: generationPreferences.codingAgentPreference,
-            model: model,
-            provider: provider
-        ) {
-        case .ironsmithSpark:
-            return .ironsmithSpark
-        case .ironsmithFlame:
-            return .ironsmithFlame
-        case .codex:
-            return .codex
-        case .automatic:
-            return defaultToolCodingAgent(for: model, provider: provider)
-        }
-    }
-
-    private func defaultToolCodingAgent(
-        for model: ModelConfig,
-        provider: ProviderConfig?
-    ) -> ToolCodingAgent {
-        guard model.source == .remote else {
-            return .ironsmithSpark
-        }
-
-        switch provider?.kind {
-        case .ironsmith, .openAI, .anthropic, .gemini:
-            return .ironsmithFlame
-        case .local, .ollama, .customOpenAICompatible, nil:
-            return .ironsmithSpark
-        }
-    }
-
     private func codexAgentAuthentication(
         for model: ModelConfig,
-        provider: ProviderConfig?
+        provider: ProviderConfig?,
+        codingAgent: ToolCodingAgent
     ) async throws -> CodexAgentAuthentication? {
-        guard resolvedToolCodingAgent(for: model, provider: provider) == .codex else {
+        guard codingAgent == .codex else {
             return nil
         }
         guard let provider else {
@@ -159,7 +132,8 @@ extension InferenceStore {
             }
             return .customResponsesProvider(
                 CodexAgentCustomResponsesProvider(
-                    identifier: "ironsmith",
+                    configurationIdentifier: "ironsmith",
+                    sessionProviderIdentifier: provider.identifier,
                     displayName: provider.displayName,
                     baseURL: try codexProviderBaseURL(provider),
                     authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
@@ -177,9 +151,60 @@ extension InferenceStore {
                 throw LanguageModelClientError.missingAPIKey
             }
             return .apiKey(apiKey)
-        case .local, .anthropic, .gemini, .ollama, .customOpenAICompatible:
+        case .ollama:
+            return .customResponsesProvider(
+                try codexCustomResponsesProvider(
+                    provider,
+                    configurationIdentifier: "ironsmith_ollama",
+                    baseURL: codexOllamaBaseURL(provider)
+                )
+            )
+        case .customOpenAICompatible:
+            guard provider.openAICompatibleAPIVariant == .responses else {
+                throw CodexAgentError.unsupportedProvider
+            }
+            return .customResponsesProvider(
+                try codexCustomResponsesProvider(
+                    provider,
+                    configurationIdentifier: "ironsmith_custom_\(provider.id.uuidString.replacingOccurrences(of: "-", with: "").lowercased())",
+                    baseURL: codexProviderBaseURL(provider)
+                )
+            )
+        case .local, .anthropic, .gemini:
             throw CodexAgentError.unsupportedProvider
         }
+    }
+
+    private func codexCustomResponsesProvider(
+        _ provider: ProviderConfig,
+        configurationIdentifier: String,
+        baseURL: URL
+    ) throws -> CodexAgentCustomResponsesProvider {
+        let apiKey: String? = if let reference = provider.apiKeyReference {
+            try dependencies.credentialClient.loadAPIKey(reference)
+        } else {
+            nil
+        }
+        let trimmedAPIKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasAPIKey = trimmedAPIKey?.isEmpty == false
+        return CodexAgentCustomResponsesProvider(
+            configurationIdentifier: configurationIdentifier,
+            sessionProviderIdentifier: provider.identifier,
+            displayName: provider.displayName,
+            baseURL: baseURL,
+            authenticationEnvironmentVariable: hasAPIKey
+                ? "IRONSMITH_CODEX_PROVIDER_API_KEY"
+                : nil,
+            authenticationToken: hasAPIKey ? trimmedAPIKey : nil
+        )
+    }
+
+    private func codexOllamaBaseURL(_ provider: ProviderConfig) throws -> URL {
+        let baseURL = try codexProviderBaseURL(provider)
+        if baseURL.pathComponents.last?.lowercased() == "v1" {
+            return baseURL
+        }
+        return baseURL.appendingPathComponent("v1", isDirectory: true)
     }
 
     private func codexProviderBaseURL(_ provider: ProviderConfig) throws -> URL {

@@ -180,7 +180,8 @@ extension AgentPipelineTests {
             temporaryDirectory: temporaryDirectory
         )
         let provider = CodexAgentCustomResponsesProvider(
-            identifier: "ironsmith",
+            configurationIdentifier: "ironsmith",
+            sessionProviderIdentifier: "ironsmith",
             displayName: "Ironsmith",
             baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
             authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
@@ -210,6 +211,7 @@ extension AgentPipelineTests {
             )
         )
         #expect(arguments.contains(#"model_providers.ironsmith.wire_api="responses""#))
+        #expect(arguments.contains("model_providers.ironsmith.requires_openai_auth=false"))
         #expect(
             arguments.contains(
                 #"model_providers.ironsmith.env_key="IRONSMITH_CODEX_ACCESS_TOKEN""#
@@ -218,6 +220,34 @@ extension AgentPipelineTests {
         #expect(arguments.contains("deepseek/deepseek-v4-flash"))
         #expect(!arguments.contains("ironsmith-access-token"))
         #expect(environment["IRONSMITH_CODEX_ACCESS_TOKEN"] == "ironsmith-access-token")
+
+        let unauthenticatedProvider = CodexAgentCustomResponsesProvider(
+            configurationIdentifier: "ironsmith_ollama",
+            sessionProviderIdentifier: "ollama",
+            displayName: "Ollama",
+            baseURL: URL(string: "http://localhost:11434/v1")!,
+            authenticationEnvironmentVariable: nil,
+            authenticationToken: nil
+        )
+        _ = try await client.run(
+            CodexAgentRequest(
+                packageRootURL: packageRoot,
+                executableName: "Demo",
+                displayName: "Demo",
+                appKind: .window,
+                sandboxEnabled: true,
+                userPrompt: "Make a demo",
+                modelIdentifier: "gpt-oss:20b",
+                authentication: .customResponsesProvider(unauthenticatedProvider)
+            )
+        )
+
+        let unauthenticatedArguments = try #require(await cliCapture.arguments)
+        let unauthenticatedEnvironment = try #require(await cliCapture.environment)
+        #expect(unauthenticatedArguments.contains(#"model_provider="ironsmith_ollama""#))
+        #expect(!unauthenticatedArguments.contains { $0.contains(".env_key=") })
+        #expect(unauthenticatedEnvironment["IRONSMITH_CODEX_ACCESS_TOKEN"] == nil)
+        #expect(unauthenticatedEnvironment["IRONSMITH_CODEX_PROVIDER_API_KEY"] == nil)
         #expect(environment["OPENAI_API_KEY"] == nil)
         #expect(arguments.contains(#"web_search="disabled""#))
         #expect(arguments.contains("apps._default.enabled=false"))
@@ -259,7 +289,8 @@ extension AgentPipelineTests {
             openAICodexAuthClient: .unconfigured
         )
         let provider = CodexAgentCustomResponsesProvider(
-            identifier: "ironsmith",
+            configurationIdentifier: "ironsmith",
+            sessionProviderIdentifier: "ironsmith",
             displayName: "Ironsmith",
             baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
             authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
@@ -288,7 +319,8 @@ extension AgentPipelineTests {
     @Test
     func codexAgentToolCompatibilityDefaultsUnknownManagedModelsToPortable() {
         let provider = CodexAgentCustomResponsesProvider(
-            identifier: "ironsmith",
+            configurationIdentifier: "ironsmith",
+            sessionProviderIdentifier: "ironsmith",
             displayName: "Ironsmith",
             baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
             authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",

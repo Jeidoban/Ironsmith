@@ -1,11 +1,12 @@
 import Foundation
 
 nonisolated struct CodexAgentCustomResponsesProvider: Equatable, Sendable {
-    let identifier: String
+    let configurationIdentifier: String
+    let sessionProviderIdentifier: String
     let displayName: String
     let baseURL: URL
-    let authenticationEnvironmentVariable: String
-    let authenticationToken: String
+    let authenticationEnvironmentVariable: String?
+    let authenticationToken: String?
 }
 
 nonisolated enum CodexAgentToolCompatibility: String, Codable, Equatable, Sendable {
@@ -26,10 +27,7 @@ nonisolated enum CodexAgentToolCompatibility: String, Codable, Equatable, Sendab
 
     private static func isOpenAIModelIdentifier(_ identifier: String) -> Bool {
         let normalized = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return normalized.hasPrefix(OpenAICodexBackend.modelIdentifierPrefix)
-            || normalized.hasPrefix("openai/")
-            || normalized.hasPrefix("openai.")
-            || normalized.hasPrefix("openai:")
+        return ToolModelFamily.resolved(identifier: normalized) == .openAI
     }
 }
 
@@ -64,7 +62,7 @@ nonisolated struct CodexAgentRequest: Sendable {
         case .chatGPTLogin:
             return "openai-chatgpt"
         case .customResponsesProvider(let provider):
-            return provider.identifier
+            return provider.sessionProviderIdentifier
         }
     }
 
@@ -506,8 +504,12 @@ extension CodexAgentClient {
             case .chatGPTLogin:
                 break
             case .customResponsesProvider(let provider):
-                environment[provider.authenticationEnvironmentVariable] =
-                    provider.authenticationToken
+                if let environmentVariable = provider.authenticationEnvironmentVariable,
+                   let token = provider.authenticationToken,
+                   !token.isEmpty
+                {
+                    environment[environmentVariable] = token
+                }
             }
 
             var arguments = ["exec"]
@@ -634,15 +636,20 @@ extension CodexAgentClient {
     nonisolated private static func configurationArguments(
         for provider: CodexAgentCustomResponsesProvider
     ) -> [String] {
-        let prefix = "model_providers.\(provider.identifier)"
-        return [
-            "-c", "model_provider=\(tomlString(provider.identifier))",
+        let prefix = "model_providers.\(provider.configurationIdentifier)"
+        var arguments = [
+            "-c", "model_provider=\(tomlString(provider.configurationIdentifier))",
             "-c", "\(prefix).name=\(tomlString(provider.displayName))",
             "-c", "\(prefix).base_url=\(tomlString(provider.baseURL.absoluteString))",
             "-c", "\(prefix).wire_api=\(tomlString("responses"))",
-            "-c",
-            "\(prefix).env_key=\(tomlString(provider.authenticationEnvironmentVariable))",
+            "-c", "\(prefix).requires_openai_auth=false",
         ]
+        if let environmentVariable = provider.authenticationEnvironmentVariable {
+            arguments.append(contentsOf: [
+                "-c", "\(prefix).env_key=\(tomlString(environmentVariable))",
+            ])
+        }
+        return arguments
     }
 
     nonisolated private static func tomlString(_ value: String) -> String {
@@ -672,7 +679,7 @@ enum CodexAgentError: LocalizedError, Equatable {
         case .missingCodexClient:
             return "Codex is not configured."
         case .unsupportedProvider:
-            return "Codex currently supports OpenAI and Ironsmith models."
+            return "Codex is not supported by the selected provider API."
         case .missingAuthenticationForRuntime:
             return "Codex authentication was not prepared for this generation."
         case .commandFailed(let status, let stderr, let transcriptURL):
