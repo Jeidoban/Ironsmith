@@ -22,10 +22,11 @@ extension InferenceStore {
 
     func models(for provider: ProviderConfig) -> [ModelConfig] {
         let source = provider.kind == .local ? enabledPersistedModels : remoteModels
-        return
-            source
-            .filter { $0.providerIdentifier == provider.identifier }
-            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        let models = source.filter { $0.providerIdentifier == provider.identifier }
+        guard provider.kind != .ironsmith else { return models }
+        return models.sorted {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
     }
 
     func connectionIssue(for provider: ProviderConfig) -> ProviderConnectionIssue? {
@@ -206,9 +207,6 @@ extension InferenceStore {
             let fetched = try await dependencies.remoteModelClient.discoverModels(provider, apiKey)
             remoteModels.removeAll { $0.providerIdentifier == provider.identifier }
             remoteModels.append(contentsOf: fetched)
-            remoteModels.sort {
-                $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
-            }
             reconcileSelectedReasoningEffort()
             providerConnectionIssues.removeValue(forKey: provider.identifier)
             return true

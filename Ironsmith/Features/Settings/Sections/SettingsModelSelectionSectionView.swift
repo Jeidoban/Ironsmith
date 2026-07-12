@@ -81,15 +81,8 @@ struct ModelPickerSheetView: View {
 
     private var providersWithModels: [(provider: ProviderConfig, models: [ModelConfig])] {
         inferenceStore.providers.compactMap { provider in
-            let models = inferenceStore.availableModels
-                .filter { $0.providerIdentifier == provider.identifier }
+            let models = inferenceStore.models(for: provider)
                 .filter(matchesSearch)
-                .sorted {
-                    SettingsModelPresentation.displayName(for: $0, provider: provider)
-                        .localizedStandardCompare(
-                            SettingsModelPresentation.displayName(for: $1, provider: provider))
-                        == .orderedAscending
-                }
 
             guard !models.isEmpty else { return nil }
             return (provider, models)

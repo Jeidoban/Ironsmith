@@ -8,6 +8,48 @@ import Testing
 extension InferenceTests {
     @MainActor
     @Test
+    func ironsmithModelDiscoveryPreservesBackendResponseOrder() throws {
+        let provider = ProviderCatalog.makeProvider(for: .ironsmith)!
+        let data = Data(
+            #"{"data":[{"id":"openai/gpt-5.6-luna","displayName":"GPT-5.6 Luna","estimatedToolCredits":10},{"id":"openai/gpt-5.6-terra","displayName":"GPT-5.6 Terra","estimatedToolCredits":20},{"id":"openai/gpt-5.6-sol","displayName":"GPT-5.6 Sol","estimatedToolCredits":30}]}"#.utf8
+        )
+
+        let models = try RemoteModelClient.decodeModels(data, for: provider)
+
+        #expect(
+            models.map(\.identifier) == [
+                "openai/gpt-5.6-luna",
+                "openai/gpt-5.6-terra",
+                "openai/gpt-5.6-sol",
+            ]
+        )
+    }
+
+    @MainActor
+    @Test
+    func ironsmithModelsPreserveBackendTierOrder() {
+        let store = Self.dependenciesBackedStore()
+        let provider = ProviderCatalog.makeProvider(for: .ironsmith)!
+        let identifiers = [
+            "openai/gpt-5.6-luna",
+            "openai/gpt-5.6-terra",
+            "openai/gpt-5.6-sol",
+        ]
+        store.remoteModels = identifiers.map { identifier in
+            ModelConfig(
+                identifier: identifier,
+                displayName: identifier,
+                providerIdentifier: provider.identifier,
+                source: .remote,
+                installState: .installed
+            )
+        }
+
+        #expect(store.models(for: provider).map(\.identifier) == identifiers)
+    }
+
+    @MainActor
+    @Test
     func remoteModelDiscoveryDecodesReasoningCapabilities() throws {
         let ironsmith = ProviderCatalog.makeProvider(for: .ironsmith)!
         let ironsmithData = Data(

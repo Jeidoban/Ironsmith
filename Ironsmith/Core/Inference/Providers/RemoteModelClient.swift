@@ -169,19 +169,21 @@ extension RemoteModelClient {
             }
         }
 
-        return entries
-            .map {
-                ModelConfig(
-                    identifier: $0.identifier,
-                    displayName: $0.displayName,
-                    providerIdentifier: provider.identifier,
-                    source: .remote,
-                    installState: .installed,
-                    estimatedToolCredits: $0.estimatedToolCredits,
-                    reasoningEfforts: $0.reasoningEfforts
-                )
-            }
-            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        let models = entries.map {
+            ModelConfig(
+                identifier: $0.identifier,
+                displayName: $0.displayName,
+                providerIdentifier: provider.identifier,
+                source: .remote,
+                installState: .installed,
+                estimatedToolCredits: $0.estimatedToolCredits,
+                reasoningEfforts: $0.reasoningEfforts
+            )
+        }
+        guard provider.kind != .ironsmith else { return models }
+        return models.sorted {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
     }
 
     static func makeCodexModelConfigs(
