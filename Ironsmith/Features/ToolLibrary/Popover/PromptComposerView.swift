@@ -121,23 +121,48 @@ struct PromptComposerView: View {
             }
 
             Menu("Coding Agent") {
-                codingAgentButton(.automatic)
-                codingAgentButton(.ironsmithSpark)
-                codingAgentButton(.ironsmithFlame)
-                codingAgentButton(.codex)
-                    .disabled(!isCodexAgentSupported)
+                checkedSelectionButton(
+                    .automatic,
+                    selection: $codingAgentPreference,
+                    displayName: ToolCodingAgentPreference.automatic.displayName
+                )
+                checkedSelectionButton(
+                    .ironsmithSpark,
+                    selection: $codingAgentPreference,
+                    displayName: ToolCodingAgentPreference.ironsmithSpark.displayName
+                )
+                checkedSelectionButton(
+                    .ironsmithFlame,
+                    selection: $codingAgentPreference,
+                    displayName: ToolCodingAgentPreference.ironsmithFlame.displayName
+                )
+                checkedSelectionButton(
+                    .codex,
+                    selection: $codingAgentPreference,
+                    displayName: ToolCodingAgentPreference.codex.displayName,
+                    isEnabled: isCodexAgentSupported
+                )
                     .help("Codex currently supports OpenAI and Ironsmith models.")
             }
 
-            Menu("Reasoning") {
-                reasoningEffortButton(.default)
-                reasoningEffortButton(.low)
-                reasoningEffortButton(.medium)
-                reasoningEffortButton(.high)
-                reasoningEffortButton(.xhigh)
-                reasoningEffortButton(.max)
+            if !supportedReasoningEfforts.isEmpty {
+                Menu("Reasoning") {
+                    checkedSelectionButton(
+                        .default,
+                        selection: $reasoningEffort,
+                        displayName: ToolReasoningEffort.default.displayName
+                    )
+                    ForEach(ToolReasoningEffort.allCases.filter { $0 != .default }, id: \.self) {
+                        effort in
+                        checkedSelectionButton(
+                            effort,
+                            selection: $reasoningEffort,
+                            displayName: effort.displayName,
+                            isEnabled: supportedReasoningEfforts.contains(effort)
+                        )
+                    }
+                }
             }
-            .disabled(supportedReasoningEfforts.isEmpty)
 
             if showsSandboxControl {
                 Divider()
@@ -250,31 +275,23 @@ struct PromptComposerView: View {
         "Controls whether generated apps include App Sandbox entitlements."
     }
 
-    private func codingAgentButton(_ preference: ToolCodingAgentPreference) -> some View {
+    private func checkedSelectionButton<Value: Equatable>(
+        _ value: Value,
+        selection: Binding<Value>,
+        displayName: String,
+        isEnabled: Bool = true
+    ) -> some View {
         Button {
-            guard preference != .codex || isCodexAgentSupported else { return }
-            codingAgentPreference = preference
+            guard isEnabled else { return }
+            selection.wrappedValue = value
         } label: {
-            if codingAgentPreference == preference {
-                Label(preference.displayName, systemImage: "checkmark")
+            if selection.wrappedValue == value {
+                Label(displayName, systemImage: "checkmark")
             } else {
-                Text(preference.displayName)
+                Text(displayName)
             }
         }
-    }
-
-    private func reasoningEffortButton(_ effort: ToolReasoningEffort) -> some View {
-        Button {
-            guard effort == .default || supportedReasoningEfforts.contains(effort) else { return }
-            reasoningEffort = effort
-        } label: {
-            if reasoningEffort == effort {
-                Label(effort.displayName, systemImage: "checkmark")
-            } else {
-                Text(effort.displayName)
-            }
-        }
-        .disabled(effort != .default && !supportedReasoningEfforts.contains(effort))
+        .disabled(!isEnabled)
     }
 
     private func resourcePermissionBinding(for permission: GeneratedAppResourcePermission)
