@@ -246,15 +246,15 @@ private struct ModelPickerRowView: View {
     }
 
     private var estimatedCreditsText: String? {
-        guard provider.kind == .ironsmith,
-            let estimatedToolCredits = model.estimatedToolCredits
+        guard let estimatedToolCredits = ToolLibraryCreditEstimate.creditsRange(
+            model: model,
+            provider: provider
+        )
         else {
             return nil
         }
 
-        return estimatedToolCredits == 1
-            ? "~1 credit/app"
-            : "~\(estimatedToolCredits.formatted()) credits/app"
+        return "\(estimatedToolCredits.lowerBound.formatted())-\(estimatedToolCredits.upperBound.formatted()) credits/app"
     }
 }
 

@@ -3,6 +3,7 @@
 //  Ironsmith
 //
 
+import AppKit
 import SwiftUI
 
 struct PromptComposerView: View {
@@ -142,7 +143,6 @@ struct PromptComposerView: View {
                     displayName: ToolCodingAgentPreference.codex.displayName,
                     isEnabled: isCodexAgentSupported
                 )
-                    .help("Codex currently supports OpenAI and Ironsmith models.")
             }
 
             if !supportedReasoningEfforts.isEmpty {
@@ -198,6 +198,11 @@ struct PromptComposerView: View {
         .accessibilityLabel("Generation settings")
         .accessibilityIdentifier("generation-settings-menu")
         .disabled(isSubmitting)
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) {
+            notification in
+            guard let menu = notification.object as? NSMenu else { return }
+            CodingAgentMenuHelp.apply(to: menu)
+        }
     }
 
     private var modelPickerButton: some View {
@@ -345,6 +350,28 @@ struct PromptComposerView: View {
             updated.enabled.remove(permission)
         }
         sandboxPermissions = updated
+    }
+}
+
+private enum CodingAgentMenuHelp {
+    private static let tooltips: [String: String] = [
+        ToolCodingAgentPreference.ironsmithSpark.displayName:
+            "Best for simple apps using on-device AI.",
+        ToolCodingAgentPreference.ironsmithFlame.displayName:
+            "Best for moderately complex apps using cloud AI. More token-efficient than Codex for smaller apps, but less efficient for complex ones.",
+        ToolCodingAgentPreference.codex.displayName:
+            "Best for complex, feature-rich apps. Typically uses 1.5-2x more tokens than Flame.",
+    ]
+
+    static func apply(to menu: NSMenu) {
+        for item in menu.items {
+            if let tooltip = tooltips[item.title] {
+                item.toolTip = tooltip
+            }
+            if let submenu = item.submenu {
+                apply(to: submenu)
+            }
+        }
     }
 }
 

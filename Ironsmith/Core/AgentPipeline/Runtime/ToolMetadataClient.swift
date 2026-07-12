@@ -88,7 +88,9 @@ struct ToolMetadataClient: Sendable {
         }
     }
 
-    static func live() -> Self {
+    static func live(
+        fallbackLanguageModel: (any LanguageModel)? = SystemLanguageModel.default
+    ) -> Self {
         Self(
             requestBased: (),
             suggestMetadataForRequest: { request in
@@ -101,15 +103,45 @@ struct ToolMetadataClient: Sendable {
                         invoker: request.invoker,
                         fallback: fallback
                     )
-                } catch {
+                } catch let primaryError {
                     AgentDiagnosticsLog.append(
                         """
-                        Tool metadata generation failed; using fallback tool metadata.
+                        Tool metadata generation failed with the selected model.
                         prompt: \(AgentDiagnosticsLog.compact(userPrompt, limit: 240))
                         error:
-                        \(AgentDiagnosticsLog.renderError(error, limit: 500))
+                        \(AgentDiagnosticsLog.renderError(primaryError, limit: 500))
                         """
                     )
+
+                    if let fallbackLanguageModel, fallbackLanguageModel.isAvailable {
+                        let fallbackConfiguration = ToolGenerationStageConfiguration(
+                            stage: .metadata,
+                            languageModel: fallbackLanguageModel,
+                            generationOptions: GenerationOptions(
+                                maximumResponseTokens: ToolGenerationOptionsResolver
+                                    .metadataMaximumResponseTokens
+                            ),
+                            streaming: ToolGenerationOptionsResolver.defaultStreaming
+                        )
+                        do {
+                            return try await Self.generateMetadata(
+                                userPrompt: userPrompt,
+                                invoker: request.invoker.replacingMetadata(
+                                    with: fallbackConfiguration
+                                ),
+                                fallback: fallback
+                            )
+                        } catch {
+                            AgentDiagnosticsLog.append(
+                                """
+                                Tool metadata generation also failed with the system language model; using fallback tool metadata.
+                                prompt: \(AgentDiagnosticsLog.compact(userPrompt, limit: 240))
+                                error:
+                                \(AgentDiagnosticsLog.renderError(error, limit: 500))
+                                """
+                            )
+                        }
+                    }
                     return fallback
                 }
             })

@@ -16,7 +16,7 @@ extension ToolLibraryTests {
             ToolLibraryCreditWarning.message(
                 model: model,
                 provider: provider,
-                balanceCredits: 199
+                balanceCredits: 459
             ) == ToolLibraryCreditWarning.lowCreditsMessage
         )
     }
@@ -27,8 +27,20 @@ extension ToolLibraryTests {
         let provider = try #require(ProviderCatalog.makeProvider(for: .ironsmith))
         let model = Self.remoteModel(provider: provider, estimatedToolCredits: 200)
 
-        #expect(ToolLibraryCreditWarning.message(model: model, provider: provider, balanceCredits: 200) == nil)
-        #expect(ToolLibraryCreditWarning.message(model: model, provider: provider, balanceCredits: 201) == nil)
+        #expect(
+            ToolLibraryCreditWarning.message(
+                model: model,
+                provider: provider,
+                balanceCredits: 460
+            ) == nil
+        )
+        #expect(
+            ToolLibraryCreditWarning.message(
+                model: model,
+                provider: provider,
+                balanceCredits: 461
+            ) == nil
+        )
     }
 
     @MainActor
@@ -37,7 +49,13 @@ extension ToolLibraryTests {
         let provider = try #require(ProviderCatalog.makeProvider(for: .openAI))
         let model = Self.remoteModel(provider: provider, estimatedToolCredits: 200)
 
-        #expect(ToolLibraryCreditWarning.message(model: model, provider: provider, balanceCredits: 50) == nil)
+        #expect(
+            ToolLibraryCreditWarning.message(
+                model: model,
+                provider: provider,
+                balanceCredits: 50
+            ) == nil
+        )
     }
 
     @MainActor
@@ -46,7 +64,37 @@ extension ToolLibraryTests {
         let provider = try #require(ProviderCatalog.makeProvider(for: .ironsmith))
         let model = Self.remoteModel(provider: provider, estimatedToolCredits: 200)
 
-        #expect(ToolLibraryCreditWarning.message(model: model, provider: provider, balanceCredits: 0) == nil)
-        #expect(ToolLibraryCreditWarning.message(model: model, provider: provider, balanceCredits: nil) == nil)
+        #expect(
+            ToolLibraryCreditWarning.message(
+                model: model,
+                provider: provider,
+                balanceCredits: 0
+            ) == nil
+        )
+        #expect(
+            ToolLibraryCreditWarning.message(
+                model: model,
+                provider: provider,
+                balanceCredits: nil
+            ) == nil
+        )
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryCreditEstimateProvidesExpectedRange() throws {
+        let provider = try #require(ProviderCatalog.makeProvider(for: .ironsmith))
+        let model = Self.remoteModel(
+            provider: provider,
+            identifier: "openai/gpt-5.6-terra",
+            estimatedToolCredits: 101
+        )
+
+        #expect(
+            ToolLibraryCreditEstimate.creditsRange(
+                model: model,
+                provider: provider
+            ) == 31...233
+        )
     }
 }

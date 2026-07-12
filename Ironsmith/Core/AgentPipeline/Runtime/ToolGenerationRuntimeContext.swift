@@ -102,6 +102,15 @@ nonisolated struct ToolLanguageModelInvoker: @unchecked Sendable {
         await afterLanguageModelInvocation()
     }
 
+    func replacingMetadata(with configuration: ToolGenerationStageConfiguration) -> Self {
+        Self(
+            codingAgent: codingAgent,
+            promptRefinement: promptRefinement,
+            metadata: configuration,
+            afterLanguageModelInvocation: afterLanguageModelInvocation
+        )
+    }
+
     private func streamResponse<Content, PromptContent>(
         stage: ToolGenerationStage,
         in session: LanguageModelSession,
