@@ -199,6 +199,7 @@ struct ToolLibraryPopoverView: View {
                 sandboxPermissions: sandboxPermissionsBinding,
                 resourcePermissions: resourcePermissionsBinding,
                 codingAgentPreference: codingAgentPreferenceBinding,
+                reasoningEffort: reasoningEffortBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
                 showsSandboxControl: showSandboxOverride,
                 modelPickerTitle: composerModelPickerTitle,
@@ -206,6 +207,7 @@ struct ToolLibraryPopoverView: View {
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
                 isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(.codex),
+                supportedReasoningEfforts: inferenceStore.selectedModelSupportedReasoningEfforts,
                 isPromptFocused: $isPromptFocused,
                 onChooseModel: {
                     isShowingModelPicker = true
@@ -581,6 +583,13 @@ struct ToolLibraryPopoverView: View {
             set: { newValue in
                 inferenceStore.generationPreferences.codingAgentPreference = newValue
             }
+        )
+    }
+
+    private var reasoningEffortBinding: Binding<ToolReasoningEffort> {
+        Binding(
+            get: { inferenceStore.generationPreferences.reasoningEffort },
+            set: { inferenceStore.generationPreferences.reasoningEffort = $0 }
         )
     }
 

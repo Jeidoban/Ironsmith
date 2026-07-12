@@ -7,6 +7,7 @@ final class GenerationPreferencesStore {
     private enum Key {
         static let generatedPromptRefinementEnabled = "generation.generatedPromptRefinementEnabled"
         static let codingAgentPreference = "generation.agentPipelineProfile"
+        static let reasoningEffort = "generation.reasoningEffort"
     }
 
     var generatedPromptRefinementEnabled: Bool {
@@ -17,6 +18,11 @@ final class GenerationPreferencesStore {
     var codingAgentPreference: ToolCodingAgentPreference {
         didSet {
             userDefaults.set(codingAgentPreference.rawValue, forKey: Key.codingAgentPreference)
+        }
+    }
+    var reasoningEffort: ToolReasoningEffort {
+        didSet {
+            userDefaults.set(reasoningEffort.rawValue, forKey: Key.reasoningEffort)
         }
     }
     var generatedAppMicrophoneAccessEnabled: Bool {
@@ -116,6 +122,9 @@ final class GenerationPreferencesStore {
         self.codingAgentPreference = userDefaults
             .string(forKey: Key.codingAgentPreference)
             .flatMap(ToolCodingAgentPreference.init(rawValue:)) ?? .automatic
+        self.reasoningEffort = userDefaults
+            .string(forKey: Key.reasoningEffort)
+            .flatMap(ToolReasoningEffort.init(rawValue:)) ?? .default
         self.generatedAppMicrophoneAccessEnabled = userDefaults.bool(
             forKey: GeneratedAppResourcePermission.microphone.userDefaultsKey
         )

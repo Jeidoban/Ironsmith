@@ -50,6 +50,7 @@ extension InferenceStore {
         {
             modelSelection.selectedModelID = selectedModelID
             reconcileSelectedCodingAgentPreference()
+            reconcileSelectedReasoningEffort()
             return
         }
 
@@ -99,11 +100,30 @@ extension InferenceStore {
         }
     }
 
+    var selectedModelSupportedReasoningEfforts: Set<ToolReasoningEffort> {
+        ToolReasoningSupport.supportedEfforts(
+            for: selectedModel,
+            provider: selectedModel.flatMap(provider(for:))
+        )
+    }
+
+    func reconcileSelectedReasoningEffort() {
+        let effectiveEffort = ToolReasoningSupport.effectiveEffort(
+            requested: generationPreferences.reasoningEffort,
+            model: selectedModel,
+            provider: selectedModel.flatMap(provider(for:))
+        )
+        if generationPreferences.reasoningEffort != effectiveEffort {
+            generationPreferences.reasoningEffort = effectiveEffort
+        }
+    }
+
     private func selectModel(_ selectionIdentifier: String?, fallbackMessage: String?) {
         selectedModelID = selectionIdentifier
         modelSelection.selectedModelID = selectionIdentifier
         selectedModelFallbackMessage = fallbackMessage
         reconcileSelectedCodingAgentPreference()
+        reconcileSelectedReasoningEffort()
     }
 
     private static func modelName(fromSelectionIdentifier selectionIdentifier: String) -> String {

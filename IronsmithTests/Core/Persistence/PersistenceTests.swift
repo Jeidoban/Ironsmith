@@ -221,6 +221,7 @@ struct PersistenceTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let config = ModelConfiguration(url: root.appendingPathComponent("ironsmith.sqlite"))
         let providerID = UUID()
+        let modelID = UUID()
 
         do {
             let container = try ModelContainer(
@@ -238,6 +239,16 @@ struct PersistenceTests {
                     origin: .custom
                 )
             )
+            context.insert(
+                IronsmithSchemaV3.ModelConfig(
+                    id: modelID,
+                    identifier: "test-model",
+                    displayName: "Test Model",
+                    providerIdentifier: "custom.test",
+                    source: .remote,
+                    installState: .installed
+                )
+            )
             try context.save()
         }
 
@@ -246,8 +257,12 @@ struct PersistenceTests {
         let provider = try #require(
             try context.fetch(FetchDescriptor<ProviderConfig>()).first { $0.id == providerID }
         )
+        let model = try #require(
+            try context.fetch(FetchDescriptor<ModelConfig>()).first { $0.id == modelID }
+        )
 
         #expect(provider.openAICompatibleAPIVariant == .chatCompletions)
+        #expect(model.reasoningEffortRawValues == nil)
     }
 
     @MainActor

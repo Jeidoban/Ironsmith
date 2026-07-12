@@ -529,6 +529,7 @@ struct SingleFileToolGenerationRuntime {
             sandboxEnabled: settings.sandboxEnabled,
             userPrompt: userPrompt,
             modelIdentifier: context.codingAgentModelIdentifier,
+            reasoningEffort: context.reasoningEffort,
             authentication: authentication
         ) { event in
             await Self.handleCodexAgentEvent(event, lifecycle: lifecycle)

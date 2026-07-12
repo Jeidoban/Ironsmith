@@ -10,6 +10,7 @@ nonisolated struct AgentLanguageModelContext {
     let promptRefinementEnabled: Bool
     let codingAgentModelIdentifier: String
     let codexAgentAuthentication: CodexAgentAuthentication?
+    let reasoningEffort: ToolReasoningEffort
 
     var languageModel: any LanguageModel {
         languageModelInvoker.languageModel
@@ -31,6 +32,7 @@ nonisolated struct AgentLanguageModelContext {
         promptRefinementEnabled: Bool = true,
         codingAgentModelIdentifier: String = "",
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
+        reasoningEffort: ToolReasoningEffort = .default,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
         self.codingAgent = codingAgent
@@ -46,6 +48,7 @@ nonisolated struct AgentLanguageModelContext {
         self.promptRefinementEnabled = promptRefinementEnabled
         self.codingAgentModelIdentifier = codingAgentModelIdentifier
         self.codexAgentAuthentication = codexAgentAuthentication
+        self.reasoningEffort = reasoningEffort
     }
 
     init(
@@ -58,6 +61,7 @@ nonisolated struct AgentLanguageModelContext {
         promptRefinementEnabled: Bool = true,
         codingAgentModelIdentifier: String = "",
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
+        reasoningEffort: ToolReasoningEffort = .default,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
         let codingAgent = ToolGenerationStageConfiguration(
@@ -84,6 +88,7 @@ nonisolated struct AgentLanguageModelContext {
             promptRefinementEnabled: promptRefinementEnabled,
             codingAgentModelIdentifier: codingAgentModelIdentifier,
             codexAgentAuthentication: codexAgentAuthentication,
+            reasoningEffort: reasoningEffort,
             afterLanguageModelInvocation: afterLanguageModelInvocation
         )
     }

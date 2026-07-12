@@ -209,6 +209,7 @@ extension InferenceStore {
             remoteModels.sort {
                 $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
             }
+            reconcileSelectedReasoningEffort()
             providerConnectionIssues.removeValue(forKey: provider.identifier)
             return true
         } catch {

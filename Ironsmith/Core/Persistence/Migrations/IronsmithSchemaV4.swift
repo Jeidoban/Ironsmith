@@ -107,6 +107,7 @@ enum IronsmithSchemaV4: VersionedSchema {
         var source: ModelSource
         var installState: ModelInstallState
         var estimatedToolCredits: Int?
+        var reasoningEffortRawValues: String?
 
         init(
             id: UUID = UUID(),
@@ -115,7 +116,8 @@ enum IronsmithSchemaV4: VersionedSchema {
             providerIdentifier: String,
             source: ModelSource,
             installState: ModelInstallState = .downloadable,
-            estimatedToolCredits: Int? = nil
+            estimatedToolCredits: Int? = nil,
+            reasoningEfforts: [ToolReasoningEffort] = []
         ) {
             self.id = id
             self.identifier = identifier
@@ -125,6 +127,10 @@ enum IronsmithSchemaV4: VersionedSchema {
             let resolvedInstallState: ModelInstallState = source == .appleFoundation ? .builtIn : installState
             self.installState = resolvedInstallState
             self.estimatedToolCredits = estimatedToolCredits
+            self.reasoningEffortRawValues = reasoningEfforts
+                .filter { $0 != .default }
+                .map(\.rawValue)
+                .joined(separator: ",")
         }
     }
 

@@ -49,6 +49,7 @@ extension AgentPipelineTests {
             sandboxEnabled: true,
             userPrompt: "Make a mortgage calculator",
             modelIdentifier: "codex:gpt-5.5",
+            reasoningEffort: .xhigh,
             authentication: .apiKey("sk-test")
         ) { event in
             await eventCapture.record(event)
@@ -71,6 +72,7 @@ extension AgentPipelineTests {
         #expect(!arguments.contains("--add-dir"))
         #expect(arguments.contains("--model"))
         #expect(arguments.contains("gpt-5.5"))
+        #expect(arguments.contains(#"model_reasoning_effort="xhigh""#))
         let prompt = try #require(arguments.last)
         #expect(prompt.contains("Create or edit only Sources/MortgageMate/ContentView.swift"))
         #expect(prompt.contains("Run `swift build --disable-sandbox`"))

@@ -108,6 +108,13 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
                 toVersion: IronsmithSchemaV4.self,
                 willMigrate: nil,
                 didMigrate: { context in
+                    let models = try context.fetch(
+                        FetchDescriptor<IronsmithSchemaV4.ModelConfig>()
+                    )
+                    for model in models {
+                        model.reasoningEffortRawValues = nil
+                    }
+
                     let providers = try context.fetch(
                         FetchDescriptor<IronsmithSchemaV4.ProviderConfig>()
                     )

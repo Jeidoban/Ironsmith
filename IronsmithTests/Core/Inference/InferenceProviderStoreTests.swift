@@ -8,6 +8,24 @@ import Testing
 extension InferenceTests {
     @MainActor
     @Test
+    func remoteModelDiscoveryDecodesReasoningCapabilities() throws {
+        let ironsmith = ProviderCatalog.makeProvider(for: .ironsmith)!
+        let ironsmithData = Data(
+            #"{"data":[{"id":"openai/gpt-5.5","displayName":"GPT-5.5","estimatedToolCredits":10,"reasoningEfforts":["low","medium","high","xhigh"]}]}"#.utf8
+        )
+        let ironsmithModels = try RemoteModelClient.decodeModels(ironsmithData, for: ironsmith)
+        #expect(ironsmithModels.first?.reasoningEfforts == [.low, .medium, .high, .xhigh])
+
+        let anthropic = ProviderCatalog.makeProvider(for: .anthropic)!
+        let anthropicData = Data(
+            #"{"data":[{"id":"claude-opus-test","display_name":"Claude Opus","capabilities":{"effort":{"low":{"supported":true},"medium":{"supported":true},"high":{"supported":true},"xhigh":{"supported":false},"max":{"supported":true}}}}]}"#.utf8
+        )
+        let anthropicModels = try RemoteModelClient.decodeModels(anthropicData, for: anthropic)
+        #expect(anthropicModels.first?.reasoningEfforts == [.low, .medium, .high, .max])
+    }
+
+    @MainActor
+    @Test
     func remoteProviderModelsAreTransientAfterDiscovery() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)

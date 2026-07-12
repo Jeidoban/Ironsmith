@@ -18,25 +18,33 @@ extension InferenceStore {
             provider: provider,
             context: resolutionContext
         )
+        let reasoningEffort = ToolReasoningSupport.effectiveEffort(
+            requested: generationPreferences.reasoningEffort,
+            model: selectedModel,
+            provider: provider
+        )
         let shouldRefreshIronsmithCredits = provider?.kind == .ironsmith
         return AgentLanguageModelContext(
             codingAgent: ToolGenerationOptionsResolver.stageConfiguration(
                 for: .codingAgent,
                 model: selectedModel,
                 provider: provider,
-                languageModel: languageModel
+                languageModel: languageModel,
+                reasoningEffort: reasoningEffort
             ),
             promptRefinement: ToolGenerationOptionsResolver.stageConfiguration(
                 for: .promptRefinement,
                 model: selectedModel,
                 provider: provider,
-                languageModel: languageModel
+                languageModel: languageModel,
+                reasoningEffort: reasoningEffort
             ),
             metadata: ToolGenerationOptionsResolver.stageConfiguration(
                 for: .metadata,
                 model: selectedModel,
                 provider: provider,
-                languageModel: languageModel
+                languageModel: languageModel,
+                reasoningEffort: reasoningEffort
             ),
             pipelineConfiguration: pipelineConfiguration(for: selectedModel, codingAgent: codingAgent),
             promptRefinementEnabled: generationPreferences.generatedPromptRefinementEnabled,
@@ -46,6 +54,7 @@ extension InferenceStore {
                 provider: provider,
                 codingAgent: codingAgent
             ),
+            reasoningEffort: reasoningEffort,
             afterLanguageModelInvocation: { [weak self] in
                 guard shouldRefreshIronsmithCredits else { return }
                 await self?.refreshIronsmithAccountSummary()

@@ -12,6 +12,7 @@ struct PromptComposerView: View {
     @Binding var sandboxPermissions: GeneratedAppSandboxPermissions
     @Binding var resourcePermissions: GeneratedAppResourcePermissions
     @Binding var codingAgentPreference: ToolCodingAgentPreference
+    @Binding var reasoningEffort: ToolReasoningEffort
     let placeholder: String
     let showsSandboxControl: Bool
     let modelPickerTitle: String
@@ -19,6 +20,7 @@ struct PromptComposerView: View {
     let isSubmitEnabled: Bool
     let isSubmitting: Bool
     let isCodexAgentSupported: Bool
+    let supportedReasoningEfforts: Set<ToolReasoningEffort>
     let isPromptFocused: FocusState<Bool>.Binding
     let onChooseModel: () -> Void
     let onSubmit: () -> Void
@@ -126,6 +128,16 @@ struct PromptComposerView: View {
                     .disabled(!isCodexAgentSupported)
                     .help("Codex currently supports OpenAI and Ironsmith models.")
             }
+
+            Menu("Reasoning") {
+                reasoningEffortButton(.default)
+                reasoningEffortButton(.low)
+                reasoningEffortButton(.medium)
+                reasoningEffortButton(.high)
+                reasoningEffortButton(.xhigh)
+                reasoningEffortButton(.max)
+            }
+            .disabled(supportedReasoningEfforts.isEmpty)
 
             if showsSandboxControl {
                 Divider()
@@ -251,6 +263,20 @@ struct PromptComposerView: View {
         }
     }
 
+    private func reasoningEffortButton(_ effort: ToolReasoningEffort) -> some View {
+        Button {
+            guard effort == .default || supportedReasoningEfforts.contains(effort) else { return }
+            reasoningEffort = effort
+        } label: {
+            if reasoningEffort == effort {
+                Label(effort.displayName, systemImage: "checkmark")
+            } else {
+                Text(effort.displayName)
+            }
+        }
+        .disabled(effort != .default && !supportedReasoningEfforts.contains(effort))
+    }
+
     private func resourcePermissionBinding(for permission: GeneratedAppResourcePermission)
         -> Binding<Bool>
     {
@@ -336,6 +362,7 @@ private struct PromptComposerPreview: View {
                 isEditing ? GeneratedAppResourcePermissions([.camera]) : .none
             ),
             codingAgentPreference: .constant(.automatic),
+            reasoningEffort: .constant(.default),
             placeholder: isEditing
                 ? "Describe changes for Clipboard Cleaner…"
                 : "Describe a new app to build…",
@@ -345,6 +372,7 @@ private struct PromptComposerPreview: View {
             isSubmitEnabled: isEditing,
             isSubmitting: false,
             isCodexAgentSupported: true,
+            supportedReasoningEfforts: [.low, .medium, .high],
             isPromptFocused: $isPromptFocused,
             onChooseModel: {},
             onSubmit: {},

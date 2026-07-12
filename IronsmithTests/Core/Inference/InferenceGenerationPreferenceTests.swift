@@ -1,5 +1,6 @@
 import AnyLanguageModel
 import Foundation
+import JSONSchema
 import SwiftData
 import Testing
 @testable import Ironsmith
@@ -39,6 +40,146 @@ extension InferenceTests {
 
         let reloadedCodexPreferences = GenerationPreferencesStore(userDefaults: userDefaults)
         #expect(reloadedCodexPreferences.codingAgentPreference == .codex)
+    }
+
+    @MainActor
+    @Test
+    func reasoningEffortDefaultsAndPersists() {
+        let suiteName = "IronsmithTests.ReasoningEffort.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(preferences.reasoningEffort == .default)
+
+        preferences.reasoningEffort = .xhigh
+        #expect(GenerationPreferencesStore(userDefaults: userDefaults).reasoningEffort == .xhigh)
+    }
+
+    @MainActor
+    @Test
+    func reasoningSupportUsesProviderSpecificCapabilities() {
+        let openAI = ProviderCatalog.makeProvider(for: .openAI)!
+        let gpt = ModelConfig(
+            identifier: "gpt-5.5",
+            displayName: "GPT-5.5",
+            providerIdentifier: openAI.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        #expect(ToolReasoningSupport.supportedEfforts(for: gpt, provider: openAI) == [
+            .low, .medium, .high, .xhigh,
+        ])
+
+        let gptPro = ModelConfig(
+            identifier: "gpt-5-pro-2025-10-06",
+            displayName: "GPT-5 Pro",
+            providerIdentifier: openAI.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        #expect(ToolReasoningSupport.supportedEfforts(for: gptPro, provider: openAI) == [.high])
+
+        let custom = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        #expect(ToolReasoningSupport.supportedEfforts(for: gpt, provider: custom) == ToolReasoningEffort.explicitCases)
+
+        let gemini = ProviderCatalog.makeProvider(for: .gemini)!
+        #expect(ToolReasoningSupport.supportedEfforts(for: gpt, provider: gemini).isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func reasoningOptionsUseProviderWireShape() {
+        let openAI = ProviderCatalog.makeProvider(for: .openAI)!
+        let openAIModel = ModelConfig(
+            identifier: "gpt-5.5",
+            displayName: "GPT-5.5",
+            providerIdentifier: openAI.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let languageModel = OpenAILanguageModel(
+            apiKey: "token",
+            model: openAIModel.identifier,
+            apiVariant: .responses
+        )
+        let openAIOptions = ToolGenerationOptionsResolver.options(
+            for: .codingAgent,
+            model: openAIModel,
+            provider: openAI,
+            languageModel: languageModel,
+            reasoningEffort: .xhigh
+        )
+        #expect(
+            openAIOptions[custom: OpenAILanguageModel.self]?.extraBody?["reasoning"]
+                == .object(["effort": .string("xhigh")])
+        )
+
+        let custom = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        custom.openAICompatibleAPIVariant = .chatCompletions
+        let customOptions = ToolGenerationOptionsResolver.options(
+            for: .codingAgent,
+            model: openAIModel,
+            provider: custom,
+            languageModel: nil,
+            reasoningEffort: .max
+        )
+        #expect(
+            customOptions[custom: OpenAILanguageModel.self]?.extraBody?["reasoning_effort"]
+                == .string("max")
+        )
+
+        let anthropic = ProviderCatalog.makeProvider(for: .anthropic)!
+        let claude = ModelConfig(
+            identifier: "claude-opus-test",
+            displayName: "Claude Opus",
+            providerIdentifier: anthropic.identifier,
+            source: .remote,
+            installState: .installed,
+            reasoningEfforts: [.low, .medium, .high, .max]
+        )
+        let anthropicOptions = ToolGenerationOptionsResolver.options(
+            for: .codingAgent,
+            model: claude,
+            provider: anthropic,
+            languageModel: nil,
+            reasoningEffort: .max
+        )
+        #expect(
+            anthropicOptions[custom: AnthropicLanguageModel.self]?.extraBody?["output_config"]
+                == .object(["effort": .string("max")])
+        )
+
+        let defaultOptions = ToolGenerationOptionsResolver.options(
+            for: .codingAgent,
+            model: openAIModel,
+            provider: openAI,
+            languageModel: languageModel,
+            reasoningEffort: .default
+        )
+        #expect(defaultOptions[custom: OpenAILanguageModel.self]?.extraBody?["reasoning"] == nil)
+    }
+
+    @MainActor
+    @Test
+    func unsupportedReasoningEffortResetsToDefault() {
+        let preferences = Self.generationPreferences()
+        preferences.reasoningEffort = .xhigh
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
+        let gemini = ProviderCatalog.makeProvider(for: .gemini)!
+        let model = ModelConfig(
+            identifier: "gemini-test",
+            displayName: "Gemini",
+            providerIdentifier: gemini.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        store.providers = [gemini]
+        store.remoteModels = [model]
+
+        store.selectModel(model.selectionIdentifier)
+
+        #expect(preferences.reasoningEffort == .default)
     }
 
     @MainActor

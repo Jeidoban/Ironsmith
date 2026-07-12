@@ -45,6 +45,7 @@ nonisolated struct CodexAgentRequest: Sendable {
     let sandboxEnabled: Bool
     let userPrompt: String
     let modelIdentifier: String
+    let reasoningEffort: ToolReasoningEffort
     let authentication: CodexAgentAuthentication
     let onEvent: @Sendable (CodexAgentEvent) async -> Void
 
@@ -74,6 +75,7 @@ nonisolated struct CodexAgentRequest: Sendable {
         sandboxEnabled: Bool,
         userPrompt: String,
         modelIdentifier: String,
+        reasoningEffort: ToolReasoningEffort = .default,
         authentication: CodexAgentAuthentication,
         onEvent: @escaping @Sendable (CodexAgentEvent) async -> Void = { _ in }
     ) {
@@ -84,6 +86,7 @@ nonisolated struct CodexAgentRequest: Sendable {
         self.sandboxEnabled = sandboxEnabled
         self.userPrompt = userPrompt
         self.modelIdentifier = modelIdentifier
+        self.reasoningEffort = reasoningEffort
         self.authentication = authentication
         self.onEvent = onEvent
     }
@@ -527,6 +530,11 @@ extension CodexAgentClient {
             ])
             if let model = modelArgument(from: request.modelIdentifier) {
                 arguments.append(contentsOf: ["--model", model])
+            }
+            if request.reasoningEffort != .default {
+                arguments.append(contentsOf: [
+                    "-c", "model_reasoning_effort=\(tomlString(request.reasoningEffort.rawValue))",
+                ])
             }
             if let resumeSessionID {
                 arguments.append(contentsOf: ["resume", resumeSessionID])

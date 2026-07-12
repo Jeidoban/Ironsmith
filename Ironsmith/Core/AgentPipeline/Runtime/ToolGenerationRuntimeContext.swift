@@ -213,6 +213,7 @@ struct ToolGenerationRuntimeContext {
     let codexAgentClient: CodexAgentClient
     let codingAgentModelIdentifier: String
     let codexAgentAuthentication: CodexAgentAuthentication?
+    let reasoningEffort: ToolReasoningEffort
 
     var languageModel: any LanguageModel {
         languageModelInvoker.languageModel
@@ -250,6 +251,7 @@ struct ToolGenerationRuntimeContext {
         self.codexAgentClient = dependencies.codexAgentClient
         self.codingAgentModelIdentifier = languageModelContext.codingAgentModelIdentifier
         self.codexAgentAuthentication = languageModelContext.codexAgentAuthentication
+        self.reasoningEffort = languageModelContext.reasoningEffort
     }
 
     func configuration(for stage: ToolGenerationStage) -> ToolGenerationStageConfiguration {
