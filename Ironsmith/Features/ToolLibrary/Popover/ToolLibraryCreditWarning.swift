@@ -29,14 +29,11 @@ enum ToolLibraryCreditWarning {
         provider: ProviderConfig?,
         balanceCredits: Int?
     ) -> String? {
-        guard
-            let estimatedToolCredits = ToolLibraryCreditEstimate.creditsRange(
-                model: model,
-                provider: provider
-            ),
+        guard provider?.kind == .ironsmith,
+            let estimatedToolCredits = model?.estimatedToolCredits,
             let balanceCredits,
             balanceCredits > 0,
-            balanceCredits < estimatedToolCredits.upperBound
+            balanceCredits < estimatedToolCredits
         else {
             return nil
         }

@@ -16,7 +16,7 @@ extension ToolLibraryTests {
             ToolLibraryCreditWarning.message(
                 model: model,
                 provider: provider,
-                balanceCredits: 459
+                balanceCredits: 199
             ) == ToolLibraryCreditWarning.lowCreditsMessage
         )
     }
@@ -31,14 +31,14 @@ extension ToolLibraryTests {
             ToolLibraryCreditWarning.message(
                 model: model,
                 provider: provider,
-                balanceCredits: 460
+                balanceCredits: 200
             ) == nil
         )
         #expect(
             ToolLibraryCreditWarning.message(
                 model: model,
                 provider: provider,
-                balanceCredits: 461
+                balanceCredits: 201
             ) == nil
         )
     }
@@ -94,7 +94,7 @@ extension ToolLibraryTests {
             ToolLibraryCreditEstimate.creditsRange(
                 model: model,
                 provider: provider
-            ) == 31...233
+            ) == 31...303
         )
     }
 }
