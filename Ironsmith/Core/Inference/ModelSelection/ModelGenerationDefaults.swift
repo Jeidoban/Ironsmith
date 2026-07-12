@@ -44,6 +44,9 @@ nonisolated struct ModelGenerationCapabilities: Equatable, Sendable {
     }
 
     static func isOpenAICodexLanguageModel(_ languageModel: (any LanguageModel)?) -> Bool {
+        if languageModel is OpenAICodexLanguageModel {
+            return true
+        }
         guard let openAIModel = languageModel as? OpenAILanguageModel else {
             return false
         }

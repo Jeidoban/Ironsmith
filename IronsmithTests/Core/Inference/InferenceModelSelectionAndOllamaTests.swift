@@ -1,5 +1,6 @@
 import AnyLanguageModel
 import Foundation
+import JSONSchema
 import Supabase
 import SwiftData
 import Testing
@@ -198,10 +199,92 @@ extension InferenceTests {
         )
 
         let languageModel = try await client.makeLanguageModel(model, provider)
-        let openAIModel = try #require(languageModel as? OpenAILanguageModel)
+        let openAIModel = try #require(languageModel as? OpenAICodexLanguageModel)
 
         #expect(openAIModel.model == "gpt-5.5")
         #expect(openAIModel.baseURL == OpenAICodexBackend.backendBaseURL)
+        #expect(!openAIModel.usesResponsesLite)
+    }
+
+    @MainActor
+    @Test
+    func languageModelClientUsesCodexResponsesLiteHeaderFromModelMetadata() async throws {
+        let credential = OpenAICodexCredential(
+            accessToken: "codex-token",
+            accountID: "account-id"
+        )
+        let liteClient = OpenAICodexAuthClient(
+            credential: { credential },
+            signIn: { credential },
+            signOut: {},
+            validCredential: { credential },
+            discoverModels: { [] },
+            modelMetadata: { identifier in
+                OpenAICodexModel(
+                    identifier: identifier,
+                    displayName: identifier,
+                    usesResponsesLite: true
+                )
+            }
+        )
+        let regularClient = OpenAICodexAuthClient(
+            credential: { credential },
+            signIn: { credential },
+            signOut: {},
+            validCredential: { credential },
+            discoverModels: { [] },
+            modelMetadata: { _ in nil }
+        )
+
+        let liteConfiguration = try await LanguageModelClient.codexGenerationConfiguration(
+            credential: credential,
+            modelIdentifier: "gpt-5.6-luna",
+            authClient: liteClient
+        )
+        let regularConfiguration = try await LanguageModelClient.codexGenerationConfiguration(
+            credential: credential,
+            modelIdentifier: "gpt-5.5",
+            authClient: regularClient
+        )
+
+        #expect(liteConfiguration.headers["ChatGPT-Account-Id"] == "account-id")
+        #expect(liteConfiguration.headers["originator"] == OpenAICodexBackend.originator)
+        #expect(liteConfiguration.headers["User-Agent"] == OpenAICodexBackend.userAgent)
+        #expect(liteConfiguration.headers[OpenAICodexBackend.responsesLiteHeader] == "true")
+        #expect(liteConfiguration.usesResponsesLite)
+        #expect(regularConfiguration.headers["ChatGPT-Account-Id"] == "account-id")
+        #expect(regularConfiguration.headers[OpenAICodexBackend.responsesLiteHeader] == nil)
+        #expect(!regularConfiguration.usesResponsesLite)
+    }
+
+    @MainActor
+    @Test
+    func openAICodexLanguageModelAppliesResponsesLiteRequirements() {
+        let base = OpenAILanguageModel(
+            baseURL: OpenAICodexBackend.backendBaseURL,
+            apiKey: "token",
+            model: "gpt-5.6-luna",
+            apiVariant: .responses
+        )
+        let model = OpenAICodexLanguageModel(base: base, usesResponsesLite: true)
+        var options = GenerationOptions()
+        var custom = OpenAILanguageModel.CustomGenerationOptions()
+        custom.extraBody = [
+            "reasoning": .object(["effort": .string("high")])
+        ]
+        options[custom: OpenAILanguageModel.self] = custom
+
+        let prepared = model.preparedGenerationOptions(options)
+        let preparedCustom = prepared[custom: OpenAILanguageModel.self]
+
+        #expect(preparedCustom?.parallelToolCalls == false)
+        #expect(
+            preparedCustom?.extraBody?["reasoning"]
+                == .object([
+                    "context": .string("all_turns"),
+                    "effort": .string("high"),
+                ])
+        )
     }
 
     @MainActor

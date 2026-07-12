@@ -9,8 +9,12 @@ nonisolated enum OpenAICodexBackend {
     static let originator = "codex_cli_rs"
     static let backendBaseURL = URL(string: "https://chatgpt.com/backend-api/codex/")!
     static let modelsURL = URL(string: "https://chatgpt.com/backend-api/codex/models")!
+    static let responsesLiteHeader = "X-OpenAI-Internal-Codex-Responses-Lite"
     static var modelCatalogClientVersion: String {
         CodexCLIClient.bundledVersion() ?? "0.142.5"
+    }
+    static var userAgent: String {
+        "\(originator)/\(modelCatalogClientVersion)"
     }
     static let modelIdentifierPrefix = "codex:"
 
@@ -46,6 +50,7 @@ nonisolated struct OpenAICodexCredential: Codable, Equatable, Sendable {
 nonisolated struct OpenAICodexModel: Equatable, Sendable {
     var identifier: String
     var displayName: String
+    var usesResponsesLite = false
 }
 
 extension ModelConfig {
