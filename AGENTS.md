@@ -13,6 +13,7 @@
 - Run tests with `script/test.sh`. Pass normal `swift test` filters through the script when narrowing a failure.
 - Use `script/clean.sh` to remove SwiftPM and staged build outputs.
 - Release, signing, packaging, and notarization workflows live in `script/build.sh`, `script/package.sh`, and `script/release.sh`; consult their usage text rather than duplicating flags here.
+- Release apps are architecture-specific and bundle only the matching Codex CLI payload. Release builds require an explicit architecture; `IRONSMITH_CODEX_VERSION` or `--codex-version` controls the bundled version.
 - Build-time backend values are documented in `Config/.env.example`; `Config/.env` is local and must not be committed.
 - Tests use Swift Testing (`@Test`, `#expect`, `#require`), not XCTest.
 
@@ -33,6 +34,7 @@
 - Views render state and send intent. Observable stores coordinate workflows. Repositories own persisted-data access. Small closure clients wrap network, process, Keychain, filesystem, and launch effects.
 - Production dependencies are assembled by the relevant `Dependencies.live` or client factory. Tests should inject lightweight fake clients directly rather than adding test-only abstraction layers.
 - `InferenceStore` owns shared provider, model, account, and generation-preference state. `ToolLibraryStore` owns popover-specific selection, prompt, generation, launch, export, and restore state.
+- Model invocation is stage-based (`codingAgent`, `promptRefinement`, and `metadata`). Route pipeline calls through `ToolLanguageModelInvoker` so streaming, generation options, and lifecycle hooks stay consistent.
 - Keep network, Keychain, process, and filesystem effects out of SwiftUI views and SwiftData repositories.
 - Prefer request/configuration objects when an operation needs several related values. Avoid compatibility initializers or forwarding wrappers created only to keep old tests compiling; update tests to the current API.
 
@@ -41,6 +43,7 @@
 - Ironsmith is a menu-bar-first macOS app. `IronsmithApplicationController` wires persistence, shared stores, routing, settings, and `IronsmithMenuBarController`.
 - The main menu bar surface is an AppKit `NSStatusItem` and `NSPopover`. Generated tools may independently use SwiftUI window or `MenuBarExtra` app entries.
 - Keep startup wiring in the application layer and feature state in its owning store. Do not introduce a template-style main window flow without an intentional product change.
+- Startup installs the curated macOS Codex plugin opportunistically; failure is diagnostic-only and retries on the next launch.
 - Prefer native macOS SwiftUI controls and small responsibility-focused views. Reuse existing provider/model presentation helpers instead of duplicating display cleanup.
 
 ## Inference
@@ -48,18 +51,22 @@
 - `ProviderCatalog` is the source of truth for built-in provider behavior and presentation metadata. Do not duplicate provider tables in views or tests.
 - `InferenceRepository` persists providers and local/installable models. Provider-discovered models remain transient unless persistence is deliberately redesigned.
 - Treat `persistedModels`, `remoteModels`, and their combined available-model view as distinct concepts at call sites.
-- API keys go through the credential client/Keychain path. Ironsmith account, session, and credit behavior goes through `IronsmithAccountClient`.
+- Provider API keys go through the credential client/Keychain path. ChatGPT/Codex OAuth is the exception: Ironsmith owns PKCE and refreshes the private `CODEX_HOME` `auth.json` that the bundled CLI shares. Never log or send those tokens through the backend.
 - Provider-specific discovery belongs in `RemoteModelClient`; provider-to-model-wrapper construction belongs in `LanguageModelClient`.
+- Custom OpenAI-compatible providers persist their API variant. Keep transport-aware Codex support, model-family detection, automatic agent routing, and reasoning capability decisions in their centralized inference helpers rather than views.
 - User generation preferences and selected-model persistence belong in their dedicated stores, not provider records or views.
 
 ## Agent Pipeline
 
 - The active runtime is single-file: the model creates or edits only `Sources/<ExecutableName>/ContentView.swift`. Ironsmith owns `Package.swift` and the fixed app entry source.
+- Spark, Flame, and Codex are first-class coding-agent choices on one preference axis. Automatic selection is resolved centrally from provider transport, model family, operation, and source context.
 - Generated tools are SwiftPM packages under `IronsmithPaths.toolsDirectory`. Derive package files and metadata paths through `ToolPackageLayout`; do not reconstruct them at call sites.
 - Create flow prepares metadata and icon assets early, generates source, cleans/formats it, compiles and repairs it, then builds the internal app bundle.
 - Edit flow must preserve the original source and settings until the edited package builds successfully. Keep version staging and restore behavior in `ToolVersionBackupClient`.
 - `ContentViewSourceCleanup` owns model-output normalization. Compiler-driven deterministic repairs should be general Swift/SwiftUI fixes; model repairs must remain validated changes confined to `ContentView.swift`.
 - Keep repair thresholds and strategy selection centralized in `ToolGenerationRepairPolicy`, `ToolRepairStrategy`, and inference model selection logic.
+- Codex runs through the bundled CLI after prompt refinement, owns its build/repair attempts, and does not enter the Spark/Flame repair loop. Ironsmith must still restore protected files, validate `ContentView.swift`, and perform final build verification.
+- Codex stdout is persisted as tool-local JSONL under `.codex/` and tailed for diagnostics and Agent Output. Keep raw command output out of diagnostics, preserve transcript/session metadata, and avoid retaining complete transcripts in memory.
 - `ToolAppBundleClient` owns internal/exported app bundle construction, signing, entitlements, icon copying, verification, replacement, and launch support. Do not duplicate bundle assembly elsewhere.
 - Preserve cancellation/resume state through the generation lifecycle. `ToolLibraryStore` is responsible for reconciling persisted tool state with generation results and failures.
 - Diagnostics use `AgentDiagnosticsLog`; keep logs compact and avoid dumping full model responses or secrets.
