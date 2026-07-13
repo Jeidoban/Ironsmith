@@ -623,11 +623,12 @@ struct SingleFileToolGenerationRuntime {
         layout: ToolPackageLayout,
         baselines: [String: String]
     ) throws {
-        for (path, baseline) in baselines {
+        var changedBaselinePaths: [String] = []
+        for path in baselines.keys.sorted() {
+            guard let baseline = baselines[path] else { continue }
             let current = try context.readIfPresent(path, packageRootURL: layout.packageRootURL)
             if current != baseline {
-                try context.write(baseline, to: path, packageRootURL: layout.packageRootURL)
-                throw CodexAgentError.protectedFileChanged(path)
+                changedBaselinePaths.append(path)
             }
         }
 
@@ -635,9 +636,42 @@ struct SingleFileToolGenerationRuntime {
             layout.appEntrySourcePath,
             layout.contentViewSourcePath,
         ]
-        for swiftPath in try swiftSourcePaths(in: layout) where !allowedSwiftPaths.contains(swiftPath) {
-            throw CodexAgentError.protectedFileChanged(swiftPath)
+        let disallowedSwiftPaths = try swiftSourcePaths(in: layout)
+            .filter { !allowedSwiftPaths.contains($0) }
+            .sorted()
+
+        guard let violation = (changedBaselinePaths + disallowedSwiftPaths).first else {
+            return
         }
+
+        var cleanupError: Error?
+        for path in changedBaselinePaths {
+            do {
+                try context.write(
+                    baselines[path] ?? "",
+                    to: path,
+                    packageRootURL: layout.packageRootURL
+                )
+            } catch {
+                cleanupError = cleanupError ?? error
+            }
+        }
+        for path in disallowedSwiftPaths {
+            do {
+                let url = try context.packageFileURL(
+                    for: path,
+                    packageRootURL: layout.packageRootURL
+                )
+                try context.fileClient.removeItemIfExists(url)
+            } catch {
+                cleanupError = cleanupError ?? error
+            }
+        }
+
+        if let cleanupError {
+            throw cleanupError
+        }
+        throw CodexAgentError.protectedFileChanged(violation)
     }
 
     private func swiftSourcePaths(in layout: ToolPackageLayout) throws -> [String] {

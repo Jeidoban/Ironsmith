@@ -503,7 +503,7 @@ extension CodexAgentClient {
             var environment = swiftBuildWorkspace.environment
             switch request.authentication {
             case .apiKey(let apiKey):
-                environment["OPENAI_API_KEY"] = apiKey
+                environment["CODEX_API_KEY"] = apiKey
             case .chatGPTLogin:
                 break
             case .customResponsesProvider(let provider):

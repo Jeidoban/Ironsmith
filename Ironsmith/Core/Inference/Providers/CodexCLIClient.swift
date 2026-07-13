@@ -338,7 +338,7 @@ extension CodexCLIClient {
                 } catch {
                     try? stdout.close()
                     tailCompletion.finish()
-                    _ = try? await stdoutTask.value
+                    try? await stdoutTask.value
                     throw error
                 }
 
@@ -350,9 +350,10 @@ extension CodexCLIClient {
                 process.waitUntilExit()
                 try? stdout.close()
                 tailCompletion.finish()
+                try await stdoutTask.value
 
                 return CodexCLIProcessResult(
-                    stdout: try await stdoutTask.value,
+                    stdout: "",
                     stderr: try await stderrText,
                     terminationStatus: process.terminationStatus
                 )
@@ -402,11 +403,10 @@ extension CodexCLIClient {
         from url: URL,
         completion: CodexCLIFileTailCompletion,
         onLine: @escaping @Sendable (String) async -> Void
-    ) async throws -> String {
+    ) async throws {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
 
-        var allData = Data()
         var lineData = Data()
 
         while true {
@@ -418,14 +418,13 @@ extension CodexCLIClient {
                         let line = String(data: lineData, encoding: .utf8) ?? ""
                         await onLine(line.trimmingTrailingCarriageReturn())
                     }
-                    return String(data: allData, encoding: .utf8) ?? ""
+                    return
                 }
                 try await Task.sleep(nanoseconds: 100_000_000)
                 continue
             }
 
             for byte in data {
-                allData.append(byte)
                 if byte == 10 {
                     let line = String(data: lineData, encoding: .utf8) ?? ""
                     await onLine(line.trimmingTrailingCarriageReturn())

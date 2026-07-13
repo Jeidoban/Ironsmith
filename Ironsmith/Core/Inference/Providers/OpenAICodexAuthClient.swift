@@ -46,7 +46,7 @@ extension OpenAICodexAuthClient {
                 try await tokenStore.validCredential()
             },
             discoverModels: {
-                try await modelCatalog.models()
+                try await modelCatalog.refresh()
             },
             modelMetadata: { identifier in
                 try await modelCatalog.model(identifier: identifier)
@@ -253,7 +253,7 @@ extension OpenAICodexAuthClient {
     }
 }
 
-private actor OpenAICodexModelCatalog {
+actor OpenAICodexModelCatalog {
     private let fetchModels: @Sendable () async throws -> [OpenAICodexModel]
     private var cachedModels: [OpenAICodexModel]?
 
@@ -266,6 +266,10 @@ private actor OpenAICodexModelCatalog {
             return cachedModels
         }
 
+        return try await refresh()
+    }
+
+    func refresh() async throws -> [OpenAICodexModel] {
         let models = try await fetchModels()
         cachedModels = models
         return models

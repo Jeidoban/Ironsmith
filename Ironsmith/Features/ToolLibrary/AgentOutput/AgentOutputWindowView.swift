@@ -581,35 +581,45 @@ private struct AgentOutputWorkingRow: View {
 extension AttributedString {
     fileprivate mutating func resolveFileLinks(relativeTo packageRootURL: URL) {
         for run in runs {
-            guard let link = run.link,
-                let resolvedURL = AgentOutputFileLinkResolver.resolvedURL(
-                    for: link,
-                    relativeTo: packageRootURL
-                )
-            else { continue }
-            self[run.range].link = resolvedURL
+            guard let link = run.link else { continue }
+            self[run.range].link = AgentOutputFileLinkResolver.resolvedURL(
+                for: link,
+                relativeTo: packageRootURL
+            )
         }
     }
 }
 
-private enum AgentOutputFileLinkResolver {
+enum AgentOutputFileLinkResolver {
     nonisolated static func resolvedURL(for link: URL, relativeTo packageRootURL: URL) -> URL? {
-        if link.isFileURL {
+        let scheme = link.scheme?.lowercased()
+        if scheme == "http" || scheme == "https" {
             return link
         }
 
-        guard link.scheme == nil else {
+        let candidateURL: URL
+        if link.isFileURL {
+            candidateURL = link
+        } else {
+            guard scheme == nil else { return nil }
+
+            let rawPath = link.relativeString.removingPercentEncoding ?? link.relativeString
+            guard !rawPath.isEmpty else { return nil }
+
+            if rawPath.hasPrefix("/") {
+                candidateURL = URL(fileURLWithPath: rawPath)
+            } else {
+                candidateURL = packageRootURL.appendingPathComponent(rawPath)
+            }
+        }
+
+        let packageRoot = packageRootURL.standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = candidateURL.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPath = packageRoot.path
+        guard candidate.path == rootPath || candidate.path.hasPrefix(rootPath + "/") else {
             return nil
         }
-
-        let rawPath = link.relativeString.removingPercentEncoding ?? link.relativeString
-        guard !rawPath.isEmpty else { return nil }
-
-        if rawPath.hasPrefix("/") {
-            return URL(fileURLWithPath: rawPath)
-        }
-
-        return packageRootURL.appendingPathComponent(rawPath)
+        return candidate
     }
 }
 

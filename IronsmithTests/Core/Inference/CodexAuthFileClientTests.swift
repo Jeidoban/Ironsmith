@@ -366,10 +366,28 @@ extension InferenceTests {
 
         let transcript = try String(contentsOf: stdoutURL, encoding: .utf8)
         #expect(result.terminationStatus == 0)
-        #expect(result.stdout == "\(firstLine)\n\(secondLine)\n")
-        #expect(transcript == result.stdout)
+        #expect(result.stdout.isEmpty)
+        #expect(transcript == "\(firstLine)\n\(secondLine)\n")
         #expect(await lineRecorder.stdout == [firstLine, secondLine])
         #expect(await lineRecorder.stderr.isEmpty)
+    }
+
+    @Test
+    func codexModelCatalogRefreshesDiscoveryButCachesMetadata() async throws {
+        let firstModel = OpenAICodexModel(identifier: "gpt-5.5", displayName: "GPT-5.5")
+        let secondModel = OpenAICodexModel(identifier: "gpt-5.6", displayName: "GPT-5.6")
+        let source = CodexModelCatalogSource(batches: [[firstModel], [secondModel]])
+        let catalog = OpenAICodexModelCatalog {
+            await source.next()
+        }
+
+        #expect(try await catalog.models() == [firstModel])
+        #expect(try await catalog.model(identifier: firstModel.identifier) == firstModel)
+        #expect(await source.fetchCount == 1)
+
+        #expect(try await catalog.refresh() == [secondModel])
+        #expect(try await catalog.model(identifier: secondModel.identifier) == secondModel)
+        #expect(await source.fetchCount == 2)
     }
 
     @Test
@@ -463,5 +481,20 @@ private actor CodexCLILineRecorder {
 
     func recordStderr(_ line: String) {
         stderr.append(line)
+    }
+}
+
+private actor CodexModelCatalogSource {
+    private let batches: [[OpenAICodexModel]]
+    private(set) var fetchCount = 0
+
+    init(batches: [[OpenAICodexModel]]) {
+        self.batches = batches
+    }
+
+    func next() -> [OpenAICodexModel] {
+        let index = min(fetchCount, batches.count - 1)
+        fetchCount += 1
+        return batches[index]
     }
 }

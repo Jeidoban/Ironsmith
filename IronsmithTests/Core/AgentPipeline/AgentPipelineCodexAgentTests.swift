@@ -90,7 +90,8 @@ extension AgentPipelineTests {
         #expect(prompt.contains("Ironsmith will clean up the temporary workspace after Codex exits."))
         #expect(prompt.contains("Internet searches are encouraged"))
         #expect(!arguments.contains("--disable"))
-        #expect(environment["OPENAI_API_KEY"] == "sk-test")
+        #expect(environment["CODEX_API_KEY"] == "sk-test")
+        #expect(environment["OPENAI_API_KEY"] == nil)
         let codexHomeDirectory = try #require(environment["HOME"])
         #expect(codexHomeDirectory.hasPrefix("\(temporaryDirectory.path)/ironsmith-codex-swift-"))
         #expect(codexHomeDirectory.hasSuffix("/home"))
@@ -673,6 +674,7 @@ extension AgentPipelineTests {
         )
 
         #expect(await authCapture.validCredentialCallCount == 1)
+        #expect(try #require(await cliCapture.environment)["CODEX_API_KEY"] == nil)
         #expect(try #require(await cliCapture.environment)["OPENAI_API_KEY"] == nil)
     }
 
@@ -817,13 +819,25 @@ extension AgentPipelineTests {
     func codexRuntimeRejectsProtectedPackageFileChanges() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+        let requestCapture = CodexAgentRequestCapture()
 
         let codexAgentClient = CodexAgentClient(run: { request in
+            await requestCapture.record(request)
             let layout = ToolPackageLayout(
                 packageRootURL: request.packageRootURL,
                 executableName: request.executableName
             )
             try "changed".write(to: layout.packageManifestURL, atomically: true, encoding: .utf8)
+            try "changed".write(
+                to: try layout.packageFileURL(for: layout.appEntrySourcePath),
+                atomically: true,
+                encoding: .utf8
+            )
+            try "struct Extra {}".write(
+                to: try layout.packageFileURL(for: "Sources/\(request.executableName)/Extra.swift"),
+                atomically: true,
+                encoding: .utf8
+            )
             try """
             import SwiftUI
             struct ContentView: View { var body: some View { Text("bad") } }
@@ -855,6 +869,65 @@ extension AgentPipelineTests {
         await #expect(throws: CodexAgentError.protectedFileChanged("Package.swift")) {
             _ = try await runtime.generateTool(for: "Make a Codex demo", settings: .default)
         }
+
+        let request = try #require(await requestCapture.request)
+        let layout = ToolPackageLayout(
+            packageRootURL: request.packageRootURL,
+            executableName: request.executableName
+        )
+        #expect(
+            try String(contentsOf: layout.packageManifestURL, encoding: .utf8)
+                == layout.packageManifestContent()
+        )
+        #expect(
+            try String(
+                contentsOf: layout.packageFileURL(for: layout.appEntrySourcePath),
+                encoding: .utf8
+            ) == layout.fixedAppEntrySource(displayName: "Codex Demo", settings: .default)
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: try layout.packageFileURL(
+                    for: "Sources/\(request.executableName)/Extra.swift"
+                ).path
+            )
+        )
+    }
+
+    @Test
+    func agentOutputFileLinksStayInsideToolPackage() throws {
+        let packageRoot = try Self.makeTemporaryDirectory().standardizedFileURL
+        defer { try? FileManager.default.removeItem(at: packageRoot) }
+        let sourceURL = packageRoot.appendingPathComponent("Sources/App/ContentView.swift")
+        let webURL = try #require(URL(string: "https://example.com/docs"))
+
+        #expect(
+            AgentOutputFileLinkResolver.resolvedURL(
+                for: try #require(URL(string: "Sources/App/ContentView.swift")),
+                relativeTo: packageRoot
+            ) == sourceURL
+        )
+        #expect(
+            AgentOutputFileLinkResolver.resolvedURL(
+                for: sourceURL,
+                relativeTo: packageRoot
+            ) == sourceURL
+        )
+        #expect(
+            AgentOutputFileLinkResolver.resolvedURL(
+                for: packageRoot.appendingPathComponent("../outside.swift"),
+                relativeTo: packageRoot
+            ) == nil
+        )
+        #expect(
+            AgentOutputFileLinkResolver.resolvedURL(
+                for: try #require(URL(string: "command://run")),
+                relativeTo: packageRoot
+            ) == nil
+        )
+        #expect(
+            AgentOutputFileLinkResolver.resolvedURL(for: webURL, relativeTo: packageRoot) == webURL
+        )
     }
 }
 
