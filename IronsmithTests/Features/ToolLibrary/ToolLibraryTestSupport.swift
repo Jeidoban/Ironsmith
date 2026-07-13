@@ -163,10 +163,11 @@ extension ToolLibraryTests {
 
     static func remoteModel(
         provider: ProviderConfig,
+        identifier: String = "test/model",
         estimatedToolCredits: Int?
     ) -> ModelConfig {
         ModelConfig(
-            identifier: "test/model",
+            identifier: identifier,
             displayName: "Test Model",
             providerIdentifier: provider.identifier,
             source: .remote,

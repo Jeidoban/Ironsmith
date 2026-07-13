@@ -173,7 +173,7 @@ extension AgentPipelineTests {
                 await promptCapture.record(prompt)
                 return continuation
             },
-            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
@@ -255,7 +255,7 @@ extension AgentPipelineTests {
                 await promptCapture.record(prompt)
                 return freshPatch
             },
-            pipelineConfiguration: .small(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
@@ -334,7 +334,7 @@ extension AgentPipelineTests {
                 Issue.record("Resume from repair should build the salvaged source before asking for a model patch.")
                 return ""
             },
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 2)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 2)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
@@ -398,7 +398,7 @@ extension AgentPipelineTests {
                 partialResponse: partialPatch,
                 probe: probe
             ),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 2)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 2)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),

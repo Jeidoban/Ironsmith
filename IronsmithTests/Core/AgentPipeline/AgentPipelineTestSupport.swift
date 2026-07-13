@@ -13,7 +13,7 @@ extension AgentPipelineTests {
     static func makeRuntime(
         languageModel: any LanguageModel,
         generationOptions: GenerationOptions = GenerationOptions(),
-        pipelineConfiguration: ToolGenerationPipelineConfiguration = .small(repairStrategy: .deterministicOnly),
+        pipelineConfiguration: ToolGenerationPipelineConfiguration = .ironsmithSpark(repairStrategy: .deterministicOnly),
         toolsDirectoryURL: URL,
         fileClient: AgentFileClient = .live,
         processClient: SwiftPackageProcessClient = .live,
@@ -23,6 +23,9 @@ extension AgentPipelineTests {
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         promptRefinementEnabled: Bool = true,
         versionBackupClient: ToolVersionBackupClient = .live,
+        codexAgentClient: CodexAgentClient = .unconfigured,
+        codingAgentModelIdentifier: String = "",
+        codexAgentAuthentication: CodexAgentAuthentication? = nil,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) -> SingleFileToolGenerationRuntime {
         let languageModelContext = AgentLanguageModelContext(
@@ -30,6 +33,8 @@ extension AgentPipelineTests {
             generationOptions: generationOptions,
             pipelineConfiguration: pipelineConfiguration,
             promptRefinementEnabled: promptRefinementEnabled,
+            codingAgentModelIdentifier: codingAgentModelIdentifier,
+            codexAgentAuthentication: codexAgentAuthentication,
             afterLanguageModelInvocation: afterLanguageModelInvocation
         )
         let dependencies = ToolGenerationRuntimeDependencies(
@@ -40,7 +45,8 @@ extension AgentPipelineTests {
             iconClient: iconClient,
             metadataClient: metadataClient,
             promptRefinementClient: promptRefinementClient,
-            versionBackupClient: versionBackupClient
+            versionBackupClient: versionBackupClient,
+            codexAgentClient: codexAgentClient
         )
         return SingleFileToolGenerationRuntime(
             context: ToolGenerationRuntimeContext(

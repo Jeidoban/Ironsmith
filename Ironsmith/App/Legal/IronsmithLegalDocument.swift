@@ -5,16 +5,40 @@ struct IronsmithLegalDocument: Identifiable, Equatable {
         id: "gplv3",
         title: "GNU GPLv3",
         resourceName: "GPLv3",
-        resourceExtension: "txt"
+        resourceExtension: "txt",
+        resourceSubdirectory: nil
+    )
+
+    static let codexApache2 = Self(
+        id: "openai-codex-apache-2",
+        title: "OpenAI Codex Apache 2.0 License",
+        resourceName: "OpenAI-Codex-Apache-2.0",
+        resourceExtension: "txt",
+        resourceSubdirectory: "ThirdPartyLicenses"
+    )
+
+    static let codexNotice = Self(
+        id: "openai-codex-notice",
+        title: "OpenAI Codex Notice",
+        resourceName: "OpenAI-Codex-NOTICE",
+        resourceExtension: "txt",
+        resourceSubdirectory: "ThirdPartyLicenses"
     )
 
     let id: String
     let title: String
     let resourceName: String
     let resourceExtension: String
+    let resourceSubdirectory: String?
 
     func text(bundle: Bundle = .main) -> String {
-        text(resourceURL: bundle.url(forResource: resourceName, withExtension: resourceExtension))
+        text(
+            resourceURL: bundle.url(
+                forResource: resourceName,
+                withExtension: resourceExtension,
+                subdirectory: resourceSubdirectory
+            )
+        )
     }
 
     func text(resourceURL: URL?) -> String {

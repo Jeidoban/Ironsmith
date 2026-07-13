@@ -3,6 +3,7 @@
 //  Ironsmith
 //
 
+import AppKit
 import SwiftUI
 
 struct PromptComposerView: View {
@@ -11,13 +12,16 @@ struct PromptComposerView: View {
     @Binding var appKind: ToolAppKind
     @Binding var sandboxPermissions: GeneratedAppSandboxPermissions
     @Binding var resourcePermissions: GeneratedAppResourcePermissions
-    @Binding var agentPipelineProfile: AgentPipelineProfilePreference
+    @Binding var codingAgentPreference: ToolCodingAgentPreference
+    @Binding var reasoningEffort: ToolReasoningEffort
     let placeholder: String
     let showsSandboxControl: Bool
     let modelPickerTitle: String
     let isModelPickerEnabled: Bool
     let isSubmitEnabled: Bool
     let isSubmitting: Bool
+    let isCodexAgentSupported: Bool
+    let supportedReasoningEfforts: Set<ToolReasoningEffort>
     let isPromptFocused: FocusState<Bool>.Binding
     let onChooseModel: () -> Void
     let onSubmit: () -> Void
@@ -117,13 +121,47 @@ struct PromptComposerView: View {
                 }
             }
 
-            Picker("Coding Agent", selection: $agentPipelineProfile) {
-                Text(AgentPipelineProfilePreference.automatic.displayName)
-                    .tag(AgentPipelineProfilePreference.automatic)
-                Text(AgentPipelineProfilePreference.largeModel.displayName)
-                    .tag(AgentPipelineProfilePreference.largeModel)
-                Text(AgentPipelineProfilePreference.smallModel.displayName)
-                    .tag(AgentPipelineProfilePreference.smallModel)
+            Menu("Coding Agent") {
+                checkedSelectionButton(
+                    .automatic,
+                    selection: $codingAgentPreference,
+                    displayName: ToolCodingAgentPreference.automatic.displayName
+                )
+                checkedSelectionButton(
+                    .ironsmithSpark,
+                    selection: $codingAgentPreference,
+                    displayName: ToolCodingAgentPreference.ironsmithSpark.displayName
+                )
+                checkedSelectionButton(
+                    .ironsmithFlame,
+                    selection: $codingAgentPreference,
+                    displayName: ToolCodingAgentPreference.ironsmithFlame.displayName
+                )
+                checkedSelectionButton(
+                    .codex,
+                    selection: $codingAgentPreference,
+                    displayName: ToolCodingAgentPreference.codex.displayName,
+                    isEnabled: isCodexAgentSupported
+                )
+            }
+
+            if !supportedReasoningEfforts.isEmpty {
+                Menu("Reasoning") {
+                    checkedSelectionButton(
+                        .default,
+                        selection: $reasoningEffort,
+                        displayName: ToolReasoningEffort.default.displayName
+                    )
+                    ForEach(ToolReasoningEffort.allCases.filter { $0 != .default }, id: \.self) {
+                        effort in
+                        checkedSelectionButton(
+                            effort,
+                            selection: $reasoningEffort,
+                            displayName: effort.displayName,
+                            isEnabled: supportedReasoningEfforts.contains(effort)
+                        )
+                    }
+                }
             }
 
             if showsSandboxControl {
@@ -160,6 +198,11 @@ struct PromptComposerView: View {
         .accessibilityLabel("Generation settings")
         .accessibilityIdentifier("generation-settings-menu")
         .disabled(isSubmitting)
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) {
+            notification in
+            guard let menu = notification.object as? NSMenu else { return }
+            CodingAgentMenuHelp.apply(to: menu)
+        }
     }
 
     private var modelPickerButton: some View {
@@ -237,6 +280,25 @@ struct PromptComposerView: View {
         "Controls whether generated apps include App Sandbox entitlements."
     }
 
+    private func checkedSelectionButton<Value: Equatable>(
+        _ value: Value,
+        selection: Binding<Value>,
+        displayName: String,
+        isEnabled: Bool = true
+    ) -> some View {
+        Button {
+            guard isEnabled else { return }
+            selection.wrappedValue = value
+        } label: {
+            if selection.wrappedValue == value {
+                Label(displayName, systemImage: "checkmark")
+            } else {
+                Text(displayName)
+            }
+        }
+        .disabled(!isEnabled)
+    }
+
     private func resourcePermissionBinding(for permission: GeneratedAppResourcePermission)
         -> Binding<Bool>
     {
@@ -291,6 +353,28 @@ struct PromptComposerView: View {
     }
 }
 
+private enum CodingAgentMenuHelp {
+    private static let tooltips: [String: String] = [
+        ToolCodingAgentPreference.ironsmithSpark.displayName:
+            "Best for simple apps using on-device AI.",
+        ToolCodingAgentPreference.ironsmithFlame.displayName:
+            "Best for moderately complex apps using cloud AI. More token-efficient than Codex for smaller apps, but less efficient for complex ones.",
+        ToolCodingAgentPreference.codex.displayName:
+            "Best for complex, feature-rich apps. Typically uses 1.5-2x more tokens than Flame.",
+    ]
+
+    static func apply(to menu: NSMenu) {
+        for item in menu.items {
+            if let tooltip = tooltips[item.title] {
+                item.toolTip = tooltip
+            }
+            if let submenu = item.submenu {
+                apply(to: submenu)
+            }
+        }
+    }
+}
+
 private enum PromptEditorLayout {
     static let baseHeight: CGFloat = 72
     static let lineHeightIncrement: CGFloat = 16
@@ -321,7 +405,8 @@ private struct PromptComposerPreview: View {
             resourcePermissions: .constant(
                 isEditing ? GeneratedAppResourcePermissions([.camera]) : .none
             ),
-            agentPipelineProfile: .constant(.automatic),
+            codingAgentPreference: .constant(.automatic),
+            reasoningEffort: .constant(.default),
             placeholder: isEditing
                 ? "Describe changes for Clipboard Cleaner…"
                 : "Describe a new app to build…",
@@ -330,6 +415,8 @@ private struct PromptComposerPreview: View {
             isModelPickerEnabled: true,
             isSubmitEnabled: isEditing,
             isSubmitting: false,
+            isCodexAgentSupported: true,
+            supportedReasoningEfforts: [.low, .medium, .high],
             isPromptFocused: $isPromptFocused,
             onChooseModel: {},
             onSubmit: {},

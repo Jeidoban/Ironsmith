@@ -428,8 +428,8 @@ extension InferenceTests {
         let data = """
         {
           "models": [
-            {"id": "gpt-5.5", "display_name": "GPT-5.5"},
-            {"slug": "o4-mini", "title": "o4 mini"},
+            {"id": "gpt-5.5", "display_name": "GPT-5.5", "use_responses_lite": true},
+            {"slug": "o4-mini", "title": "o4 mini", "use_responses_lite": false},
             {"id": "codex-auto-review", "display_name": "Codex Auto Review"},
             {"id": "gpt-image-1", "display_name": "GPT Image"},
             {"id": "text-embedding-3-small", "display_name": "Embedding"},
@@ -442,6 +442,7 @@ extension InferenceTests {
 
         #expect(models.map(\.identifier) == ["gpt-5.5", "o4-mini"])
         #expect(models.map(\.displayName) == ["GPT-5.5", "o4 mini"])
+        #expect(models.map(\.usesResponsesLite) == [true, false])
     }
 
     @MainActor

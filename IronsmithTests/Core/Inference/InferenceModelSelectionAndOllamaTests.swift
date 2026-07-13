@@ -1,5 +1,6 @@
 import AnyLanguageModel
 import Foundation
+import JSONSchema
 import Supabase
 import SwiftData
 import Testing
@@ -8,11 +9,11 @@ import Testing
 extension InferenceTests {
     @MainActor
     @Test
-    func openAIModelsDefaultToLargeModelPatchRepairStrategy() async throws {
+    func openAIModelsDefaultToCodex() async throws {
         let store = Self.dependenciesBackedStore()
         let provider = ProviderCatalog.makeProvider(for: .openAI)!
         let model = ModelConfig(
-            identifier: "gpt-test",
+            identifier: "codex:gpt-test",
             displayName: "GPT Test",
             providerIdentifier: ProviderKind.openAI.rawValue,
             source: .remote,
@@ -24,12 +25,8 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.pipelineConfiguration.profile == .largeModel)
-        #expect(
-            context.repairStrategy == .modelSearchReplace(
-                maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
-            )
-        )
+        #expect(context.pipelineConfiguration.codingAgent == .codex)
+        #expect(context.repairStrategy == .deterministicOnly)
     }
 
     @MainActor
@@ -50,7 +47,7 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.pipelineConfiguration.profile == .smallModel)
+        #expect(context.pipelineConfiguration.codingAgent == .ironsmithSpark)
         #expect(context.repairStrategy == .modelSearchReplace(maxPatchBlocksPerTurn: 3))
     }
 
@@ -72,7 +69,7 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.pipelineConfiguration.profile == .smallModel)
+        #expect(context.pipelineConfiguration.codingAgent == .ironsmithSpark)
         #expect(context.repairStrategy == .modelSearchReplace(maxPatchBlocksPerTurn: 3))
     }
 
@@ -134,6 +131,41 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func languageModelClientUsesConfiguredCustomOpenAIAPIVariant() async throws {
+        let provider = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        provider.identifier = "custom.test"
+        provider.baseURLString = "http://localhost:1234/v1"
+        let model = ModelConfig(
+            identifier: "test-model",
+            displayName: "Test Model",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let client = LanguageModelClient.live(
+            credentialClient: CredentialClient(
+                loadAPIKey: { _ in nil },
+                saveAPIKey: { _, _ in },
+                deleteAPIKey: { _ in }
+            ),
+            localModelClient: Self.fakeLocalModelClient()
+        )
+
+        provider.openAICompatibleAPIVariant = .chatCompletions
+        let chatModel = try #require(
+            try await client.makeLanguageModel(model, provider) as? OpenAILanguageModel
+        )
+        #expect(chatModel.apiVariant == .chatCompletions)
+
+        provider.openAICompatibleAPIVariant = .responses
+        let responsesModel = try #require(
+            try await client.makeLanguageModel(model, provider) as? OpenAILanguageModel
+        )
+        #expect(responsesModel.apiVariant == .responses)
+    }
+
+    @MainActor
+    @Test
     func languageModelClientBuildsOpenAICodexLanguageModel() async throws {
         let provider = ProviderCatalog.makeProvider(for: .openAI)!
         let model = ModelConfig(
@@ -167,10 +199,92 @@ extension InferenceTests {
         )
 
         let languageModel = try await client.makeLanguageModel(model, provider)
-        let openAIModel = try #require(languageModel as? OpenAILanguageModel)
+        let openAIModel = try #require(languageModel as? OpenAICodexLanguageModel)
 
         #expect(openAIModel.model == "gpt-5.5")
         #expect(openAIModel.baseURL == OpenAICodexBackend.backendBaseURL)
+        #expect(!openAIModel.usesResponsesLite)
+    }
+
+    @MainActor
+    @Test
+    func languageModelClientUsesCodexResponsesLiteHeaderFromModelMetadata() async throws {
+        let credential = OpenAICodexCredential(
+            accessToken: "codex-token",
+            accountID: "account-id"
+        )
+        let liteClient = OpenAICodexAuthClient(
+            credential: { credential },
+            signIn: { credential },
+            signOut: {},
+            validCredential: { credential },
+            discoverModels: { [] },
+            modelMetadata: { identifier in
+                OpenAICodexModel(
+                    identifier: identifier,
+                    displayName: identifier,
+                    usesResponsesLite: true
+                )
+            }
+        )
+        let regularClient = OpenAICodexAuthClient(
+            credential: { credential },
+            signIn: { credential },
+            signOut: {},
+            validCredential: { credential },
+            discoverModels: { [] },
+            modelMetadata: { _ in nil }
+        )
+
+        let liteConfiguration = try await LanguageModelClient.codexGenerationConfiguration(
+            credential: credential,
+            modelIdentifier: "gpt-5.6-luna",
+            authClient: liteClient
+        )
+        let regularConfiguration = try await LanguageModelClient.codexGenerationConfiguration(
+            credential: credential,
+            modelIdentifier: "gpt-5.5",
+            authClient: regularClient
+        )
+
+        #expect(liteConfiguration.headers["ChatGPT-Account-Id"] == "account-id")
+        #expect(liteConfiguration.headers["originator"] == OpenAICodexBackend.originator)
+        #expect(liteConfiguration.headers["User-Agent"] == OpenAICodexBackend.userAgent)
+        #expect(liteConfiguration.headers[OpenAICodexBackend.responsesLiteHeader] == "true")
+        #expect(liteConfiguration.usesResponsesLite)
+        #expect(regularConfiguration.headers["ChatGPT-Account-Id"] == "account-id")
+        #expect(regularConfiguration.headers[OpenAICodexBackend.responsesLiteHeader] == nil)
+        #expect(!regularConfiguration.usesResponsesLite)
+    }
+
+    @MainActor
+    @Test
+    func openAICodexLanguageModelAppliesResponsesLiteRequirements() {
+        let base = OpenAILanguageModel(
+            baseURL: OpenAICodexBackend.backendBaseURL,
+            apiKey: "token",
+            model: "gpt-5.6-luna",
+            apiVariant: .responses
+        )
+        let model = OpenAICodexLanguageModel(base: base, usesResponsesLite: true)
+        var options = GenerationOptions()
+        var custom = OpenAILanguageModel.CustomGenerationOptions()
+        custom.extraBody = [
+            "reasoning": .object(["effort": .string("high")])
+        ]
+        options[custom: OpenAILanguageModel.self] = custom
+
+        let prepared = model.preparedGenerationOptions(options)
+        let preparedCustom = prepared[custom: OpenAILanguageModel.self]
+
+        #expect(preparedCustom?.parallelToolCalls == false)
+        #expect(
+            preparedCustom?.extraBody?["reasoning"]
+                == .object([
+                    "context": .string("all_turns"),
+                    "effort": .string("high"),
+                ])
+        )
     }
 
     @MainActor
@@ -314,6 +428,70 @@ extension InferenceTests {
 
         #expect(inferenceStore.availableModels.count == 2)
         #expect(inferenceStore.availableModels.contains { $0.source == .appleFoundation })
+    }
+
+    @MainActor
+    @Test
+    func unsupportedSelectedModelResetsCodexCodingAgentPreference() {
+        let preferences = Self.generationPreferences()
+        preferences.codingAgentPreference = .codex
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
+        let openAIProvider = ProviderCatalog.makeProvider(for: .openAI)!
+        let ironsmithProvider = ProviderCatalog.makeProvider(for: .ironsmith)!
+        let ollamaProvider = ProviderCatalog.makeProvider(for: .ollama)!
+        let customProvider = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        customProvider.identifier = "custom.test"
+        let openAIModel = ModelConfig(
+            identifier: "gpt-test",
+            displayName: "GPT Test",
+            providerIdentifier: openAIProvider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let ollamaModel = ModelConfig(
+            identifier: "gemma4:e2b",
+            displayName: "Gemma 4 E2B",
+            providerIdentifier: ollamaProvider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let ironsmithModel = ModelConfig(
+            identifier: "deepseek/deepseek-v4-flash",
+            displayName: "DeepSeek V4 Flash",
+            providerIdentifier: ironsmithProvider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let customModel = ModelConfig(
+            identifier: "openai/gpt-5.4",
+            displayName: "GPT 5.4",
+            providerIdentifier: customProvider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        store.providers = [openAIProvider, ironsmithProvider, ollamaProvider, customProvider]
+        store.remoteModels = [openAIModel, ironsmithModel, ollamaModel, customModel]
+
+        store.selectModel(openAIModel.selectionIdentifier)
+
+        #expect(store.selectedModelSupportsCodingAgentPreference(.codex))
+        #expect(preferences.codingAgentPreference == .codex)
+
+        store.selectModel(ironsmithModel.selectionIdentifier)
+
+        #expect(store.selectedModelSupportsCodingAgentPreference(.codex))
+        #expect(preferences.codingAgentPreference == .codex)
+
+        store.selectModel(ollamaModel.selectionIdentifier)
+
+        #expect(store.selectedModelSupportsCodingAgentPreference(.codex))
+        #expect(preferences.codingAgentPreference == .codex)
+
+        store.selectModel(customModel.selectionIdentifier)
+
+        #expect(!store.selectedModelSupportsCodingAgentPreference(.codex))
+        #expect(preferences.codingAgentPreference == .automatic)
     }
 
     @MainActor

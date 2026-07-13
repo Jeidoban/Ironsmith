@@ -58,6 +58,7 @@ final class ToolLibraryStore {
     var exportingToolID: UUID?
     var rebuildingToolID: UUID?
     var restoringToolID: UUID?
+    private(set) var activeCodingAgentByToolID: [UUID: ToolCodingAgent] = [:]
     private(set) var selectedToolID: UUID?
     private(set) var selectedToolName: String?
     private var restorableToolIDs = Set<UUID>()
@@ -217,6 +218,15 @@ final class ToolLibraryStore {
 
     func canRestorePreviousVersion(_ tool: Tool) -> Bool {
         tool.isGenerationReady && restorableToolIDs.contains(tool.id)
+    }
+
+    func activeCodingAgent(for tool: Tool) -> ToolCodingAgent? {
+        activeCodingAgentByToolID[tool.id]
+    }
+
+    func canShowAgentOutput(for tool: Tool) -> Bool {
+        activeCodingAgentByToolID[tool.id] == .codex
+            || CodexAgentTranscriptReader.hasTranscript(for: tool.packageRootURL)
     }
 
     func refreshRestoreAvailability(for tools: [Tool]) async {
@@ -409,8 +419,15 @@ final class ToolLibraryStore {
             }
 
             try await inferenceStore.prepareSelectedModelForGeneration()
-            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext()
+            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
+                resolutionContext: codingAgentResolutionContext(
+                    for: selectedTool,
+                    generationMode: selectedTool == nil ? .create : .edit
+                )
+            )
+            let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
             if let selectedTool {
+                setActiveCodingAgent(activeCodingAgent, for: selectedTool)
                 markToolGenerating(
                     selectedTool,
                     mode: .edit,
@@ -423,7 +440,8 @@ final class ToolLibraryStore {
             let activeToolBox = BindingBox(activeTool)
             let lifecycle = generationLifecycle(
                 modelContext: modelContext,
-                activeTool: activeToolBox
+                activeTool: activeToolBox,
+                activeCodingAgent: activeCodingAgent
             ) { tool in
                 activeTool = tool
                 activeToolBox.value = tool
@@ -491,6 +509,9 @@ final class ToolLibraryStore {
             }
         }
 
+        if let activeTool {
+            clearActiveCodingAgent(for: activeTool)
+        }
         isGenerating = false
         generationStopWasRequested = false
     }
@@ -695,7 +716,14 @@ final class ToolLibraryStore {
 
         do {
             try await inferenceStore.prepareSelectedModelForGeneration()
-            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext()
+            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
+                resolutionContext: codingAgentResolutionContext(
+                    for: tool,
+                    generationMode: tool.generationMode ?? .create
+                )
+            )
+            let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
+            setActiveCodingAgent(activeCodingAgent, for: tool)
             let settings = tool.generationSettings(
                 defaults: Self.defaultGenerationSettings(from: inferenceStore.generationPreferences)
             )
@@ -745,6 +773,7 @@ final class ToolLibraryStore {
             }
         }
 
+        clearActiveCodingAgent(for: tool)
         isGenerating = false
         generationStopWasRequested = false
     }
@@ -766,6 +795,7 @@ final class ToolLibraryStore {
     private func generationLifecycle(
         modelContext: ModelContext,
         activeTool: BindingBox<Tool?>,
+        activeCodingAgent: ToolCodingAgent? = nil,
         onPrepared: @escaping (Tool) -> Void = { _ in }
     ) -> ToolGenerationLifecycle {
         ToolGenerationLifecycle(
@@ -807,6 +837,9 @@ final class ToolLibraryStore {
                     }
                     try modelContext.save()
                     activeTool.value = tool
+                    if let activeCodingAgent {
+                        self.setActiveCodingAgent(activeCodingAgent, for: tool)
+                    }
                     onPrepared(tool)
                 }
             },
@@ -873,6 +906,14 @@ final class ToolLibraryStore {
         tool.generationErrorSummary = Self.shortSummary(for: generationErrorMessage(for: error))
         tool.generationRepairErrorCount = nil
         tool.updatedAt = .now
+    }
+
+    private func setActiveCodingAgent(_ codingAgent: ToolCodingAgent, for tool: Tool) {
+        activeCodingAgentByToolID[tool.id] = codingAgent
+    }
+
+    private func clearActiveCodingAgent(for tool: Tool) {
+        activeCodingAgentByToolID.removeValue(forKey: tool.id)
     }
 
     private func notifyGenerationFinished(_ tool: Tool) async {
@@ -978,6 +1019,35 @@ final class ToolLibraryStore {
 
     private static func contentViewURL(for tool: Tool) throws -> URL {
         try ToolPackageLayout.packageFileURL(for: tool.contentViewSourcePath, packageRootURL: tool.packageRootURL)
+    }
+
+    func codingAgentResolutionContext(
+        for tool: Tool?,
+        generationMode: ToolGenerationMode
+    ) -> ToolCodingAgentResolutionContext {
+        guard generationMode == .edit,
+              let tool,
+              let contentViewURL = try? Self.contentViewURL(for: tool),
+              let source = try? String(contentsOf: contentViewURL, encoding: .utf8)
+        else {
+            return ToolCodingAgentResolutionContext(
+                generationMode: generationMode,
+                existingSourceLineCount: nil
+            )
+        }
+
+        var lineCount = source.split(
+            omittingEmptySubsequences: false,
+            whereSeparator: \Character.isNewline
+        ).count
+        if source.last?.isNewline == true {
+            lineCount -= 1
+        }
+
+        return ToolCodingAgentResolutionContext(
+            generationMode: generationMode,
+            existingSourceLineCount: lineCount
+        )
     }
 
     private static var defaultPrompt: String {

@@ -231,6 +231,26 @@ struct SingleFileToolGenerationRuntime {
                 )
             }
 
+            if context.pipelineConfiguration.codingAgent == .codex {
+                try await generateWithCodexAgent(
+                    displayName: setup.displayName,
+                    layout: setup.layout,
+                    contentViewPath: setup.contentViewPath,
+                    userPrompt: contentPrompt,
+                    settings: setup.settings,
+                    lifecycle: lifecycle
+                )
+                return try await packageTool(
+                    displayName: setup.displayName,
+                    executableName: setup.executableName,
+                    bundleIdentifier: setup.bundleIdentifier,
+                    packageRootURL: setup.layout.packageRootURL,
+                    settings: setup.settings,
+                    iconPrompt: setup.iconPrompt,
+                    lifecycle: lifecycle
+                )
+            }
+
             let generator = createGenerator(
                 userPrompt: contentPrompt,
                 appKind: setup.settings.appKind,
@@ -351,6 +371,36 @@ struct SingleFileToolGenerationRuntime {
                 to: layout.appEntrySourcePath,
                 packageRootURL: layout.packageRootURL
             )
+            if context.pipelineConfiguration.codingAgent == .codex {
+                try await generateWithCodexAgent(
+                    displayName: existingTool.name,
+                    layout: layout,
+                    contentViewPath: contentViewPath,
+                    userPrompt: prompt,
+                    settings: settings,
+                    lifecycle: lifecycle
+                )
+                try Task.checkCancellation()
+                try await lifecycle.updatePhase(.generating, .packaging, nil)
+                _ = try await context.appBundleClient.buildInternalApp(
+                    ToolAppBundleRequest(
+                        displayName: existingTool.name,
+                        executableName: existingTool.executableName,
+                        bundleIdentifier: existingTool.bundleIdentifier,
+                        packageRootURL: existingTool.packageRootURL,
+                        settings: settings
+                    )
+                )
+                try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
+                try context.versionBackupClient.promoteStagedVersion(backup)
+                return ToolGenerationResult(
+                    toolName: existingTool.name,
+                    executableName: existingTool.executableName,
+                    bundleIdentifier: existingTool.bundleIdentifier,
+                    settings: settings,
+                    packageRootURL: existingTool.packageRootURL
+                )
+            }
             let generator = editGenerator(
                 userPrompt: prompt,
                 layout: layout,
@@ -445,6 +495,266 @@ struct SingleFileToolGenerationRuntime {
             generator: generator,
             failureRecovery: effectiveFailureRecovery
         )
+    }
+
+    private func generateWithCodexAgent(
+        displayName: String,
+        layout: ToolPackageLayout,
+        contentViewPath: String,
+        userPrompt: String,
+        settings: ToolGenerationSettings,
+        lifecycle: ToolGenerationLifecycle
+    ) async throws {
+        guard let authentication = context.codexAgentAuthentication else {
+            throw CodexAgentError.missingAuthenticationForRuntime
+        }
+
+        try await lifecycle.updatePhase(.generating, .generatingSource, nil)
+        AgentDiagnosticsLog.append(
+            """
+            Codex coding agent started.
+            displayName: \(displayName)
+            executableName: \(layout.executableName)
+            packageRoot: \(layout.packageRootURL.path)
+            prompt: \(AgentDiagnosticsLog.compact(userPrompt, limit: 240))
+            """
+        )
+        let protectedFileBaselines = try codexProtectedFileBaselines(layout: layout)
+
+        let request = CodexAgentRequest(
+            packageRootURL: layout.packageRootURL,
+            executableName: layout.executableName,
+            displayName: displayName,
+            appKind: settings.appKind,
+            sandboxEnabled: settings.sandboxEnabled,
+            userPrompt: userPrompt,
+            modelIdentifier: context.codingAgentModelIdentifier,
+            reasoningEffort: context.reasoningEffort,
+            authentication: authentication
+        ) { event in
+            await Self.handleCodexAgentEvent(event, lifecycle: lifecycle)
+        }
+
+        do {
+            let result: CodexAgentResult
+            do {
+                result = try await context.codexAgentClient.run(request)
+                await context.languageModelInvoker.recordInvocationCompleted()
+            } catch {
+                await context.languageModelInvoker.recordInvocationCompleted()
+                throw error
+            }
+            try Task.checkCancellation()
+            try validateCodexProtectedFiles(
+                layout: layout,
+                baselines: protectedFileBaselines
+            )
+            try await verifyCodexGeneratedSource(
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle
+            )
+            AgentDiagnosticsLog.append(
+                """
+                Codex coding agent completed.
+                packageRoot: \(layout.packageRootURL.path)
+                transcript: \(result.transcriptURL.path)
+                """
+            )
+        } catch {
+            AgentDiagnosticsLog.append(
+                """
+                Codex coding agent failed.
+                packageRoot: \(layout.packageRootURL.path)
+                error:
+                \(AgentDiagnosticsLog.renderError(error, limit: 1_500))
+                """
+            )
+            throw error
+        }
+    }
+
+    private func codexProtectedFileBaselines(layout: ToolPackageLayout) throws -> [String: String] {
+        [
+            "Package.swift": try context.readIfPresent(
+                "Package.swift",
+                packageRootURL: layout.packageRootURL
+            ),
+            layout.appEntrySourcePath: try context.readIfPresent(
+                layout.appEntrySourcePath,
+                packageRootURL: layout.packageRootURL
+            ),
+        ]
+    }
+
+    private static func handleCodexAgentEvent(
+        _ event: CodexAgentEvent,
+        lifecycle: ToolGenerationLifecycle
+    ) async {
+        if let summary = event.diagnosticSummary {
+            AgentDiagnosticsLog.append(summary)
+        }
+
+        do {
+            switch event {
+            case .commandExecution, .fileChange, .webSearch, .todoList:
+                try await lifecycle.updatePhase(.generating, .repairing, nil)
+            case .agentMessage:
+                try await lifecycle.updatePhase(.generating, .generatingSource, nil)
+            case .turnCompleted:
+                try await lifecycle.updatePhase(.generating, .repairing, nil)
+            case .error(let message):
+                try await lifecycle.updatePhase(.generating, .generatingSource, message)
+            case .threadStarted, .turnStarted:
+                break
+            }
+        } catch {
+            AgentDiagnosticsLog.append(
+                """
+                Codex progress update failed.
+                error:
+                \(AgentDiagnosticsLog.renderError(error, limit: 500))
+                """
+            )
+        }
+    }
+
+    private func validateCodexProtectedFiles(
+        layout: ToolPackageLayout,
+        baselines: [String: String]
+    ) throws {
+        var changedBaselinePaths: [String] = []
+        for path in baselines.keys.sorted() {
+            guard let baseline = baselines[path] else { continue }
+            let current = try context.readIfPresent(path, packageRootURL: layout.packageRootURL)
+            if current != baseline {
+                changedBaselinePaths.append(path)
+            }
+        }
+
+        let allowedSwiftPaths: Set<String> = [
+            layout.appEntrySourcePath,
+            layout.contentViewSourcePath,
+        ]
+        let disallowedSwiftPaths = try swiftSourcePaths(in: layout)
+            .filter { !allowedSwiftPaths.contains($0) }
+            .sorted()
+
+        guard let violation = (changedBaselinePaths + disallowedSwiftPaths).first else {
+            return
+        }
+
+        var cleanupError: Error?
+        for path in changedBaselinePaths {
+            do {
+                try context.write(
+                    baselines[path] ?? "",
+                    to: path,
+                    packageRootURL: layout.packageRootURL
+                )
+            } catch {
+                cleanupError = cleanupError ?? error
+            }
+        }
+        for path in disallowedSwiftPaths {
+            do {
+                let url = try context.packageFileURL(
+                    for: path,
+                    packageRootURL: layout.packageRootURL
+                )
+                try context.fileClient.removeItemIfExists(url)
+            } catch {
+                cleanupError = cleanupError ?? error
+            }
+        }
+
+        if let cleanupError {
+            throw cleanupError
+        }
+        throw CodexAgentError.protectedFileChanged(violation)
+    }
+
+    private func swiftSourcePaths(in layout: ToolPackageLayout) throws -> [String] {
+        guard context.fileClient.fileExists(layout.sourceDirectoryURL) else {
+            return []
+        }
+        guard let enumerator = FileManager.default.enumerator(
+            at: layout.sourceDirectoryURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        let packageRootPath = layout.packageRootURL.standardizedFileURL.path
+        var paths: [String] = []
+        for case let url as URL in enumerator {
+            guard url.pathExtension == "swift" else { continue }
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            let standardizedPath = url.standardizedFileURL.path
+            guard standardizedPath.hasPrefix(packageRootPath + "/") else { continue }
+            paths.append(String(standardizedPath.dropFirst(packageRootPath.count + 1)))
+        }
+        return paths
+    }
+
+    private func verifyCodexGeneratedSource(
+        layout: ToolPackageLayout,
+        contentViewPath: String,
+        lifecycle: ToolGenerationLifecycle
+    ) async throws {
+        let contentViewURL = try layout.packageFileURL(for: contentViewPath)
+        guard context.fileClient.fileExists(contentViewURL) else {
+            throw CodexAgentError.missingContentView
+        }
+
+        let sourceBeforeCleanup = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
+        guard !sourceBeforeCleanup.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CodexAgentError.missingContentView
+        }
+
+        try await lifecycle.updatePhase(.generating, .repairing, nil)
+        try await ContentViewBuildRepairLoop.cleanContentViewSource(
+            contentViewPath,
+            layout: layout,
+            context: context
+        )
+
+        let result = try await context.processClient.build(layout.packageRootURL)
+        guard result.succeeded else {
+            let diagnostics = SwiftPackageProcessClient.parseDiagnostics(
+                in: result.combinedOutput,
+                packageRootURL: layout.packageRootURL
+            )
+            let contentViewErrors = ContentViewRepairSupport.actionableErrors(
+                from: diagnostics,
+                contentViewPath: contentViewPath
+            )
+            try await lifecycle.updateRepairErrorCount(
+                contentViewErrors.isEmpty ? nil : contentViewErrors.count
+            )
+            AgentDiagnosticsLog.append(
+                """
+                Codex-generated source failed final verification.
+                packageRoot: \(layout.packageRootURL.path)
+                contentViewErrorCount: \(contentViewErrors.count)
+                diagnostics:
+                \(AgentDiagnosticsLog.renderDiagnostics(contentViewErrors, limit: AgentDiagnosticsLog.buildFailureDiagnosticLimit, includeSupportingLines: true, supportingLineLimit: AgentDiagnosticsLog.repairRequestSupportingLineLimit))
+                """
+            )
+            throw ToolGenerationError.compileFailed(
+                SwiftPackageProcessClient.compilerExcerpt(from: result.combinedOutput)
+            )
+        }
+
+        let source = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
+        if ContentViewSourceCleanup.isPlaceholderScaffold(source) {
+            throw ToolGenerationError.compileFailed(
+                "ContentView.swift compiled but only contains the placeholder Generated App scaffold."
+            )
+        }
+        try await lifecycle.updateRepairErrorCount(nil)
     }
 
     private func editGenerationAttempts() -> Int {
@@ -877,7 +1187,7 @@ struct SingleFileToolGenerationRuntime {
             packageRootURL: layout.packageRootURL
         )
         guard !draft.isEmpty else { return }
-        if context.pipelineConfiguration.profile == .largeModel {
+        if context.pipelineConfiguration.codingAgent == .ironsmithFlame {
             let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
                 draft,
                 to: originalSource,
@@ -1079,7 +1389,7 @@ struct SingleFileToolGenerationRuntime {
         )
         let editedSource: String
         do {
-            if context.pipelineConfiguration.profile == .largeModel {
+            if context.pipelineConfiguration.codingAgent == .ironsmithFlame {
                 let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
                     sanitizedPatch,
                     to: existingSource,

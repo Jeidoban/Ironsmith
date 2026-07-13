@@ -332,6 +332,65 @@ extension InferenceTests {
     }
 
     @Test
+    func codexCLIClientStreamsStdoutFromOutputFile() async throws {
+        let directory = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let codexHomeDirectory = directory.appendingPathComponent(".codex", isDirectory: true)
+        let stdoutURL = directory.appendingPathComponent("agent.jsonl")
+        let lineRecorder = CodexCLILineRecorder()
+        let client = CodexCLIClient.live(
+            codexHomeDirectory: codexHomeDirectory,
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            bundleResourceURL: nil,
+            environment: ["PATH": "/bin:/usr/bin"]
+        )
+        let firstLine = #"{"type":"thread.started","thread_id":"thread-1"}"#
+        let secondLine = #"{"type":"turn.completed"}"#
+        let script = """
+        printf '%s\\n' '\(firstLine)'
+        sleep 0.1
+        printf '%s\\n' '\(secondLine)'
+        """
+
+        let result = try await client.runStreamingToFile(
+            ["-c", script],
+            [:],
+            stdoutURL,
+            { line in
+                await lineRecorder.recordStdout(line)
+            },
+            { line in
+                await lineRecorder.recordStderr(line)
+            }
+        )
+
+        let transcript = try String(contentsOf: stdoutURL, encoding: .utf8)
+        #expect(result.terminationStatus == 0)
+        #expect(result.stdout.isEmpty)
+        #expect(transcript == "\(firstLine)\n\(secondLine)\n")
+        #expect(await lineRecorder.stdout == [firstLine, secondLine])
+        #expect(await lineRecorder.stderr.isEmpty)
+    }
+
+    @Test
+    func codexModelCatalogRefreshesDiscoveryButCachesMetadata() async throws {
+        let firstModel = OpenAICodexModel(identifier: "gpt-5.5", displayName: "GPT-5.5")
+        let secondModel = OpenAICodexModel(identifier: "gpt-5.6", displayName: "GPT-5.6")
+        let source = CodexModelCatalogSource(batches: [[firstModel], [secondModel]])
+        let catalog = OpenAICodexModelCatalog {
+            await source.next()
+        }
+
+        #expect(try await catalog.models() == [firstModel])
+        #expect(try await catalog.model(identifier: firstModel.identifier) == firstModel)
+        #expect(await source.fetchCount == 1)
+
+        #expect(try await catalog.refresh() == [secondModel])
+        #expect(try await catalog.model(identifier: secondModel.identifier) == secondModel)
+        #expect(await source.fetchCount == 2)
+    }
+
+    @Test
     func codexCLIClientLocatesBundledVendorBinary() throws {
         let resourcesURL = try Self.temporaryDirectory()
         let codexResourceURL = resourcesURL.appendingPathComponent("Codex", isDirectory: true)
@@ -409,5 +468,33 @@ private actor CodexCLIRequestRecorder {
 
     func record(_ request: CodexCLIProcessRequest) {
         requests.append(request)
+    }
+}
+
+private actor CodexCLILineRecorder {
+    private(set) var stdout: [String] = []
+    private(set) var stderr: [String] = []
+
+    func recordStdout(_ line: String) {
+        stdout.append(line)
+    }
+
+    func recordStderr(_ line: String) {
+        stderr.append(line)
+    }
+}
+
+private actor CodexModelCatalogSource {
+    private let batches: [[OpenAICodexModel]]
+    private(set) var fetchCount = 0
+
+    init(batches: [[OpenAICodexModel]]) {
+        self.batches = batches
+    }
+
+    func next() -> [OpenAICodexModel] {
+        let index = min(fetchCount, batches.count - 1)
+        fetchCount += 1
+        return batches[index]
     }
 }

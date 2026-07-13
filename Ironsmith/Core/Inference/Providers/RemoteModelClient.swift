@@ -139,12 +139,7 @@ extension RemoteModelClient {
                 for: provider.kind
             ).map { RemoteModelEntry(identifier: $0.identifier, displayName: $0.displayName) }
         case .anthropic:
-            filterDiscoverableModels(
-                try JSONDecoder().decode(AnthropicModelsResponse.self, from: data).data.map {
-                    ($0.id, $0.displayName ?? $0.id)
-                },
-                for: provider.kind
-            ).map { RemoteModelEntry(identifier: $0.identifier, displayName: $0.displayName) }
+            try decodeAnthropicModels(data, for: provider)
         case .gemini:
             filterDiscoverableModels(
                 try JSONDecoder().decode(GeminiModelsResponse.self, from: data).models
@@ -168,23 +163,27 @@ extension RemoteModelClient {
                 RemoteModelEntry(
                     identifier: $0.id,
                     displayName: $0.displayName,
-                    estimatedToolCredits: $0.estimatedToolCredits
+                    estimatedToolCredits: $0.estimatedToolCredits,
+                    reasoningEfforts: $0.reasoningEfforts ?? []
                 )
             }
         }
 
-        return entries
-            .map {
-                ModelConfig(
-                    identifier: $0.identifier,
-                    displayName: $0.displayName,
-                    providerIdentifier: provider.identifier,
-                    source: .remote,
-                    installState: .installed,
-                    estimatedToolCredits: $0.estimatedToolCredits
-                )
-            }
-            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        let models = entries.map {
+            ModelConfig(
+                identifier: $0.identifier,
+                displayName: $0.displayName,
+                providerIdentifier: provider.identifier,
+                source: .remote,
+                installState: .installed,
+                estimatedToolCredits: $0.estimatedToolCredits,
+                reasoningEfforts: $0.reasoningEfforts
+            )
+        }
+        guard provider.kind != .ironsmith else { return models }
+        return models.sorted {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
     }
 
     static func makeCodexModelConfigs(
@@ -198,6 +197,24 @@ extension RemoteModelClient {
                 providerIdentifier: provider.identifier,
                 source: .remote,
                 installState: .installed
+            )
+        }
+    }
+
+    private static func decodeAnthropicModels(
+        _ data: Data,
+        for provider: ProviderConfig
+    ) throws -> [RemoteModelEntry] {
+        let models = try JSONDecoder().decode(AnthropicModelsResponse.self, from: data).data
+        let modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
+        return filterDiscoverableModels(
+            models.map { ($0.id, $0.displayName ?? $0.id) },
+            for: provider.kind
+        ).map {
+            RemoteModelEntry(
+                identifier: $0.identifier,
+                displayName: $0.displayName,
+                reasoningEfforts: modelsByID[$0.identifier]?.reasoningEfforts ?? []
             )
         }
     }
@@ -316,11 +333,18 @@ private struct RemoteModelEntry {
     let identifier: String
     let displayName: String
     let estimatedToolCredits: Int?
+    let reasoningEfforts: [ToolReasoningEffort]
 
-    init(identifier: String, displayName: String, estimatedToolCredits: Int? = nil) {
+    init(
+        identifier: String,
+        displayName: String,
+        estimatedToolCredits: Int? = nil,
+        reasoningEfforts: [ToolReasoningEffort] = []
+    ) {
         self.identifier = identifier
         self.displayName = displayName
         self.estimatedToolCredits = estimatedToolCredits
+        self.reasoningEfforts = reasoningEfforts
     }
 }
 
@@ -340,6 +364,7 @@ private struct IronsmithModelEntry: Decodable {
     let id: String
     let displayName: String
     let estimatedToolCredits: Int?
+    let reasoningEfforts: [ToolReasoningEffort]?
 }
 
 private struct AnthropicModelsResponse: Decodable {
@@ -349,10 +374,44 @@ private struct AnthropicModelsResponse: Decodable {
 private struct AnthropicModelEntry: Decodable {
     let id: String
     let displayName: String?
+    let capabilities: Capabilities?
+
+    var reasoningEfforts: [ToolReasoningEffort] {
+        guard let effort = capabilities?.effort else { return [] }
+        return ToolReasoningEffort.explicitCases.filter { effort.supports($0) }
+    }
+
+    struct Capabilities: Decodable {
+        let effort: Effort?
+    }
+
+    struct Effort: Decodable {
+        let low: Capability?
+        let medium: Capability?
+        let high: Capability?
+        let xhigh: Capability?
+        let max: Capability?
+
+        func supports(_ effort: ToolReasoningEffort) -> Bool {
+            switch effort {
+            case .default: false
+            case .low: low?.supported == true
+            case .medium: medium?.supported == true
+            case .high: high?.supported == true
+            case .xhigh: xhigh?.supported == true
+            case .max: max?.supported == true
+            }
+        }
+    }
+
+    struct Capability: Decodable {
+        let supported: Bool
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
         case displayName = "display_name"
+        case capabilities
     }
 }
 

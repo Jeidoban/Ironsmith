@@ -23,7 +23,9 @@ extension InferenceTests {
     static func agentLanguageModelContext(
         providerKind: ProviderKind
     ) async throws -> AgentLanguageModelContext {
-        let store = Self.dependenciesBackedStore()
+        let preferences = Self.generationPreferences()
+        preferences.codingAgentPreference = .ironsmithFlame
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
         let provider = ProviderCatalog.makeProvider(for: providerKind)!
         let model = ModelConfig(
             identifier: "\(providerKind.rawValue)-test",

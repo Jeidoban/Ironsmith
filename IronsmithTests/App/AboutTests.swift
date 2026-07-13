@@ -1,3 +1,4 @@
+import AcknowList
 import Foundation
 import Testing
 @testable import Ironsmith
@@ -74,5 +75,34 @@ struct AboutTests {
 
         #expect(text.contains("GNU GENERAL PUBLIC LICENSE"))
         #expect(text.contains("Version 3, 29 June 2007"))
+    }
+
+    @Test
+    func codexLegalResourcesExistAndProduceAcknowledgement() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repositoryRootURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let licensesURL = repositoryRootURL
+            .appendingPathComponent("Ironsmith/Resources/ThirdPartyLicenses", isDirectory: true)
+        let licenseText = IronsmithLegalDocument.codexApache2.text(
+            resourceURL: licensesURL.appendingPathComponent("OpenAI-Codex-Apache-2.0.txt")
+        )
+        let noticeText = IronsmithLegalDocument.codexNotice.text(
+            resourceURL: licensesURL.appendingPathComponent("OpenAI-Codex-NOTICE.txt")
+        )
+        let acknowledgement = IronsmithLicenseAcknowledgements.codexAcknowledgement(
+            licenseText: licenseText,
+            noticeText: noticeText
+        )
+
+        #expect(licenseText.contains("Apache License"))
+        #expect(licenseText.contains("Version 2.0, January 2004"))
+        #expect(noticeText.contains("OpenAI Codex"))
+        #expect(acknowledgement.title == "OpenAI Codex")
+        #expect(acknowledgement.license == "Apache 2.0")
+        #expect(acknowledgement.text?.contains("Ratatui") == true)
+        #expect(acknowledgement.repository?.absoluteString == "https://github.com/openai/codex")
     }
 }

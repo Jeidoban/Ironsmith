@@ -5,6 +5,11 @@ struct LanguageModelClient {
     var makeLanguageModel: (ModelConfig, ProviderConfig?) async throws -> any LanguageModel
 }
 
+nonisolated struct OpenAICodexGenerationConfiguration: Equatable, Sendable {
+    let headers: [String: String]
+    let usesResponsesLite: Bool
+}
+
 extension LanguageModelClient {
     static func live(
         credentialClient: CredentialClient,
@@ -62,19 +67,23 @@ extension LanguageModelClient {
             case .openAI:
                 if let codexModelIdentifier = model.openAICodexRawIdentifier {
                     let credential = try await openAICodexAuthClient.validCredential()
-                    var headers: [String: String] = [:]
-                    if let accountID = credential.accountID, !accountID.isEmpty {
-                        headers["ChatGPT-Account-Id"] = accountID
-                    }
-                    return OpenAILanguageModel(
-                        baseURL: OpenAICodexBackend.backendBaseURL,
-                        apiKey: credential.accessToken,
-                        model: codexModelIdentifier,
-                        apiVariant: .responses,
-                        session: remoteGenerationSession(
-                            for: OpenAICodexBackend.backendBaseURL,
-                            headers: headers
-                        )
+                    let configuration = try await codexGenerationConfiguration(
+                        credential: credential,
+                        modelIdentifier: codexModelIdentifier,
+                        authClient: openAICodexAuthClient
+                    )
+                    return OpenAICodexLanguageModel(
+                        base: OpenAILanguageModel(
+                            baseURL: OpenAICodexBackend.backendBaseURL,
+                            apiKey: credential.accessToken,
+                            model: codexModelIdentifier,
+                            apiVariant: .responses,
+                            session: remoteGenerationSession(
+                                for: OpenAICodexBackend.backendBaseURL,
+                                headers: configuration.headers
+                            )
+                        ),
+                        usesResponsesLite: configuration.usesResponsesLite
                     )
                 }
 
@@ -95,7 +104,7 @@ extension LanguageModelClient {
                     baseURL: baseURL,
                     apiKey: token,
                     model: model.identifier,
-                    apiVariant: .chatCompletions,
+                    apiVariant: provider.openAICompatibleAPIVariant.openAILanguageModelVariant,
                     session: remoteGenerationSession(for: baseURL)
                 )
 
@@ -135,6 +144,28 @@ extension LanguageModelClient {
                 throw LanguageModelClientError.missingProvider
             }
         }
+    }
+
+    nonisolated static func codexGenerationConfiguration(
+        credential: OpenAICodexCredential,
+        modelIdentifier: String,
+        authClient: OpenAICodexAuthClient
+    ) async throws -> OpenAICodexGenerationConfiguration {
+        var headers = [
+            "originator": OpenAICodexBackend.originator,
+            "User-Agent": OpenAICodexBackend.userAgent,
+        ]
+        if let accountID = credential.accountID, !accountID.isEmpty {
+            headers["ChatGPT-Account-Id"] = accountID
+        }
+        let usesResponsesLite = try await authClient.modelMetadata(modelIdentifier)?.usesResponsesLite == true
+        if usesResponsesLite {
+            headers[OpenAICodexBackend.responsesLiteHeader] = "true"
+        }
+        return OpenAICodexGenerationConfiguration(
+            headers: headers,
+            usesResponsesLite: usesResponsesLite
+        )
     }
 
     private static func providerBaseURL(_ provider: ProviderConfig) throws -> URL {
@@ -182,6 +213,17 @@ extension LanguageModelClient {
             return ""
         }
         return try credentialClient.loadAPIKey(reference) ?? ""
+    }
+}
+
+private extension OpenAICompatibleAPIVariant {
+    var openAILanguageModelVariant: OpenAILanguageModel.APIVariant {
+        switch self {
+        case .chatCompletions:
+            return .chatCompletions
+        case .responses:
+            return .responses
+        }
     }
 }
 

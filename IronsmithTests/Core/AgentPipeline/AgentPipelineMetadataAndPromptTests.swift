@@ -74,7 +74,7 @@ extension AgentPipelineTests {
     func liveMetadataClientFallsBackWhenStructuredGenerationFails() async throws {
         let response = StructuredMetadataResponse(error: FakeAgentError.expected)
 
-        let suggestion = await ToolMetadataClient.live().suggestMetadata(
+        let suggestion = await ToolMetadataClient.live(fallbackLanguageModel: nil).suggestMetadata(
             userPrompt: "Build a pantry tracker",
             invoker: Self.makeInvoker(
                 languageModel: StructuredMetadataLanguageModel(response: response),
@@ -84,6 +84,37 @@ extension AgentPipelineTests {
 
         #expect(suggestion.displayName == "Build A Pantry Tracker")
         #expect(suggestion.iconPrompt == "")
+    }
+
+    @MainActor
+    @Test
+    func liveMetadataClientUsesSystemModelAfterSelectedModelFails() async throws {
+        let primaryResponse = StructuredMetadataResponse(error: FakeAgentError.expected)
+        let fallbackResponse = StructuredMetadataResponse(
+            metadata: GeneratedToolMetadata(
+                displayName: "Pantry Pal",
+                iconPrompt: "Pantry shelves"
+            )
+        )
+
+        let suggestion = await ToolMetadataClient.live(
+            fallbackLanguageModel: StructuredMetadataLanguageModel(response: fallbackResponse)
+        ).suggestMetadata(
+            userPrompt: "Build a pantry tracker",
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: primaryResponse),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
+        )
+
+        #expect(suggestion.displayName == "Pantry Pal")
+        #expect(suggestion.iconPrompt == "Pantry shelves")
+        #expect(await primaryResponse.prompts.count == 1)
+        #expect(await fallbackResponse.prompts.count == 1)
+        #expect(
+            await fallbackResponse.options.first?.maximumResponseTokens
+                == ToolGenerationOptionsResolver.metadataMaximumResponseTokens
+        )
     }
 
     @MainActor
@@ -190,7 +221,7 @@ extension AgentPipelineTests {
                 return Self.simpleContentViewSource(text: "refined prompt")
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in
@@ -232,7 +263,7 @@ extension AgentPipelineTests {
                 return Self.simpleContentViewSource(text: "original prompt")
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .small(repairStrategy: .deterministicOnly),
+            pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in
@@ -276,7 +307,7 @@ extension AgentPipelineTests {
                 return Self.renameOldToNewPatch
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .large(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in

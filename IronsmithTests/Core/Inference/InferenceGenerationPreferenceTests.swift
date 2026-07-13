@@ -1,5 +1,6 @@
 import AnyLanguageModel
 import Foundation
+import JSONSchema
 import SwiftData
 import Testing
 @testable import Ironsmith
@@ -22,18 +23,177 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func agentPipelineProfilePreferenceDefaultsAutomaticAndPersists() {
-        let suiteName = "IronsmithTests.AgentPipelineProfile.\(UUID().uuidString)"
+    func codingAgentPreferenceDefaultsAutomaticAndPersists() {
+        let suiteName = "IronsmithTests.ToolCodingAgent.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
         userDefaults.removePersistentDomain(forName: suiteName)
 
         let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
-        #expect(preferences.agentPipelineProfile == .automatic)
+        #expect(preferences.codingAgentPreference == .automatic)
 
-        preferences.agentPipelineProfile = .largeModel
+        preferences.codingAgentPreference = .ironsmithFlame
 
         let reloadedPreferences = GenerationPreferencesStore(userDefaults: userDefaults)
-        #expect(reloadedPreferences.agentPipelineProfile == .largeModel)
+        #expect(reloadedPreferences.codingAgentPreference == .ironsmithFlame)
+
+        reloadedPreferences.codingAgentPreference = .codex
+
+        let reloadedCodexPreferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(reloadedCodexPreferences.codingAgentPreference == .codex)
+    }
+
+    @MainActor
+    @Test
+    func reasoningEffortDefaultsAndPersists() {
+        let suiteName = "IronsmithTests.ReasoningEffort.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(preferences.reasoningEffort == .default)
+
+        preferences.reasoningEffort = .xhigh
+        #expect(GenerationPreferencesStore(userDefaults: userDefaults).reasoningEffort == .xhigh)
+    }
+
+    @MainActor
+    @Test
+    func reasoningSupportUsesProviderSpecificCapabilities() {
+        let openAI = ProviderCatalog.makeProvider(for: .openAI)!
+        let gpt = ModelConfig(
+            identifier: "gpt-5.5",
+            displayName: "GPT-5.5",
+            providerIdentifier: openAI.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        #expect(ToolReasoningSupport.supportedEfforts(for: gpt, provider: openAI) == [
+            .low, .medium, .high, .xhigh,
+        ])
+
+        let gptPro = ModelConfig(
+            identifier: "gpt-5-pro-2025-10-06",
+            displayName: "GPT-5 Pro",
+            providerIdentifier: openAI.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        #expect(ToolReasoningSupport.supportedEfforts(for: gptPro, provider: openAI) == [.high])
+
+        let custom = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        #expect(ToolReasoningSupport.supportedEfforts(for: gpt, provider: custom) == ToolReasoningEffort.explicitCases)
+
+        let gemini = ProviderCatalog.makeProvider(for: .gemini)!
+        #expect(ToolReasoningSupport.supportedEfforts(for: gpt, provider: gemini).isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func reasoningOptionsUseProviderWireShape() {
+        let openAI = ProviderCatalog.makeProvider(for: .openAI)!
+        let openAIModel = ModelConfig(
+            identifier: "gpt-5.5",
+            displayName: "GPT-5.5",
+            providerIdentifier: openAI.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        let languageModel = OpenAILanguageModel(
+            apiKey: "token",
+            model: openAIModel.identifier,
+            apiVariant: .responses
+        )
+        let openAIOptions = ToolGenerationOptionsResolver.options(
+            for: .codingAgent,
+            model: openAIModel,
+            provider: openAI,
+            languageModel: languageModel,
+            reasoningEffort: .xhigh
+        )
+        #expect(
+            openAIOptions[custom: OpenAILanguageModel.self]?.extraBody?["reasoning"]
+                == .object(["effort": .string("xhigh")])
+        )
+
+        let custom = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        custom.openAICompatibleAPIVariant = .chatCompletions
+        let customOptions = ToolGenerationOptionsResolver.options(
+            for: .codingAgent,
+            model: openAIModel,
+            provider: custom,
+            languageModel: nil,
+            reasoningEffort: .max
+        )
+        #expect(
+            customOptions[custom: OpenAILanguageModel.self]?.extraBody?["reasoning_effort"]
+                == .string("max")
+        )
+
+        let anthropic = ProviderCatalog.makeProvider(for: .anthropic)!
+        let claude = ModelConfig(
+            identifier: "claude-opus-test",
+            displayName: "Claude Opus",
+            providerIdentifier: anthropic.identifier,
+            source: .remote,
+            installState: .installed,
+            reasoningEfforts: [.low, .medium, .high, .max]
+        )
+        let anthropicOptions = ToolGenerationOptionsResolver.options(
+            for: .codingAgent,
+            model: claude,
+            provider: anthropic,
+            languageModel: nil,
+            reasoningEffort: .max
+        )
+        #expect(
+            anthropicOptions[custom: AnthropicLanguageModel.self]?.extraBody?["output_config"]
+                == .object(["effort": .string("max")])
+        )
+
+        let defaultOptions = ToolGenerationOptionsResolver.options(
+            for: .codingAgent,
+            model: openAIModel,
+            provider: openAI,
+            languageModel: languageModel,
+            reasoningEffort: .default
+        )
+        #expect(defaultOptions[custom: OpenAILanguageModel.self]?.extraBody?["reasoning"] == nil)
+    }
+
+    @MainActor
+    @Test
+    func unsupportedReasoningEffortResetsToDefault() {
+        let preferences = Self.generationPreferences()
+        preferences.reasoningEffort = .xhigh
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
+        let gemini = ProviderCatalog.makeProvider(for: .gemini)!
+        let model = ModelConfig(
+            identifier: "gemini-test",
+            displayName: "Gemini",
+            providerIdentifier: gemini.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        store.providers = [gemini]
+        store.remoteModels = [model]
+
+        store.selectModel(model.selectionIdentifier)
+
+        #expect(preferences.reasoningEffort == .default)
+    }
+
+    @MainActor
+    @Test
+    func codingAgentPreferencePreservesLegacySmallAndLargeRawValues() {
+        let suiteName = "IronsmithTests.ToolCodingAgentLegacy.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        userDefaults.set("small_model", forKey: "generation.agentPipelineProfile")
+        #expect(GenerationPreferencesStore(userDefaults: userDefaults).codingAgentPreference == .ironsmithSpark)
+
+        userDefaults.set("large_model", forKey: "generation.agentPipelineProfile")
+        #expect(GenerationPreferencesStore(userDefaults: userDefaults).codingAgentPreference == .ironsmithFlame)
     }
 
     @MainActor
@@ -95,6 +255,7 @@ extension InferenceTests {
     func selectedAgentLanguageModelContextCarriesPromptRefinementPreference() async throws {
         let preferences = Self.generationPreferences()
         preferences.generatedPromptRefinementEnabled = false
+        preferences.codingAgentPreference = .ironsmithFlame
         let store = Self.dependenciesBackedStore(generationPreferences: preferences)
         let provider = ProviderCatalog.makeProvider(for: .openAI)!
         let model = ModelConfig(
@@ -200,9 +361,9 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func explicitAgentPipelineProfileOverridesAutomaticProviderDefault() async throws {
+    func explicitToolCodingAgentOverridesAutomaticProviderDefault() async throws {
         let preferences = Self.generationPreferences()
-        preferences.agentPipelineProfile = .largeModel
+        preferences.codingAgentPreference = .ironsmithFlame
         let store = Self.dependenciesBackedStore(generationPreferences: preferences)
         let provider = ProviderCatalog.makeProvider(for: .ollama)!
         let model = ModelConfig(
@@ -218,11 +379,182 @@ extension InferenceTests {
         store.selectedModelID = model.selectionIdentifier
 
         let context = try await store.makeSelectedAgentLanguageModelContext()
-        #expect(context.pipelineConfiguration.profile == .largeModel)
+        #expect(context.pipelineConfiguration.codingAgent == .ironsmithFlame)
         #expect(
             context.repairStrategy == .modelSearchReplace(
                 maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
             )
         )
+    }
+
+    @MainActor
+    @Test
+    func selectedOpenAICodexModelUsesCodexAgentAndChatGPTAuthenticationWhenRequested() async throws {
+        let preferences = Self.generationPreferences()
+        preferences.codingAgentPreference = .codex
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
+        let provider = ProviderCatalog.makeProvider(for: .openAI)!
+        let model = ModelConfig(
+            identifier: "codex:gpt-5.5",
+            displayName: "GPT-5.5 (Codex)",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        store.providers = [provider]
+        store.remoteModels = [model]
+        store.selectModel(model.selectionIdentifier)
+
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+
+        #expect(context.pipelineConfiguration.codingAgent == .codex)
+        #expect(context.codingAgentModelIdentifier == "codex:gpt-5.5")
+        #expect(context.codexAgentAuthentication == .chatGPTLogin)
+    }
+
+    @MainActor
+    @Test
+    func selectedIronsmithModelUsesCodexCustomResponsesProviderWhenRequested() async throws {
+        let preferences = Self.generationPreferences()
+        preferences.codingAgentPreference = .codex
+        let accountClient = Self.accountClient()
+        let store = InferenceStore(
+            dependencies: Self.dependencies(accountClient: accountClient),
+            generationPreferences: preferences,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
+        let provider = ProviderCatalog.makeProvider(for: .ironsmith)!
+        provider.baseURLString = "https://api.ironsmith.test/api/v1"
+        let model = ModelConfig(
+            identifier: "deepseek/deepseek-v4-flash",
+            displayName: "DeepSeek V4 Flash",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        store.providers = [provider]
+        store.remoteModels = [model]
+        store.selectModel(model.selectionIdentifier)
+        try await store.prepareSelectedModelForGeneration()
+
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+
+        #expect(context.pipelineConfiguration.codingAgent == .codex)
+        #expect(context.codingAgentModelIdentifier == "deepseek/deepseek-v4-flash")
+        #expect(
+            context.codexAgentAuthentication
+                == .customResponsesProvider(
+                    CodexAgentCustomResponsesProvider(
+                        configurationIdentifier: "ironsmith",
+                        sessionProviderIdentifier: "ironsmith",
+                        displayName: "Ironsmith",
+                        baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
+                        authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
+                        authenticationToken: "access-token"
+                    )
+                )
+        )
+    }
+
+    @MainActor
+    @Test
+    func automaticCodingAgentUsesProviderModelAndLargeEditRules() {
+        let openAIProvider = ProviderCatalog.makeProvider(for: .openAI)!
+        let ironsmithProvider = ProviderCatalog.makeProvider(for: .ironsmith)!
+        let ollamaProvider = ProviderCatalog.makeProvider(for: .ollama)!
+        let customProvider = ProviderCatalog.makeProvider(for: .customOpenAICompatible)!
+        customProvider.identifier = "custom.test"
+        let anthropicProvider = ProviderCatalog.makeProvider(for: .anthropic)!
+
+        func model(_ identifier: String, provider: ProviderConfig) -> ModelConfig {
+            ModelConfig(
+                identifier: identifier,
+                displayName: identifier,
+                providerIdentifier: provider.identifier,
+                source: .remote,
+                installState: .installed
+            )
+        }
+
+        func resolve(
+            _ identifier: String,
+            provider: ProviderConfig,
+            lineCount: Int? = nil,
+            requested: ToolCodingAgentPreference = .automatic
+        ) -> ToolCodingAgent {
+            ToolCodingAgentResolver.resolve(
+                requested: requested,
+                model: model(identifier, provider: provider),
+                provider: provider,
+                context: ToolCodingAgentResolutionContext(
+                    generationMode: lineCount == nil ? .create : .edit,
+                    existingSourceLineCount: lineCount
+                )
+            )
+        }
+
+        #expect(resolve("future-model", provider: openAIProvider) == .codex)
+        #expect(resolve("openai/gpt-5.4", provider: ironsmithProvider) == .codex)
+        #expect(resolve("anthropic/claude-sonnet", provider: ironsmithProvider) == .ironsmithFlame)
+        #expect(resolve("anthropic/claude-sonnet", provider: ironsmithProvider, lineCount: 600) == .ironsmithFlame)
+        #expect(resolve("anthropic/claude-sonnet", provider: ironsmithProvider, lineCount: 601) == .codex)
+
+        #expect(resolve("gpt-oss:20b", provider: ollamaProvider) == .codex)
+        #expect(resolve("claude-local", provider: ollamaProvider) == .ironsmithFlame)
+        #expect(resolve("claude-local", provider: ollamaProvider, lineCount: 601) == .codex)
+        #expect(resolve("gemma4:12b", provider: ollamaProvider, lineCount: 601) == .ironsmithSpark)
+
+        customProvider.openAICompatibleAPIVariant = .chatCompletions
+        #expect(resolve("openai/gpt-5.4", provider: customProvider) == .ironsmithFlame)
+        #expect(resolve("openai/gpt-5.4", provider: customProvider, lineCount: 601) == .ironsmithFlame)
+
+        customProvider.openAICompatibleAPIVariant = .responses
+        #expect(resolve("openai/gpt-5.4", provider: customProvider) == .codex)
+        #expect(resolve("google/gemini-3.1", provider: customProvider) == .ironsmithFlame)
+        #expect(resolve("google/gemini-3.1", provider: customProvider, lineCount: 601) == .codex)
+        #expect(resolve("deepseek-v4", provider: customProvider, lineCount: 601) == .ironsmithSpark)
+
+        #expect(resolve("claude-sonnet", provider: anthropicProvider, lineCount: 601) == .ironsmithFlame)
+        #expect(
+            resolve(
+                "openai/gpt-5.4",
+                provider: openAIProvider,
+                requested: .ironsmithSpark
+            ) == .ironsmithSpark
+        )
+    }
+
+    @MainActor
+    @Test
+    func selectedOllamaOpenAIModelUsesUnauthenticatedResponsesProviderForCodex() async throws {
+        let store = Self.dependenciesBackedStore()
+        let provider = ProviderCatalog.makeProvider(for: .ollama)!
+        provider.baseURLString = "http://localhost:11434"
+        let model = ModelConfig(
+            identifier: "gpt-oss:20b",
+            displayName: "GPT OSS 20B",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        store.providers = [provider]
+        store.remoteModels = [model]
+        store.selectModel(model.selectionIdentifier)
+
+        let context = try await store.makeSelectedAgentLanguageModelContext()
+        let authentication = try #require(context.codexAgentAuthentication)
+        guard case .customResponsesProvider(let codexProvider) = authentication else {
+            Issue.record("Expected an Ollama custom Responses provider.")
+            return
+        }
+
+        #expect(context.pipelineConfiguration.codingAgent == .codex)
+        #expect(codexProvider.configurationIdentifier == "ironsmith_ollama")
+        #expect(codexProvider.sessionProviderIdentifier == "ollama")
+        #expect(codexProvider.baseURL.absoluteString == "http://localhost:11434/v1/")
+        #expect(codexProvider.authenticationEnvironmentVariable == nil)
+        #expect(codexProvider.authenticationToken == nil)
     }
 }

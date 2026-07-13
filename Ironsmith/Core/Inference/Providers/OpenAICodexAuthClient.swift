@@ -8,6 +8,7 @@ nonisolated struct OpenAICodexAuthClient {
     var signOut: @Sendable () async throws -> Void
     var validCredential: @Sendable () async throws -> OpenAICodexCredential
     var discoverModels: @Sendable () async throws -> [OpenAICodexModel]
+    var modelMetadata: @Sendable (String) async throws -> OpenAICodexModel? = { _ in nil }
 }
 
 extension OpenAICodexAuthClient {
@@ -22,6 +23,10 @@ extension OpenAICodexAuthClient {
             authFileClient: authFileClient,
             refreshCredential: refreshCredential
         )
+        let modelCatalog = OpenAICodexModelCatalog {
+            let credential = try await tokenStore.validCredential()
+            return try await Self.fetchModels(credential: credential)
+        }
 
         return Self(
             credential: {
@@ -30,17 +35,21 @@ extension OpenAICodexAuthClient {
             signIn: {
                 let credential = try await pkceAuthClient.signIn()
                 try authFileClient.saveCredential(credential)
+                await modelCatalog.invalidate()
                 return credential
             },
             signOut: {
                 try authFileClient.deleteCredential()
+                await modelCatalog.invalidate()
             },
             validCredential: {
                 try await tokenStore.validCredential()
             },
             discoverModels: {
-                let credential = try await tokenStore.validCredential()
-                return try await Self.fetchModels(credential: credential)
+                try await modelCatalog.refresh()
+            },
+            modelMetadata: { identifier in
+                try await modelCatalog.model(identifier: identifier)
             }
         )
     }
@@ -51,7 +60,8 @@ extension OpenAICodexAuthClient {
             signIn: { throw OpenAICodexAuthClientError.missingCredential },
             signOut: {},
             validCredential: { throw OpenAICodexAuthClientError.missingCredential },
-            discoverModels: { throw OpenAICodexAuthClientError.missingCredential }
+            discoverModels: { throw OpenAICodexAuthClientError.missingCredential },
+            modelMetadata: { _ in throw OpenAICodexAuthClientError.missingCredential }
         )
     }
 
@@ -177,7 +187,13 @@ extension OpenAICodexAuthClient {
         let displayName =
             stringValue(in: object, keys: ["display_name", "displayName", "title", "label"])
             ?? identifier
-        return [OpenAICodexModel(identifier: identifier, displayName: displayName)]
+        return [
+            OpenAICodexModel(
+                identifier: identifier,
+                displayName: displayName,
+                usesResponsesLite: object["use_responses_lite"] as? Bool ?? false
+            )
+        ]
     }
 
     nonisolated private static func stringValue(in object: [String: Any], keys: [String]) -> String? {
@@ -234,6 +250,37 @@ extension OpenAICodexAuthClient {
         components.queryItems = values.map { URLQueryItem(name: $0.key, value: $0.value) }
             .sorted { $0.name < $1.name }
         return Data((components.percentEncodedQuery ?? "").utf8)
+    }
+}
+
+actor OpenAICodexModelCatalog {
+    private let fetchModels: @Sendable () async throws -> [OpenAICodexModel]
+    private var cachedModels: [OpenAICodexModel]?
+
+    init(fetchModels: @escaping @Sendable () async throws -> [OpenAICodexModel]) {
+        self.fetchModels = fetchModels
+    }
+
+    func models() async throws -> [OpenAICodexModel] {
+        if let cachedModels {
+            return cachedModels
+        }
+
+        return try await refresh()
+    }
+
+    func refresh() async throws -> [OpenAICodexModel] {
+        let models = try await fetchModels()
+        cachedModels = models
+        return models
+    }
+
+    func model(identifier: String) async throws -> OpenAICodexModel? {
+        try await models().first { $0.identifier == identifier }
+    }
+
+    func invalidate() {
+        cachedModels = nil
     }
 }
 

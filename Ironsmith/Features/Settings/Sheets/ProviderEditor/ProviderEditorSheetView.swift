@@ -10,6 +10,7 @@ struct ProviderEditorSheetView: View {
     @State private var apiKey = ""
     @State private var displayName = ""
     @State private var baseURLString = ""
+    @State private var openAICompatibleAPIVariant: OpenAICompatibleAPIVariant = .chatCompletions
     @State private var isConfirmingDelete = false
     @State private var isConfirmingAccountDeletion = false
     @State private var isConfirmingAccountDeletionWithCredits = false
@@ -90,6 +91,14 @@ struct ProviderEditorSheetView: View {
                                 text: $baseURLString,
                                 prompt: Text(isOllama ? "http://localhost:11434" : "http://localhost:1234/v1")
                             )
+                            if isCustomOpenAICompatible {
+                                Picker("API", selection: $openAICompatibleAPIVariant) {
+                                    ForEach(OpenAICompatibleAPIVariant.allCases) { variant in
+                                        Text(variant.displayName).tag(variant)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                            }
                         } header: {
                             Text("Connection")
                         }
@@ -153,7 +162,10 @@ struct ProviderEditorSheetView: View {
                                 provider: provider,
                                 apiKey: apiKey,
                                 displayName: isCustomOpenAICompatible ? displayName : nil,
-                                baseURLString: usesEditableConnection ? baseURLString : nil
+                                baseURLString: usesEditableConnection ? baseURLString : nil,
+                                openAICompatibleAPIVariant: isCustomOpenAICompatible
+                                    ? openAICompatibleAPIVariant
+                                    : nil
                             )
                             await MainActor.run {
                                 if didSave {
@@ -174,6 +186,7 @@ struct ProviderEditorSheetView: View {
             apiKey = inferenceStore.apiKey(for: provider)
             displayName = provider.displayName
             baseURLString = provider.baseURLString
+            openAICompatibleAPIVariant = provider.openAICompatibleAPIVariant
             if isIronsmith {
                 inferenceStore.refreshIronsmithSession()
             }

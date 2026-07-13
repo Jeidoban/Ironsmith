@@ -8,6 +8,66 @@ import Testing
 extension InferenceTests {
     @MainActor
     @Test
+    func ironsmithModelDiscoveryPreservesBackendResponseOrder() throws {
+        let provider = ProviderCatalog.makeProvider(for: .ironsmith)!
+        let data = Data(
+            #"{"data":[{"id":"openai/gpt-5.6-luna","displayName":"GPT-5.6 Luna","estimatedToolCredits":10},{"id":"openai/gpt-5.6-terra","displayName":"GPT-5.6 Terra","estimatedToolCredits":20},{"id":"openai/gpt-5.6-sol","displayName":"GPT-5.6 Sol","estimatedToolCredits":30}]}"#.utf8
+        )
+
+        let models = try RemoteModelClient.decodeModels(data, for: provider)
+
+        #expect(
+            models.map(\.identifier) == [
+                "openai/gpt-5.6-luna",
+                "openai/gpt-5.6-terra",
+                "openai/gpt-5.6-sol",
+            ]
+        )
+    }
+
+    @MainActor
+    @Test
+    func ironsmithModelsPreserveBackendTierOrder() {
+        let store = Self.dependenciesBackedStore()
+        let provider = ProviderCatalog.makeProvider(for: .ironsmith)!
+        let identifiers = [
+            "openai/gpt-5.6-luna",
+            "openai/gpt-5.6-terra",
+            "openai/gpt-5.6-sol",
+        ]
+        store.remoteModels = identifiers.map { identifier in
+            ModelConfig(
+                identifier: identifier,
+                displayName: identifier,
+                providerIdentifier: provider.identifier,
+                source: .remote,
+                installState: .installed
+            )
+        }
+
+        #expect(store.models(for: provider).map(\.identifier) == identifiers)
+    }
+
+    @MainActor
+    @Test
+    func remoteModelDiscoveryDecodesReasoningCapabilities() throws {
+        let ironsmith = ProviderCatalog.makeProvider(for: .ironsmith)!
+        let ironsmithData = Data(
+            #"{"data":[{"id":"openai/gpt-5.5","displayName":"GPT-5.5","estimatedToolCredits":10,"reasoningEfforts":["low","medium","high","xhigh"]}]}"#.utf8
+        )
+        let ironsmithModels = try RemoteModelClient.decodeModels(ironsmithData, for: ironsmith)
+        #expect(ironsmithModels.first?.reasoningEfforts == [.low, .medium, .high, .xhigh])
+
+        let anthropic = ProviderCatalog.makeProvider(for: .anthropic)!
+        let anthropicData = Data(
+            #"{"data":[{"id":"claude-opus-test","display_name":"Claude Opus","capabilities":{"effort":{"low":{"supported":true},"medium":{"supported":true},"high":{"supported":true},"xhigh":{"supported":false},"max":{"supported":true}}}}]}"#.utf8
+        )
+        let anthropicModels = try RemoteModelClient.decodeModels(anthropicData, for: anthropic)
+        #expect(anthropicModels.first?.reasoningEfforts == [.low, .medium, .high, .max])
+    }
+
+    @MainActor
+    @Test
     func remoteProviderModelsAreTransientAfterDiscovery() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
@@ -310,11 +370,13 @@ extension InferenceTests {
             baseURLString: "http://localhost:11434/v1"
         )
         let provider = try #require(inferenceStore.providers.first { $0.kind == .customOpenAICompatible })
+        #expect(provider.openAICompatibleAPIVariant == .chatCompletions)
         let didSave = await inferenceStore.saveProviderEdits(
             provider: provider,
             apiKey: "",
             displayName: "Local LM Studio",
-            baseURLString: "http://localhost:1234/v1"
+            baseURLString: "http://localhost:1234/v1",
+            openAICompatibleAPIVariant: .responses
         )
 
         let savedProvider = try #require(inferenceStore.providers.first { $0.identifier == provider.identifier })
@@ -322,10 +384,55 @@ extension InferenceTests {
         #expect(didSave)
         #expect(savedProvider.displayName == "Local LM Studio")
         #expect(savedProvider.baseURLString == "http://localhost:1234/v1")
+        #expect(savedProvider.openAICompatibleAPIVariant == .responses)
         await Self.eventually {
             inferenceStore.remoteModels.contains { $0.identifier == "qwen2.5-coder" }
         }
         #expect(inferenceStore.remoteModels.contains { $0.identifier == "qwen2.5-coder" })
+    }
+
+    @MainActor
+    @Test
+    func changingSelectedCustomProviderToChatCompletionsResetsCodexPreference() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let preferences = Self.generationPreferences()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(remoteModelIDs: ["openai/gpt-5.4"]),
+            generationPreferences: preferences
+        )
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        let didAdd = await inferenceStore.addProvider(
+            choice: InferenceStore.ProviderChoice(
+                descriptor: ProviderCatalog.descriptor(for: .customOpenAICompatible)!
+            ),
+            apiKey: "",
+            displayName: "Responses Server",
+            baseURLString: "http://localhost:1234/v1",
+            openAICompatibleAPIVariant: .responses
+        )
+        let provider = try #require(
+            inferenceStore.providers.first { $0.kind == .customOpenAICompatible }
+        )
+        await Self.eventually {
+            inferenceStore.remoteModels.contains { $0.providerIdentifier == provider.identifier }
+        }
+        let model = try #require(
+            inferenceStore.remoteModels.first { $0.providerIdentifier == provider.identifier }
+        )
+        inferenceStore.selectModel(model.selectionIdentifier)
+        preferences.codingAgentPreference = .codex
+
+        let didSave = await inferenceStore.saveProviderEdits(
+            provider: provider,
+            apiKey: "",
+            openAICompatibleAPIVariant: .chatCompletions
+        )
+
+        #expect(didAdd)
+        #expect(didSave)
+        #expect(preferences.codingAgentPreference == .automatic)
     }
 
     @MainActor

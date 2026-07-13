@@ -250,10 +250,13 @@ extension ToolLibraryTests {
             source: .remote,
             installState: .installed
         )
+        let preferences = GenerationPreferencesStore(userDefaults: try Self.makeIsolatedUserDefaults())
+        preferences.codingAgentPreference = .ironsmithFlame
         let inferenceStore = InferenceStore(
             dependencies: Self.inferenceDependencies(
                 accountClient: Self.ironsmithAccountClient(balanceCredits: 12)
-            )
+            ),
+            generationPreferences: preferences
         )
         inferenceStore.providers = [provider]
         inferenceStore.remoteModels = [model]
@@ -276,6 +279,149 @@ extension ToolLibraryTests {
         #expect(!(store.isGenerating))
     }
 
+    @Test
+    func toolRowStatusUsesCodexWorkingTextOnlyForCodexOwnedPhases() {
+        #expect(
+            ToolRowGenerationStatusResolver.statusText(
+                phase: .generatingSource,
+                repairErrorCount: nil,
+                activeCodingAgent: .codex
+            ) == "Codex is working"
+        )
+        #expect(
+            ToolRowGenerationStatusResolver.statusText(
+                phase: .generatingEditDiff,
+                repairErrorCount: nil,
+                activeCodingAgent: .codex
+            ) == "Codex is working"
+        )
+        #expect(
+            ToolRowGenerationStatusResolver.statusText(
+                phase: .generatingRepairDiff,
+                repairErrorCount: 2,
+                activeCodingAgent: .codex
+            ) == "Codex is working"
+        )
+        #expect(
+            ToolRowGenerationStatusResolver.statusText(
+                phase: .repairing,
+                repairErrorCount: 2,
+                activeCodingAgent: .codex
+            ) == "Codex is working"
+        )
+        #expect(
+            ToolRowGenerationStatusResolver.statusText(
+                phase: .packaging,
+                repairErrorCount: nil,
+                activeCodingAgent: .codex
+            ) == "Packaging"
+        )
+        #expect(
+            ToolRowGenerationStatusResolver.statusText(
+                phase: .generatingSource,
+                repairErrorCount: nil,
+                activeCodingAgent: .ironsmithFlame
+            ) == "Generating source"
+        )
+        #expect(
+            ToolRowGenerationStatusResolver.statusText(
+                phase: .repairing,
+                repairErrorCount: 2,
+                activeCodingAgent: nil
+            ) == "Repairing 2 errors"
+        )
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreEnablesAgentOutputForExistingCodexTranscript() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("TranscriptTool", isDirectory: true)
+        let transcriptDirectory = CodexAgentTranscriptReader.transcriptDirectoryURL(for: packageRoot)
+        try FileManager.default.createDirectory(at: transcriptDirectory, withIntermediateDirectories: true)
+        let tool = StoredTool(
+            name: "Transcript Tool",
+            executableName: "TranscriptTool",
+            packageRootPath: packageRoot.path
+        )
+        let store = ToolLibraryStore()
+
+        #expect(!store.canShowAgentOutput(for: tool))
+
+        try #"{"type":"thread.started","thread_id":"thread-1"}"#
+            .write(
+                to: transcriptDirectory.appendingPathComponent("agent-test.jsonl"),
+                atomically: true,
+                encoding: .utf8
+            )
+
+        #expect(store.canShowAgentOutput(for: tool))
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreTracksActiveCodexAgentDuringCreateGeneration() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let preferences = GenerationPreferencesStore(userDefaults: try Self.makeIsolatedUserDefaults())
+        preferences.codingAgentPreference = .codex
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            generationPreferences: preferences,
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
+        let provider = ProviderCatalog.makeProvider(for: .openAI)!
+        let model = ModelConfig(
+            identifier: "codex:gpt-5.5",
+            displayName: "GPT-5.5 (Codex)",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+        inferenceStore.providers = [provider]
+        inferenceStore.remoteModels = [model]
+        inferenceStore.selectedModelID = model.selectionIdentifier
+
+        let packageRoot = root.appendingPathComponent("ActiveCodex", isDirectory: true)
+        let capture = ToolLibraryActiveAgentCapture()
+        var store: ToolLibraryStore!
+        store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { request in
+                    try await request.lifecycle.prepareCreatedTool(
+                        ToolGenerationPreparedTool(
+                            name: "Active Codex",
+                            executableName: "ActiveCodex",
+                            bundleIdentifier: ToolBundleIdentifier.make(executableName: "ActiveCodex"),
+                            settings: request.settings,
+                            packageRootURL: packageRoot
+                        ),
+                        request.prompt
+                    )
+                    await capture.record(
+                        store.activeCodingAgentByToolID.values.contains(.codex)
+                    )
+                    return ToolGenerationResult(
+                        toolName: "Active Codex",
+                        executableName: "ActiveCodex",
+                        settings: request.settings,
+                        packageRootURL: packageRoot
+                    )
+                },
+                runnerClient: ToolRunnerClient { _ in }
+            )
+        )
+        store.prompt = "Build with Codex"
+
+        await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
+
+        #expect(await capture.sawActiveCodex)
+        #expect(store.activeCodingAgentByToolID.isEmpty)
+    }
+
     @MainActor
     @Test
     func toolLibraryStoreRefreshesIronsmithCreditsAfterEachModelInvocation() async throws {
@@ -289,11 +435,14 @@ extension ToolLibraryTests {
             source: .remote,
             installState: .installed
         )
+        let preferences = GenerationPreferencesStore(userDefaults: try Self.makeIsolatedUserDefaults())
+        preferences.codingAgentPreference = .ironsmithFlame
         let accountCapture = IronsmithAccountFetchCapture(balances: [100, 91, 84, 84])
         let inferenceStore = InferenceStore(
             dependencies: Self.inferenceDependencies(
                 accountClient: Self.ironsmithAccountClient(fetchCapture: accountCapture)
-            )
+            ),
+            generationPreferences: preferences
         )
         inferenceStore.providers = [provider]
         inferenceStore.remoteModels = [model]
@@ -519,6 +668,14 @@ private actor ToolGenerationNotificationCapture {
     }
 }
 
+private actor ToolLibraryActiveAgentCapture {
+    private(set) var sawActiveCodex = false
+
+    func record(_ isActiveCodex: Bool) {
+        sawActiveCodex = sawActiveCodex || isActiveCodex
+    }
+}
+
 private actor LateGenerationCompletionGate {
     private var isStarted = false
     private var isReleased = false
@@ -552,6 +709,49 @@ private actor LateGenerationCompletionGate {
 }
 
 extension ToolLibraryTests {
+    @MainActor
+    @Test
+    func toolLibraryCodingAgentContextCountsExistingEditSourceLines() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tool = Tool(
+            name: "Large Editor",
+            executableName: "LargeEditor",
+            packageRootPath: root.path
+        )
+        let contentViewURL = try ToolPackageLayout.packageFileURL(
+            for: tool.contentViewSourcePath,
+            packageRootURL: root
+        )
+        try FileManager.default.createDirectory(
+            at: contentViewURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let store = ToolLibraryStore()
+
+        try Array(repeating: "line", count: 600)
+            .joined(separator: "\n")
+            .appending("\n")
+            .write(to: contentViewURL, atomically: true, encoding: .utf8)
+        let sixHundred = store.codingAgentResolutionContext(
+            for: tool,
+            generationMode: .edit
+        )
+        #expect(sixHundred.existingSourceLineCount == 600)
+        #expect(!sixHundred.isLargeEdit)
+
+        try Array(repeating: "line", count: 601)
+            .joined(separator: "\n")
+            .appending("\n")
+            .write(to: contentViewURL, atomically: true, encoding: .utf8)
+        let sixHundredOne = store.codingAgentResolutionContext(
+            for: tool,
+            generationMode: .edit
+        )
+        #expect(sixHundredOne.existingSourceLineCount == 601)
+        #expect(sixHundredOne.isLargeEdit)
+    }
+
     @MainActor
     static func waitForIdle(_ store: ToolLibraryStore) async {
         let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000

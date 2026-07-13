@@ -24,6 +24,7 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
             IronsmithSchemaV1.self,
             IronsmithSchemaV2.self,
             IronsmithSchemaV3.self,
+            IronsmithSchemaV4.self,
         ]
     }
 
@@ -99,6 +100,27 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
                         context.delete(model)
                     }
 
+                    try context.save()
+                }
+            ),
+            .custom(
+                fromVersion: IronsmithSchemaV3.self,
+                toVersion: IronsmithSchemaV4.self,
+                willMigrate: nil,
+                didMigrate: { context in
+                    let models = try context.fetch(
+                        FetchDescriptor<IronsmithSchemaV4.ModelConfig>()
+                    )
+                    for model in models {
+                        model.reasoningEffortRawValues = nil
+                    }
+
+                    let providers = try context.fetch(
+                        FetchDescriptor<IronsmithSchemaV4.ProviderConfig>()
+                    )
+                    for provider in providers {
+                        provider.openAICompatibleAPIVariant = .chatCompletions
+                    }
                     try context.save()
                 }
             ),

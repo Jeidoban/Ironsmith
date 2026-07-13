@@ -1,5 +1,6 @@
 import AnyLanguageModel
 import Foundation
+import JSONSchema
 
 nonisolated enum ToolGenerationStage: Sendable, Equatable, CaseIterable {
     case codingAgent
@@ -43,6 +44,9 @@ nonisolated struct ModelGenerationCapabilities: Equatable, Sendable {
     }
 
     static func isOpenAICodexLanguageModel(_ languageModel: (any LanguageModel)?) -> Bool {
+        if languageModel is OpenAICodexLanguageModel {
+            return true
+        }
         guard let openAIModel = languageModel as? OpenAILanguageModel else {
             return false
         }
@@ -78,14 +82,23 @@ enum ToolGenerationOptionsResolver {
         for stage: ToolGenerationStage,
         model: ModelConfig?,
         provider: ProviderConfig?,
-        languageModel: any LanguageModel
+        languageModel: any LanguageModel,
+        reasoningEffort: ToolReasoningEffort = .default
     ) -> ToolGenerationStageConfiguration {
         let capabilities = ModelGenerationCapabilities.resolved(
             model: model,
             provider: provider,
             languageModel: languageModel
         )
-        let options = capabilities.applying(to: baseOptions(for: stage))
+        let options = applyReasoningEffort(
+            ToolReasoningSupport.effectiveEffort(
+                requested: reasoningEffort,
+                model: model,
+                provider: provider
+            ),
+            provider: provider,
+            to: capabilities.applying(to: baseOptions(for: stage))
+        )
         return ToolGenerationStageConfiguration(
             stage: stage,
             languageModel: languageModel,
@@ -99,14 +112,23 @@ enum ToolGenerationOptionsResolver {
         for stage: ToolGenerationStage,
         model: ModelConfig?,
         provider: ProviderConfig?,
-        languageModel: (any LanguageModel)?
+        languageModel: (any LanguageModel)?,
+        reasoningEffort: ToolReasoningEffort = .default
     ) -> GenerationOptions {
         let capabilities = ModelGenerationCapabilities.resolved(
             model: model,
             provider: provider,
             languageModel: languageModel
         )
-        return capabilities.applying(to: baseOptions(for: stage))
+        return applyReasoningEffort(
+            ToolReasoningSupport.effectiveEffort(
+                requested: reasoningEffort,
+                model: model,
+                provider: provider
+            ),
+            provider: provider,
+            to: capabilities.applying(to: baseOptions(for: stage))
+        )
     }
 
     @MainActor
@@ -120,6 +142,54 @@ enum ToolGenerationOptionsResolver {
             return GenerationOptions(maximumResponseTokens: metadataMaximumResponseTokens)
         }
     }
+
+    private static func applyReasoningEffort(
+        _ effort: ToolReasoningEffort,
+        provider: ProviderConfig?,
+        to options: GenerationOptions
+    ) -> GenerationOptions {
+        guard effort != .default, let provider else { return options }
+        var options = options
+        switch provider.kind {
+        case .ironsmith, .openAI:
+            setOpenAIReasoning(effort, usesResponsesAPI: true, in: &options)
+        case .customOpenAICompatible:
+            setOpenAIReasoning(
+                effort,
+                usesResponsesAPI: provider.openAICompatibleAPIVariant == .responses,
+                in: &options
+            )
+        case .anthropic:
+            var custom = options[custom: AnthropicLanguageModel.self]
+                ?? AnthropicLanguageModel.CustomGenerationOptions()
+            var extraBody = custom.extraBody ?? [:]
+            extraBody["output_config"] = .object([
+                "effort": .string(effort.rawValue)
+            ])
+            custom.extraBody = extraBody
+            options[custom: AnthropicLanguageModel.self] = custom
+        case .local, .gemini, .ollama:
+            break
+        }
+        return options
+    }
+
+    private static func setOpenAIReasoning(
+        _ effort: ToolReasoningEffort,
+        usesResponsesAPI: Bool,
+        in options: inout GenerationOptions
+    ) {
+        var custom = options[custom: OpenAILanguageModel.self]
+            ?? OpenAILanguageModel.CustomGenerationOptions()
+        var extraBody = custom.extraBody ?? [:]
+        if usesResponsesAPI {
+            extraBody["reasoning"] = .object(["effort": .string(effort.rawValue)])
+        } else {
+            extraBody["reasoning_effort"] = .string(effort.rawValue)
+        }
+        custom.extraBody = extraBody
+        options[custom: OpenAILanguageModel.self] = custom
+    }
 }
 
 extension ModelConfig {
@@ -129,7 +199,8 @@ extension ModelConfig {
             for: .codingAgent,
             model: self,
             provider: nil,
-            languageModel: nil
+            languageModel: nil,
+            reasoningEffort: preferences.reasoningEffort
         )
     }
 }

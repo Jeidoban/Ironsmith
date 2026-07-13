@@ -98,6 +98,8 @@ struct ToolLibraryPopoverView: View {
                                 canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
                                 showsStoreActions: isStoreFeatureEnabled,
                                 canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
+                                activeCodingAgent: toolLibraryStore.activeCodingAgent(for: tool),
+                                canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool),
                                 onSelect: {
                                     toolLibraryStore.toggleSelection(
                                         for: tool,
@@ -143,6 +145,9 @@ struct ToolLibraryPopoverView: View {
                                     Task {
                                         await toolLibraryStore.viewSource(tool)
                                     }
+                                },
+                                onShowAgentOutput: {
+                                    routeStore.open(.agentOutput(tool.id))
                                 },
                                 onContinue: {
                                     toolLibraryStore.continueGeneration(
@@ -193,13 +198,16 @@ struct ToolLibraryPopoverView: View {
                 appKind: appKindBinding,
                 sandboxPermissions: sandboxPermissionsBinding,
                 resourcePermissions: resourcePermissionsBinding,
-                agentPipelineProfile: agentPipelineProfileBinding,
+                codingAgentPreference: codingAgentPreferenceBinding,
+                reasoningEffort: reasoningEffortBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
                 showsSandboxControl: showSandboxOverride,
                 modelPickerTitle: composerModelPickerTitle,
                 isModelPickerEnabled: isComposerModelPickerEnabled,
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
+                isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(.codex),
+                supportedReasoningEfforts: inferenceStore.selectedModelSupportedReasoningEfforts,
                 isPromptFocused: $isPromptFocused,
                 onChooseModel: {
                     isShowingModelPicker = true
@@ -569,12 +577,19 @@ struct ToolLibraryPopoverView: View {
         )
     }
 
-    private var agentPipelineProfileBinding: Binding<AgentPipelineProfilePreference> {
+    private var codingAgentPreferenceBinding: Binding<ToolCodingAgentPreference> {
         Binding(
-            get: { inferenceStore.generationPreferences.agentPipelineProfile },
+            get: { inferenceStore.generationPreferences.codingAgentPreference },
             set: { newValue in
-                inferenceStore.generationPreferences.agentPipelineProfile = newValue
+                inferenceStore.generationPreferences.codingAgentPreference = newValue
             }
+        )
+    }
+
+    private var reasoningEffortBinding: Binding<ToolReasoningEffort> {
+        Binding(
+            get: { inferenceStore.generationPreferences.reasoningEffort },
+            set: { inferenceStore.generationPreferences.reasoningEffort = $0 }
         )
     }
 
