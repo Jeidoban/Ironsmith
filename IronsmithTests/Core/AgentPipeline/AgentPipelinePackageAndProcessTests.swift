@@ -937,7 +937,6 @@ extension AgentPipelineTests {
         let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "FallbackIconTool")
         let iconPrompt = "Silver hammer"
         let client = ToolIconClient.live(
-            foregroundClient: .noop,
             imageGenerator: { _ in
                 throw ToolAppBundleError.iconGenerationProducedNoImage
             }
@@ -967,7 +966,6 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let client = ToolIconClient.live(
-            foregroundClient: .noop,
             imageGenerator: { _ in
                 throw ToolAppBundleError.iconGenerationProducedNoImage
             }

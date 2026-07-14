@@ -173,6 +173,7 @@ struct SingleFileToolGenerationRuntime {
             try Task.checkCancellation()
             let metadata = await context.metadataClient.suggestMetadata(
                 userPrompt: prompt,
+                imageGenerationProvider: imageGenerationProvider,
                 invoker: context.languageModelInvoker
             )
             try Task.checkCancellation()

@@ -18,7 +18,7 @@ nonisolated enum ToolImageGenerationError: LocalizedError {
     case missingCredential(ToolImageGenerationProvider)
     case serviceNotConfigured
     case invalidResponse
-    case requestFailed(Int)
+    case requestFailed(statusCode: Int, message: String?)
     case invalidImage
     case imageTooLarge
 
@@ -30,7 +30,10 @@ nonisolated enum ToolImageGenerationError: LocalizedError {
             return "The image generation service is not configured."
         case .invalidResponse:
             return "The image provider returned an invalid response."
-        case .requestFailed(let statusCode):
+        case .requestFailed(let statusCode, let message):
+            if let message, !message.isEmpty {
+                return "The image provider returned HTTP \(statusCode): \(message)"
+            }
             return "The image provider returned HTTP \(statusCode)."
         case .invalidImage:
             return "The image provider did not return a valid image."
@@ -41,6 +44,8 @@ nonisolated enum ToolImageGenerationError: LocalizedError {
 }
 
 nonisolated struct ToolImageGenerationClient: Sendable {
+    private static let requestTimeoutInterval: TimeInterval = 300
+
     var generate: @Sendable (ToolImageGenerationProvider, String) async throws -> CGImage
 
     @MainActor
@@ -139,22 +144,14 @@ nonisolated struct ToolImageGenerationClient: Sendable {
         authClient: OpenAICodexAuthClient,
         httpClient: ToolImageHTTPClient
     ) async throws -> CGImage {
-        var credential = try await authClient.validCredential()
-        var response = try await performCodex(
+        let credential = try await authClient.validCredential()
+        let response = try await performCodex(
             prompt: prompt,
             credential: credential,
             httpClient: httpClient
         )
-        if response.1.statusCode == 401 {
-            credential = try await authClient.forceRefreshCredential()
-            response = try await performCodex(
-                prompt: prompt,
-                credential: credential,
-                httpClient: httpClient
-            )
-        }
         guard (200...299).contains(response.1.statusCode) else {
-            throw ToolImageGenerationError.requestFailed(response.1.statusCode)
+            throw requestFailure(data: response.0, response: response.1)
         }
         return try decodeOpenAIImage(response.0)
     }
@@ -177,7 +174,7 @@ nonisolated struct ToolImageGenerationClient: Sendable {
     private static func imageRequest(url: URL, prompt: String) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 180
+        request.timeoutInterval = requestTimeoutInterval
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONEncoder().encode(
             OpenAIImageRequest(
@@ -201,7 +198,7 @@ nonisolated struct ToolImageGenerationClient: Sendable {
             url: URL(string: "https://generativelanguage.googleapis.com/v1beta/interactions")!
         )
         request.httpMethod = "POST"
-        request.timeoutInterval = 180
+        request.timeoutInterval = requestTimeoutInterval
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
@@ -210,7 +207,6 @@ nonisolated struct ToolImageGenerationClient: Sendable {
                 input: prompt,
                 responseFormat: .init(
                     type: "image",
-                    mimeType: "image/png",
                     aspectRatio: "1:1",
                     imageSize: "1K"
                 )
@@ -242,7 +238,7 @@ nonisolated struct ToolImageGenerationClient: Sendable {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
-        request.timeoutInterval = 180
+        request.timeoutInterval = requestTimeoutInterval
         let data = try await perform(request, httpClient: httpClient)
         return try decodeOpenAIImage(data)
     }
@@ -253,9 +249,25 @@ nonisolated struct ToolImageGenerationClient: Sendable {
     ) async throws -> Data {
         let (data, response) = try await httpClient.data(request)
         guard (200...299).contains(response.statusCode) else {
-            throw ToolImageGenerationError.requestFailed(response.statusCode)
+            throw requestFailure(data: data, response: response)
         }
         return data
+    }
+
+    private static func requestFailure(
+        data: Data,
+        response: HTTPURLResponse
+    ) -> ToolImageGenerationError {
+        let decodedMessage = try? JSONDecoder().decode(
+            ProviderErrorEnvelope.self,
+            from: data
+        ).error.message
+        let trimmedMessage = decodedMessage?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = trimmedMessage.flatMap { value in
+            value.isEmpty ? nil : String(value.prefix(500))
+        }
+        return .requestFailed(statusCode: response.statusCode, message: message)
     }
 
     private static func decodeOpenAIImage(_ data: Data) throws -> CGImage {
@@ -307,13 +319,11 @@ nonisolated private struct OpenAIImageResponse: Decodable {
 nonisolated private struct GeminiImageRequest: Encodable {
     struct ResponseFormat: Encodable {
         let type: String
-        let mimeType: String
         let aspectRatio: String
         let imageSize: String
 
         enum CodingKeys: String, CodingKey {
             case type
-            case mimeType = "mime_type"
             case aspectRatio = "aspect_ratio"
             case imageSize = "image_size"
         }
@@ -327,6 +337,14 @@ nonisolated private struct GeminiImageRequest: Encodable {
         case model, input
         case responseFormat = "response_format"
     }
+}
+
+nonisolated private struct ProviderErrorEnvelope: Decodable {
+    struct Detail: Decodable {
+        let message: String?
+    }
+
+    let error: Detail
 }
 
 nonisolated private struct GeminiImageResponse: Decodable {

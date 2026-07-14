@@ -24,7 +24,7 @@ struct GeneratedToolMetadata {
 
     @Guide(
         description:
-            "A tiny app icon concept phrase for an image generator, two to five words. Do not write a sentence."
+            "An image-generation prompt that follows the iconPrompt requirements in the instructions."
     )
     let iconPrompt: String
 
@@ -46,6 +46,7 @@ extension GeneratedToolMetadata {
 
 struct ToolMetadataRequest: Sendable {
     let userPrompt: String
+    let imageGenerationProvider: ToolImageGenerationProvider
     let invoker: ToolLanguageModelInvoker
 }
 
@@ -72,11 +73,13 @@ struct ToolMetadataClient: Sendable {
 
     func suggestMetadata(
         userPrompt: String,
+        imageGenerationProvider: ToolImageGenerationProvider = .imagePlayground,
         invoker: ToolLanguageModelInvoker
     ) async -> ToolMetadataSuggestion {
         await suggestMetadataForRequest(
             ToolMetadataRequest(
                 userPrompt: userPrompt,
+                imageGenerationProvider: imageGenerationProvider,
                 invoker: invoker
             )
         )
@@ -100,6 +103,7 @@ struct ToolMetadataClient: Sendable {
                 do {
                     return try await Self.generateMetadata(
                         userPrompt: userPrompt,
+                        imageGenerationProvider: request.imageGenerationProvider,
                         invoker: request.invoker,
                         fallback: fallback
                     )
@@ -126,6 +130,7 @@ struct ToolMetadataClient: Sendable {
                         do {
                             return try await Self.generateMetadata(
                                 userPrompt: userPrompt,
+                                imageGenerationProvider: request.imageGenerationProvider,
                                 invoker: request.invoker.replacingMetadata(
                                     with: fallbackConfiguration
                                 ),
@@ -149,33 +154,46 @@ struct ToolMetadataClient: Sendable {
 
     private static func generateMetadata(
         userPrompt: String,
+        imageGenerationProvider: ToolImageGenerationProvider,
         invoker: ToolLanguageModelInvoker,
         fallback: ToolMetadataSuggestion
     ) async throws -> ToolMetadataSuggestion {
         let session = invoker.makeSession(
             for: .metadata,
-            instructions: metadataInstructions
+            instructions: metadataInstructions(for: imageGenerationProvider)
         )
         let response = try await invoker.respond(
             stage: .metadata,
             in: session,
-            to: Self.metadataPrompt(for: userPrompt),
+            to: Self.metadataPrompt(
+                for: userPrompt,
+                imageGenerationProvider: imageGenerationProvider
+            ),
             generating: GeneratedToolMetadata.self
         )
         return Self.metadataSuggestion(response, fallback: fallback)
     }
 
-    nonisolated private static func metadataPrompt(for userPrompt: String) -> String {
+    nonisolated private static func metadataPrompt(
+        for userPrompt: String,
+        imageGenerationProvider: ToolImageGenerationProvider
+    ) -> String {
         """
         User request:
         \(userPrompt)
+
+        Image prompt mode:
+        \(imagePromptModeDescription(for: imageGenerationProvider))
 
         Allowed menuBarSystemImage values:
         \(ToolMenuBarSymbol.allowedSymbols.joined(separator: ", "))
         """
     }
 
-    nonisolated private static let metadataInstructions = """
+    nonisolated private static func metadataInstructions(
+        for imageGenerationProvider: ToolImageGenerationProvider
+    ) -> String {
+        """
         You create compact metadata for a SwiftUI AI coding agent for a macOS app.
 
         displayName:
@@ -186,16 +204,47 @@ struct ToolMetadataClient: Sendable {
         - Do not use punctuation, emoji, or generic suffixes like App or Tool.
 
         iconPrompt:
-        - Must be a tiny object phrase, not a sentence or description.
-        - Must be 2 to 5 words.
-        - Good examples: Calculator in front of house. Gamepad with buttons.
-        - Do not mention app icon, macOS, style, text, letters, screenshots, UI, logos, or backgrounds.
+        \(imagePromptInstructions(for: imageGenerationProvider))
 
         menuBarSystemImage:
         - Must be one exact SF Symbol name from the allowed list in the prompt.
         - Choose the closest symbol for the user's requested app.
         - Do not invent names or include variants outside that list.
         """
+    }
+
+    nonisolated private static func imagePromptModeDescription(
+        for provider: ToolImageGenerationProvider
+    ) -> String {
+        switch provider {
+        case .gemini, .openAI, .ironsmith:
+            return "Hosted image generation; visual concept only."
+        case .imagePlayground, .disabled:
+            return "Compact Image Playground-compatible concept."
+        }
+    }
+
+    nonisolated private static func imagePromptInstructions(
+        for provider: ToolImageGenerationProvider
+    ) -> String {
+        switch provider {
+        case .gemini, .openAI, .ironsmith:
+            return """
+            - Write one concise visual concept of 8 to 20 words.
+            - Describe only the concrete subject, any meaningful secondary object, and how they relate or are arranged.
+            - Choose a concept specific to the requested app instead of repeating the app name.
+            - Do not specify icon shape, canvas, background, palette, materials, lighting, depth, style, rendering quality, legibility, macOS conventions, or generation instructions.
+            - Good examples: A small house sheltering a calculator, with one coin orbiting the roofline. A calendar page whose date square becomes a checkmark.
+            """
+        case .imagePlayground, .disabled:
+            return """
+            - Must be a tiny object phrase, not a sentence or description.
+            - Must be 2 to 5 words.
+            - Good examples: Calculator in front of house. Gamepad with buttons.
+            - Do not mention app icon, macOS, style, text, letters, screenshots, UI, logos, or backgrounds.
+            """
+        }
+    }
 
     nonisolated private static func metadataSuggestion(
         _ response: GeneratedToolMetadata,

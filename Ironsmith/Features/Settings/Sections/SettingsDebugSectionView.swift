@@ -133,7 +133,6 @@
                 do {
                     imagePlaygroundPreview = try await ToolIconClient.debugImagePlaygroundPreview(
                         prompt: prompt,
-                        foregroundClient: .live,
                         coordinator: imagePlaygroundCoordinator
                     )
                 } catch {

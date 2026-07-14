@@ -59,7 +59,6 @@ extension AgentPipelineTests {
         var codexAuthClient = OpenAICodexAuthClient.unconfigured
         codexAuthClient.credential = { codexCredential }
         codexAuthClient.validCredential = { codexCredential }
-        codexAuthClient.forceRefreshCredential = { codexCredential }
         let codexClient = ToolImageGenerationClient.make(
             httpClient: httpClient,
             credentialClient: credentialClient,
@@ -73,6 +72,7 @@ extension AgentPipelineTests {
         let requests = await capture.requests
         let openAIRequest = try #require(requests.first)
         #expect(openAIRequest.url?.absoluteString == "https://api.openai.com/v1/images/generations")
+        #expect(openAIRequest.timeoutInterval == 300)
         #expect(openAIRequest.value(forHTTPHeaderField: "Authorization") == "Bearer openai-key")
         let openAIBody = try #require(jsonObject(openAIRequest) as? [String: Any])
         #expect(openAIBody["model"] as? String == "gpt-image-2")
@@ -81,17 +81,146 @@ extension AgentPipelineTests {
 
         let geminiRequest = try #require(requests.dropFirst().first)
         #expect(geminiRequest.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/interactions")
+        #expect(geminiRequest.timeoutInterval == 300)
         #expect(geminiRequest.value(forHTTPHeaderField: "x-goog-api-key") == "gemini-key")
         let geminiBody = try #require(jsonObject(geminiRequest) as? [String: Any])
         #expect(geminiBody["model"] as? String == "gemini-3.1-flash-lite-image")
         let responseFormat = try #require(geminiBody["response_format"] as? [String: Any])
         #expect(responseFormat["aspect_ratio"] as? String == "1:1")
         #expect(responseFormat["image_size"] as? String == "1K")
+        #expect(responseFormat["mime_type"] == nil)
 
         let codexRequest = try #require(requests.last)
         #expect(codexRequest.url?.absoluteString == "https://chatgpt.com/backend-api/codex/images/generations")
+        #expect(codexRequest.timeoutInterval == 300)
         #expect(codexRequest.value(forHTTPHeaderField: "Authorization") == "Bearer codex-token")
         #expect(codexRequest.value(forHTTPHeaderField: "ChatGPT-Account-Id") == "account-id")
+    }
+
+    @Test
+    func hostedIconPromptLocksHouseStyleButPlaygroundKeepsCompactConcept() {
+        let layout = ToolPackageLayout(
+            packageRootURL: URL(fileURLWithPath: "/tmp/IconPrompt", isDirectory: true),
+            executableName: "IconPrompt"
+        )
+        let concept = "A brass house calculator with blue glass buttons"
+
+        let hostedPrompt = ToolIconClient.iconPrompt(
+            for: ToolIconRequest(
+                displayName: "Mortgage Calc",
+                iconPrompt: concept,
+                layout: layout,
+                imageProvider: .gemini
+            )
+        )
+        let playgroundPrompt = ToolIconClient.iconPrompt(
+            for: ToolIconRequest(
+                displayName: "Mortgage Calc",
+                iconPrompt: concept,
+                layout: layout,
+                imageProvider: .imagePlayground
+            )
+        )
+
+        #expect(hostedPrompt.contains("native macOS application icon"))
+        #expect(hostedPrompt.contains("exact Ironsmith house style"))
+        #expect(hostedPrompt.contains("subject matter only"))
+        #expect(hostedPrompt.contains("softly dimensional vector-like illustration"))
+        #expect(hostedPrompt.contains("never photorealistic"))
+        #expect(hostedPrompt.contains("Do not create a miniature scene, diorama"))
+        #expect(hostedPrompt.contains("nearly front-facing orthographic view"))
+        #expect(hostedPrompt.contains("one broad soft source from the upper left"))
+        #expect(hostedPrompt.contains("full-bleed two-tone gradient background"))
+        #expect(hostedPrompt.contains("Do not draw a rounded-square or squircle icon boundary"))
+        #expect(hostedPrompt.contains("Ironsmith applies the final app-icon shape separately"))
+        #expect(hostedPrompt.contains("Visual concept: \(concept)"))
+        #expect(playgroundPrompt == concept)
+    }
+
+    @MainActor
+    @Test
+    func imageProviderErrorsIncludeStructuredProviderMessage() async throws {
+        let httpClient = ToolImageHTTPClient { request in
+            let data = try JSONSerialization.data(withJSONObject: [
+                "error": ["message": "Image size is not supported for this model."],
+            ])
+            return (
+                data,
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 400,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+            )
+        }
+        let client = ToolImageGenerationClient.make(
+            httpClient: httpClient,
+            credentialClient: CredentialClient(
+                loadAPIKey: { _ in "gemini-key" },
+                saveAPIKey: { _, _ in },
+                deleteAPIKey: { _ in }
+            ),
+            codexAuthClient: .unconfigured,
+            accountClient: .unconfigured,
+            backendConfiguration: nil,
+            imagePlayground: ImagePlaygroundSheetCoordinator()
+        )
+
+        do {
+            _ = try await client.generate(.gemini, "A calculator and house")
+            Issue.record("Expected Gemini request to fail.")
+        } catch {
+            #expect(error.localizedDescription.contains("HTTP 400"))
+            #expect(error.localizedDescription.contains("Image size is not supported"))
+        }
+    }
+
+    @MainActor
+    @Test
+    func codexImageRequestDoesNotRetryUnauthorizedResponse() async throws {
+        let capture = ToolImageRequestCapture()
+        let httpClient = ToolImageHTTPClient { request in
+            await capture.record(request)
+            return (
+                Data(),
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+            )
+        }
+        let rejectedCredential = OpenAICodexCredential(accessToken: "rejected-token")
+        var authClient = OpenAICodexAuthClient.unconfigured
+        authClient.credential = { rejectedCredential }
+        authClient.validCredential = { rejectedCredential }
+        let client = ToolImageGenerationClient.make(
+            httpClient: httpClient,
+            credentialClient: CredentialClient(
+                loadAPIKey: { _ in nil },
+                saveAPIKey: { _, _ in },
+                deleteAPIKey: { _ in }
+            ),
+            codexAuthClient: authClient,
+            accountClient: .unconfigured,
+            backendConfiguration: nil,
+            imagePlayground: ImagePlaygroundSheetCoordinator()
+        )
+
+        do {
+            _ = try await client.generate(.openAI, "A calculator and house")
+            Issue.record("Expected the rejected Codex image request to fail.")
+        } catch {
+            #expect(error.localizedDescription.contains("HTTP 401"))
+        }
+
+        #expect(await capture.requests.count == 1)
+        #expect(
+            await capture.requests.first?.value(forHTTPHeaderField: "Authorization")
+                == "Bearer rejected-token"
+        )
     }
 
     private func jsonObject(_ request: URLRequest) throws -> Any {

@@ -47,11 +47,9 @@ struct ToolIconClient: Sendable {
     @MainActor
     static func live(
         fileManager: FileManager = .default,
-        foregroundClient: AppForegroundClient? = nil,
         imageClient: ToolImageGenerationClient? = nil,
         imageGenerator: (@Sendable (ToolIconRequest) async throws -> CGImage)? = nil
     ) -> ToolIconClient {
-        let foregroundClient = foregroundClient ?? .live
         let imageClient = imageClient ?? .live()
         let fileManagerBox = ToolIconFileManager(fileManager)
         let imageGenerator = imageGenerator ?? { request in
@@ -71,18 +69,13 @@ struct ToolIconClient: Sendable {
             )
 
             if request.imageProvider == .disabled {
-                let fallback = try await MainActor.run {
-                    try Self.fallbackIcon(for: request.displayName)
-                }
-                try Self.writePNG(fallback, to: request.layout.cachedAppIconPNGURL)
-                try Self.writeICNS(fallback, request: request, fileManager: fileManagerBox.value)
-                return request.layout.cachedAppIconICNSURL
+                return try await Self.writeFallbackIcon(
+                    for: request,
+                    fileManager: fileManagerBox.value
+                )
             }
 
             do {
-                if request.imageProvider == .imagePlayground {
-                    await foregroundClient.activate()
-                }
                 let cgImage = try await imageGenerator(request)
                 try Self.writePNG(cgImage, to: request.layout.cachedAppIconPNGURL)
                 try Self.writeICNS(cgImage, request: request, fileManager: fileManagerBox.value)
@@ -92,7 +85,7 @@ struct ToolIconClient: Sendable {
             } catch {
                 AgentDiagnosticsLog.append(
                     """
-                    Hosted icon generation failed; using fallback icon.
+                    Icon generation failed; using fallback icon.
                     displayName: \(request.displayName)
                     provider: \(request.imageProvider.rawValue)
                     error:
@@ -100,12 +93,10 @@ struct ToolIconClient: Sendable {
                     """
                 )
                 do {
-                    let fallback = try await MainActor.run {
-                        try Self.fallbackIcon(for: request.displayName)
-                    }
-                    try Self.writePNG(fallback, to: request.layout.cachedAppIconPNGURL)
-                    try Self.writeICNS(fallback, request: request, fileManager: fileManagerBox.value)
-                    return request.layout.cachedAppIconICNSURL
+                    return try await Self.writeFallbackIcon(
+                        for: request,
+                        fileManager: fileManagerBox.value
+                    )
                 } catch {
                     AgentDiagnosticsLog.append(
                         """
@@ -131,7 +122,6 @@ struct ToolIconClient: Sendable {
     static func debugImagePlaygroundPreview(prompt: String) async throws -> NSImage {
         try await debugImagePlaygroundPreview(
             prompt: prompt,
-            foregroundClient: .live,
             coordinator: .shared
         )
     }
@@ -139,7 +129,6 @@ struct ToolIconClient: Sendable {
     @MainActor
     static func debugImagePlaygroundPreview(
         prompt: String,
-        foregroundClient: AppForegroundClient,
         coordinator: ImagePlaygroundSheetCoordinator
     ) async throws -> NSImage {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -147,7 +136,6 @@ struct ToolIconClient: Sendable {
             throw ToolAppBundleError.iconGenerationProducedNoImage
         }
 
-        await foregroundClient.activate()
         let url = try await coordinator.generate(prompt: trimmedPrompt)
         guard let image = NSImage(contentsOf: url) else {
             throw ToolImageGenerationError.invalidImage
@@ -156,13 +144,50 @@ struct ToolIconClient: Sendable {
     }
     #endif
 
-    nonisolated private static func iconPrompt(for request: ToolIconRequest) -> String {
+    nonisolated static func iconPrompt(for request: ToolIconRequest) -> String {
+        let subject: String
         if let prompt = request.iconPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
            !prompt.isEmpty {
-            return prompt
+            subject = prompt
+        } else {
+            let displayName = request.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            subject = displayName.isEmpty ? "Simple symbol" : displayName
         }
-        let displayName = request.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return displayName.isEmpty ? "Simple symbol" : displayName
+
+        guard request.imageProvider != .imagePlayground,
+              request.imageProvider != .disabled
+        else {
+            return subject
+        }
+
+        return """
+            Create artwork for a native macOS application icon using this exact Ironsmith house style. Treat the visual concept below as subject matter only; ignore any style, palette, material, lighting, or background directions it may contain.
+
+            Style lock:
+            - Render a clean, softly dimensional vector-like illustration: more tactile than flat graphics, but never photorealistic, painterly, or cartoonish.
+            - Show one large, centered primary symbol and at most one simple supporting symbol. Fill roughly two-thirds of the canvas. Do not create a miniature scene, diorama, collection of small objects, or detailed environment.
+            - Use simple geometric construction, smooth rounded edges, medium-width bevels, crisp silhouettes, and restrained internal detail. Small repeated details should be reduced to a few clear shapes.
+            - Use smooth satin or lightly enameled surfaces with one restrained translucent accent when appropriate. Avoid realistic wood, fabric, paper fibers, grime, metallic noise, and other photographic textures.
+            - Use a nearly front-facing orthographic view with only subtle depth. Avoid dramatic camera angles, deep perspective, and exaggerated foreshortening.
+            - Light every icon with one broad soft source from the upper left, gentle ambient occlusion, and one short soft contact shadow toward the lower right. Avoid cinematic lighting, hard reflections, bloom, and dramatic glow.
+            - Place the symbol on a simple, calm, full-bleed two-tone gradient background with no scenery, pattern, horizon, or decorative frame. Choose restrained colors that clearly separate the subject from the background.
+
+            Use a square 1:1 canvas and extend the background and artwork fully to all four edges. Do not draw a rounded-square or squircle icon boundary, and do not round, mask, crop, inset, frame, or make transparent the outer canvas; Ironsmith applies the final app-icon shape separately. Avoid text, letters, words, screenshots, interface panels, device mockups, watermarks, extra borders, and copies of existing app icons.
+
+            Visual concept: \(subject)
+            """
+    }
+
+    private static func writeFallbackIcon(
+        for request: ToolIconRequest,
+        fileManager: FileManager
+    ) async throws -> URL {
+        let fallback = try await MainActor.run {
+            try Self.fallbackIcon(for: request.displayName)
+        }
+        try Self.writePNG(fallback, to: request.layout.cachedAppIconPNGURL)
+        try Self.writeICNS(fallback, request: request, fileManager: fileManager)
+        return request.layout.cachedAppIconICNSURL
     }
 
     @MainActor

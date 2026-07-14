@@ -49,6 +49,29 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func liveMetadataClientSelectsConceptOnlyPromptModeForHostedImages() async throws {
+        let response = StructuredMetadataResponse(
+            metadata: GeneratedToolMetadata(
+                displayName: "Mortgage Calc",
+                iconPrompt: "A small house sheltering a calculator, with one coin orbiting the roofline."
+            )
+        )
+
+        _ = await ToolMetadataClient.live().suggestMetadata(
+            userPrompt: "Make a mortgage calculator",
+            imageGenerationProvider: .openAI,
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
+        )
+
+        let prompt = try #require(await response.prompts.first)
+        #expect(prompt.contains("Image prompt mode:\nHosted image generation; visual concept only."))
+    }
+
+    @MainActor
+    @Test
     func metadataSuggestionValidatesMenuBarSymbolAgainstAllowlist() async throws {
         let response = StructuredMetadataResponse(
             metadata: GeneratedToolMetadata(
