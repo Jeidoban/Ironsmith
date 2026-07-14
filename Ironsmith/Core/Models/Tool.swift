@@ -16,6 +16,7 @@ enum ToolGenerationPhase: String, Codable, CaseIterable, Equatable, Sendable {
     case initializing
     case planning
     case generatingIcon
+    case waitingForIcon
     case refiningPrompt
     case generatingSource
     case generatingEditDiff

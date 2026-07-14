@@ -453,6 +453,7 @@ final class ToolLibraryStore {
                     existingTool: selectedTool,
                     settings: submittedSettings,
                     languageModelContext: languageModelContext,
+                    imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
                     lifecycle: lifecycle
                 )
             )
@@ -741,6 +742,7 @@ final class ToolLibraryStore {
                     existingTool: tool,
                     settings: settings,
                     languageModelContext: languageModelContext,
+                    imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
                     lifecycle: lifecycle
                 )
             )

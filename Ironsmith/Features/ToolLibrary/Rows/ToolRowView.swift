@@ -332,6 +332,8 @@ enum ToolRowGenerationStatusResolver {
             return "Naming app"
         case .generatingIcon:
             return "Generating icon"
+        case .waitingForIcon:
+            return "Waiting for icon"
         case .refiningPrompt:
             return "Enhancing prompt"
         case .generatingSource:
@@ -353,7 +355,7 @@ enum ToolRowGenerationStatusResolver {
         switch phase {
         case .generatingSource, .generatingEditDiff, .generatingRepairDiff, .repairing:
             return true
-        case .initializing, .planning, .generatingIcon, .refiningPrompt, .packaging, .completed, nil:
+        case .initializing, .planning, .generatingIcon, .waitingForIcon, .refiningPrompt, .packaging, .completed, nil:
             return false
         }
     }

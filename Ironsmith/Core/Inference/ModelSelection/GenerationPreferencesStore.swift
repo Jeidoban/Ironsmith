@@ -8,6 +8,7 @@ final class GenerationPreferencesStore {
         static let generatedPromptRefinementEnabled = "generation.generatedPromptRefinementEnabled"
         static let codingAgentPreference = "generation.agentPipelineProfile"
         static let reasoningEffort = "generation.reasoningEffort"
+        static let imageGenerationProvider = "generation.imageGenerationProvider"
     }
 
     var generatedPromptRefinementEnabled: Bool {
@@ -23,6 +24,11 @@ final class GenerationPreferencesStore {
     var reasoningEffort: ToolReasoningEffort {
         didSet {
             userDefaults.set(reasoningEffort.rawValue, forKey: Key.reasoningEffort)
+        }
+    }
+    var imageGenerationProvider: ToolImageGenerationProvider {
+        didSet {
+            userDefaults.set(imageGenerationProvider.rawValue, forKey: Key.imageGenerationProvider)
         }
     }
     var generatedAppMicrophoneAccessEnabled: Bool {
@@ -125,6 +131,9 @@ final class GenerationPreferencesStore {
         self.reasoningEffort = userDefaults
             .string(forKey: Key.reasoningEffort)
             .flatMap(ToolReasoningEffort.init(rawValue:)) ?? .default
+        self.imageGenerationProvider = userDefaults
+            .string(forKey: Key.imageGenerationProvider)
+            .flatMap(ToolImageGenerationProvider.init(rawValue:)) ?? .imagePlayground
         self.generatedAppMicrophoneAccessEnabled = userDefaults.bool(
             forKey: GeneratedAppResourcePermission.microphone.userDefaultsKey
         )

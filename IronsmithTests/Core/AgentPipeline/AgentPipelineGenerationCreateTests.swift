@@ -8,6 +8,56 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
+    func newToolSourceGenerationRunsWhileIconGenerationIsWaiting() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let modelProbe = StreamingResponseProbe()
+        let iconProbe = StreamingResponseProbe()
+        let model = PartialThenSuspendingLanguageModel(
+            partialResponse: "import SwiftUI\nstruct ContentView: View {",
+            probe: modelProbe
+        )
+        let iconClient = ToolIconClient { request in
+            await iconProbe.recordStart(promptDescription: request.displayName)
+            try await Task.sleep(nanoseconds: 10_000_000_000)
+            return request.layout.cachedAppIconICNSURL
+        }
+        let runtime = Self.makeRuntime(
+            languageModel: model,
+            toolsDirectoryURL: toolsDirectory,
+            iconClient: iconClient,
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(displayName: "Parallel Icon", iconPrompt: "An anvil")
+            }
+        )
+
+        let task = Task {
+            try await runtime.generateTool(
+                for: "Build a tool while its icon is chosen",
+                settings: .default,
+                imageGenerationProvider: .imagePlayground
+            )
+        }
+        await Self.eventually {
+            let iconStarted = await iconProbe.didStart
+            let modelStarted = await modelProbe.didStart
+            return iconStarted && modelStarted
+        }
+
+        #expect(await iconProbe.didStart)
+        #expect(await modelProbe.didStart)
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Expected cancellation to stop the in-progress generation.")
+        } catch is CancellationError {
+            // Expected.
+        }
+    }
+
+    @MainActor
+    @Test
     func cancelledNewToolGenerationRemovesPartialPackage() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }

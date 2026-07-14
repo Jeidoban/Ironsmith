@@ -28,7 +28,7 @@ struct ToolAppBundleClient {
         processClient: SwiftPackageProcessClient = .live,
         iconClient: ToolIconClient? = nil
     ) -> ToolAppBundleClient {
-        let iconClient = iconClient ?? ToolIconClient.live()
+        let iconClient = iconClient ?? ToolIconClient.cachedOnly()
         return ToolAppBundleClient(
             buildInternalApp: { request in
                 try await buildApp(

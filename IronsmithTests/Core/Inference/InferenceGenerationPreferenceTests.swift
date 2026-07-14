@@ -8,6 +8,39 @@ import Testing
 extension InferenceTests {
     @MainActor
     @Test
+    func imageGenerationProviderDefaultsToPlaygroundAndPersists() {
+        let suiteName = "IronsmithTests.ImageGenerationProvider.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(preferences.imageGenerationProvider == .imagePlayground)
+
+        preferences.imageGenerationProvider = .gemini
+        #expect(
+            GenerationPreferencesStore(userDefaults: userDefaults).imageGenerationProvider == .gemini
+        )
+    }
+
+    @MainActor
+    @Test
+    func unavailableImageProviderReconcilesToPlaygroundOrOff() {
+        let preferences = Self.generationPreferences()
+        preferences.imageGenerationProvider = .gemini
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
+        store.providers = []
+
+        #expect(!store.availableImageGenerationProviders.contains(.gemini))
+        store.reconcileImageGenerationProvider()
+
+        let expected: ToolImageGenerationProvider = store.availableImageGenerationProviders.contains(.imagePlayground)
+            ? .imagePlayground
+            : .disabled
+        #expect(preferences.imageGenerationProvider == expected)
+    }
+
+    @MainActor
+    @Test
     func generatedPromptRefinementPreferenceDefaultsEnabledAndPersists() {
         let suiteName = "IronsmithTests.GeneratedPromptRefinement.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!

@@ -113,6 +113,7 @@ final class InferenceStore {
 
         ironsmithSession = dependencies.accountClient.currentSession()
         refreshOpenAICodexCredential()
+        reconcileImageGenerationProvider()
         let selectedRemoteProvider = providers.first { provider in
             provider.kind != .local
                 && selectedModelID?.hasPrefix("\(provider.identifier)::") == true
@@ -171,6 +172,7 @@ final class InferenceStore {
         if reconcileSelection {
             reconcileSelectedModel()
         }
+        reconcileImageGenerationProvider()
     }
 }
 

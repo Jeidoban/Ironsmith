@@ -178,14 +178,15 @@ struct ToolGenerationRuntimeDependencies {
         self.codexAgentClient = codexAgentClient
     }
 
+    @MainActor
     static func live(
         toolsDirectoryURL: URL = IronsmithPaths.toolsDirectory,
         fileClient: AgentFileClient = .live,
         processClient: SwiftPackageProcessClient = .live,
-        appBundleClient: ToolAppBundleClient = .live(),
-        iconClient: ToolIconClient = .live(),
-        metadataClient: ToolMetadataClient = .live(),
-        promptRefinementClient: ToolPromptRefinementClient = .live(),
+        appBundleClient: ToolAppBundleClient? = nil,
+        iconClient: ToolIconClient? = nil,
+        metadataClient: ToolMetadataClient? = nil,
+        promptRefinementClient: ToolPromptRefinementClient? = nil,
         versionBackupClient: ToolVersionBackupClient = .live,
         packageMaterializer: ToolPackageMaterializer? = nil,
         codexAgentClient: CodexAgentClient = .live()
@@ -194,10 +195,10 @@ struct ToolGenerationRuntimeDependencies {
             toolsDirectoryURL: toolsDirectoryURL,
             fileClient: fileClient,
             processClient: processClient,
-            appBundleClient: appBundleClient,
-            iconClient: iconClient,
-            metadataClient: metadataClient,
-            promptRefinementClient: promptRefinementClient,
+            appBundleClient: appBundleClient ?? .live(),
+            iconClient: iconClient ?? .live(),
+            metadataClient: metadataClient ?? .live(),
+            promptRefinementClient: promptRefinementClient ?? .live(),
             versionBackupClient: versionBackupClient,
             packageMaterializer: packageMaterializer,
             codexAgentClient: codexAgentClient

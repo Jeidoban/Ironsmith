@@ -17,6 +17,7 @@ extension InferenceStore {
     func signInToOpenAIChatGPT() async -> Bool {
         do {
             openAICodexCredential = try await dependencies.openAICodexAuthClient.signIn()
+            reconcileImageGenerationProvider()
             if let provider = providers.first(where: { $0.kind == .openAI }) {
                 await refreshDiscoveredModels(for: provider)
                 reconcileSelectedModel()
@@ -35,6 +36,7 @@ extension InferenceStore {
         do {
             try await dependencies.openAICodexAuthClient.signOut()
             openAICodexCredential = nil
+            reconcileImageGenerationProvider()
             if let provider {
                 remoteModels.removeAll {
                     $0.providerIdentifier == provider.identifier && $0.isOpenAICodexModel

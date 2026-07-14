@@ -3,6 +3,7 @@ import Foundation
 extension InferenceStore {
     func refreshIronsmithSession() {
         ironsmithSession = dependencies.accountClient.currentSession()
+        reconcileImageGenerationProvider()
     }
 
     func refreshIronsmithAccountSummary() async {
@@ -75,6 +76,7 @@ extension InferenceStore {
     ) async -> Bool {
         do {
             ironsmithSession = try await dependencies.accountClient.signInWithAppleOAuth(launchFlow)
+            reconcileImageGenerationProvider()
             let didEnsureProvider = await ensureIronsmithProviderExists()
             await refreshIronsmithAccountSummary()
             return didEnsureProvider
@@ -91,6 +93,7 @@ extension InferenceStore {
         do {
             try await dependencies.accountClient.signOut()
             ironsmithSession = nil
+            reconcileImageGenerationProvider()
             ironsmithAccountSummary = nil
             ironsmithCreditPacks = []
             pendingIronsmithAccountRefreshAfterCheckout = false
@@ -107,6 +110,7 @@ extension InferenceStore {
             try await dependencies.accountClient.deleteAccount()
             try? await dependencies.accountClient.signOut()
             ironsmithSession = nil
+            reconcileImageGenerationProvider()
             ironsmithAccountSummary = nil
             ironsmithCreditPacks = []
             pendingIronsmithAccountRefreshAfterCheckout = false

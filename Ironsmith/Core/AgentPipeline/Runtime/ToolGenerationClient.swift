@@ -67,6 +67,7 @@ nonisolated struct ToolGenerationRequest {
     let existingTool: Tool?
     let settings: ToolGenerationSettings
     let languageModelContext: AgentLanguageModelContext
+    let imageGenerationProvider: ToolImageGenerationProvider
     let lifecycle: ToolGenerationLifecycle
 
     init(
@@ -74,12 +75,14 @@ nonisolated struct ToolGenerationRequest {
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
         languageModelContext: AgentLanguageModelContext,
+        imageGenerationProvider: ToolImageGenerationProvider = .disabled,
         lifecycle: ToolGenerationLifecycle = .noop
     ) {
         self.prompt = prompt
         self.existingTool = existingTool
         self.settings = settings
         self.languageModelContext = languageModelContext
+        self.imageGenerationProvider = imageGenerationProvider
         self.lifecycle = lifecycle
     }
 }
@@ -97,10 +100,12 @@ struct ToolGenerationClient {
         self.generate = generate
     }
 
+    @MainActor
     static func live(
-        dependencies: ToolGenerationRuntimeDependencies = .live()
+        dependencies: ToolGenerationRuntimeDependencies? = nil
     ) -> Self {
-        Self { request in
+        let dependencies = dependencies ?? .live()
+        return Self { request in
             let context = ToolGenerationRuntimeContext(
                 languageModelContext: request.languageModelContext,
                 dependencies: dependencies
@@ -110,6 +115,7 @@ struct ToolGenerationClient {
                 for: request.prompt,
                 existingTool: request.existingTool,
                 settings: request.settings,
+                imageGenerationProvider: request.imageGenerationProvider,
                 lifecycle: request.lifecycle
             )
         }

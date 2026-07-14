@@ -2,21 +2,23 @@ import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
-import ImagePlayground
 
-struct ToolIconRequest: Equatable, Sendable {
+nonisolated struct ToolIconRequest: Equatable, Sendable {
     let displayName: String
     let iconPrompt: String?
     let layout: ToolPackageLayout
+    let imageProvider: ToolImageGenerationProvider
 
     init(
         displayName: String,
         iconPrompt: String? = nil,
-        layout: ToolPackageLayout
+        layout: ToolPackageLayout,
+        imageProvider: ToolImageGenerationProvider = .disabled
     ) {
         self.displayName = displayName
         self.iconPrompt = iconPrompt
         self.layout = layout
+        self.imageProvider = imageProvider
     }
 }
 
@@ -29,33 +31,70 @@ struct ToolIconClient: Sendable {
         request.layout.cachedAppIconICNSURL
     }
 
+    static func cachedOnly(fileManager: FileManager = .default) -> ToolIconClient {
+        let fileManagerBox = ToolIconFileManager(fileManager)
+        return ToolIconClient { request in
+            if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconICNSURL.path) {
+                return request.layout.cachedAppIconICNSURL
+            }
+            if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconPNGURL.path) {
+                return request.layout.cachedAppIconPNGURL
+            }
+            throw ToolAppBundleError.iconGenerationProducedNoImage
+        }
+    }
+
+    @MainActor
     static func live(
         fileManager: FileManager = .default,
-        foregroundClient: AppForegroundClient = .live,
+        foregroundClient: AppForegroundClient? = nil,
+        imageClient: ToolImageGenerationClient? = nil,
         imageGenerator: (@Sendable (ToolIconRequest) async throws -> CGImage)? = nil
     ) -> ToolIconClient {
-        let imageGenerator = imageGenerator ?? imagePlaygroundIcon(for:)
+        let foregroundClient = foregroundClient ?? .live
+        let imageClient = imageClient ?? .live()
+        let fileManagerBox = ToolIconFileManager(fileManager)
+        let imageGenerator = imageGenerator ?? { request in
+            try await imageClient.generate(
+                request.imageProvider,
+                Self.iconPrompt(for: request)
+            )
+        }
         return ToolIconClient { request in
-            if fileManager.fileExists(atPath: request.layout.cachedAppIconICNSURL.path) {
+            if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconICNSURL.path) {
                 return request.layout.cachedAppIconICNSURL
             }
 
-            try fileManager.createDirectory(
+            try fileManagerBox.value.createDirectory(
                 at: request.layout.packageMetadataDirectoryURL,
                 withIntermediateDirectories: true
             )
 
+            if request.imageProvider == .disabled {
+                let fallback = try await MainActor.run {
+                    try Self.fallbackIcon(for: request.displayName)
+                }
+                try Self.writePNG(fallback, to: request.layout.cachedAppIconPNGURL)
+                try Self.writeICNS(fallback, request: request, fileManager: fileManagerBox.value)
+                return request.layout.cachedAppIconICNSURL
+            }
+
             do {
-                await foregroundClient.activate()
+                if request.imageProvider == .imagePlayground {
+                    await foregroundClient.activate()
+                }
                 let cgImage = try await imageGenerator(request)
                 try Self.writePNG(cgImage, to: request.layout.cachedAppIconPNGURL)
-                try Self.writeICNS(cgImage, request: request, fileManager: fileManager)
+                try Self.writeICNS(cgImage, request: request, fileManager: fileManagerBox.value)
                 return request.layout.cachedAppIconICNSURL
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 AgentDiagnosticsLog.append(
                     """
-                    Image Playground icon generation failed; using fallback icon.
+                    Hosted icon generation failed; using fallback icon.
                     displayName: \(request.displayName)
+                    provider: \(request.imageProvider.rawValue)
                     error:
                     \(AgentDiagnosticsLog.renderError(error, limit: 500))
                     """
@@ -65,7 +104,7 @@ struct ToolIconClient: Sendable {
                         try Self.fallbackIcon(for: request.displayName)
                     }
                     try Self.writePNG(fallback, to: request.layout.cachedAppIconPNGURL)
-                    try Self.writeICNS(fallback, request: request, fileManager: fileManager)
+                    try Self.writeICNS(fallback, request: request, fileManager: fileManagerBox.value)
                     return request.layout.cachedAppIconICNSURL
                 } catch {
                     AgentDiagnosticsLog.append(
@@ -79,7 +118,7 @@ struct ToolIconClient: Sendable {
                 }
             }
 
-            if fileManager.fileExists(atPath: request.layout.cachedAppIconPNGURL.path) {
+            if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconPNGURL.path) {
                 return request.layout.cachedAppIconPNGURL
             }
 
@@ -87,48 +126,35 @@ struct ToolIconClient: Sendable {
         }
     }
 
-    private static func imagePlaygroundIcon(for request: ToolIconRequest) async throws -> CGImage {
-        try await imagePlaygroundImage(for: Self.iconPrompt(for: request))
-    }
-
     #if DEBUG
     @MainActor
     static func debugImagePlaygroundPreview(prompt: String) async throws -> NSImage {
-        try await debugImagePlaygroundPreview(prompt: prompt, foregroundClient: .live)
+        try await debugImagePlaygroundPreview(
+            prompt: prompt,
+            foregroundClient: .live,
+            coordinator: .shared
+        )
     }
 
     @MainActor
-    static func debugImagePlaygroundPreview(prompt: String, foregroundClient: AppForegroundClient) async throws
-        -> NSImage
-    {
+    static func debugImagePlaygroundPreview(
+        prompt: String,
+        foregroundClient: AppForegroundClient,
+        coordinator: ImagePlaygroundSheetCoordinator
+    ) async throws -> NSImage {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else {
             throw ToolAppBundleError.iconGenerationProducedNoImage
         }
 
         await foregroundClient.activate()
-        let cgImage = try await imagePlaygroundImage(for: trimmedPrompt)
-        return NSImage(
-            cgImage: cgImage,
-            size: NSSize(width: cgImage.width, height: cgImage.height)
-        )
+        let url = try await coordinator.generate(prompt: trimmedPrompt)
+        guard let image = NSImage(contentsOf: url) else {
+            throw ToolImageGenerationError.invalidImage
+        }
+        return image
     }
     #endif
-
-    private static func imagePlaygroundImage(for prompt: String) async throws -> CGImage {
-        let creator = try await ImageCreator()
-        let style = creator.availableStyles.contains(.illustration)
-            ? ImagePlaygroundStyle.illustration
-            : (creator.availableStyles.first ?? .illustration)
-        let concept = ImagePlaygroundConcept.text(prompt)
-        let sequence = creator.images(for: [concept], style: style, limit: 1)
-
-        for try await image in sequence {
-            return image.cgImage
-        }
-
-        throw ToolAppBundleError.iconGenerationProducedNoImage
-    }
 
     nonisolated private static func iconPrompt(for request: ToolIconRequest) -> String {
         if let prompt = request.iconPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -368,5 +394,13 @@ struct ToolIconClient: Sendable {
             throw ToolAppBundleError.iconEncodingFailed
         }
         return scaled
+    }
+}
+
+nonisolated private final class ToolIconFileManager: @unchecked Sendable {
+    let value: FileManager
+
+    init(_ value: FileManager) {
+        self.value = value
     }
 }

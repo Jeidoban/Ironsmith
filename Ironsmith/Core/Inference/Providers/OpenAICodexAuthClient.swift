@@ -7,6 +7,9 @@ nonisolated struct OpenAICodexAuthClient {
     var signIn: @Sendable () async throws -> OpenAICodexCredential
     var signOut: @Sendable () async throws -> Void
     var validCredential: @Sendable () async throws -> OpenAICodexCredential
+    var forceRefreshCredential: @Sendable () async throws -> OpenAICodexCredential = {
+        throw OpenAICodexAuthClientError.missingCredential
+    }
     var discoverModels: @Sendable () async throws -> [OpenAICodexModel]
     var modelMetadata: @Sendable (String) async throws -> OpenAICodexModel? = { _ in nil }
 }
@@ -44,6 +47,9 @@ extension OpenAICodexAuthClient {
             },
             validCredential: {
                 try await tokenStore.validCredential()
+            },
+            forceRefreshCredential: {
+                try await tokenStore.forceRefreshCredential()
             },
             discoverModels: {
                 try await modelCatalog.refresh()
@@ -306,6 +312,15 @@ private actor OpenAICodexTokenStore {
             return credential
         }
 
+        let refreshed = try await refreshCredential(credential)
+        try authFileClient.saveCredential(refreshed)
+        return refreshed
+    }
+
+    func forceRefreshCredential() async throws -> OpenAICodexCredential {
+        guard let credential = try authFileClient.credential() else {
+            throw OpenAICodexAuthClientError.missingCredential
+        }
         let refreshed = try await refreshCredential(credential)
         try authFileClient.saveCredential(refreshed)
         return refreshed
