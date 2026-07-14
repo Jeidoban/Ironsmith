@@ -2,6 +2,8 @@ import AnyLanguageModel
 import Foundation
 
 struct SingleFileToolGenerationRuntime {
+    static let codexIconGenerationStagger: Duration = .seconds(1)
+
     let context: ToolGenerationRuntimeContext
 
     private struct CreateToolSetup {
@@ -199,7 +201,15 @@ struct SingleFileToolGenerationRuntime {
 
         do {
             try Task.checkCancellation()
+            let staggerIconGeneration = Self.shouldStaggerIconGeneration(
+                imageGenerationProvider: imageGenerationProvider,
+                promptRefinementEnabled: context.promptRefinementEnabled,
+                promptRefinementModel: context.promptRefinement.languageModel
+            )
             let iconTask = Task {
+                if staggerIconGeneration {
+                    try await Task.sleep(for: Self.codexIconGenerationStagger)
+                }
                 try await generateIconAssets(
                     displayName: setup.displayName,
                     iconPrompt: setup.iconPrompt,
@@ -295,6 +305,16 @@ struct SingleFileToolGenerationRuntime {
             }
             throw CancellationError()
         }
+    }
+
+    nonisolated static func shouldStaggerIconGeneration(
+        imageGenerationProvider: ToolImageGenerationProvider,
+        promptRefinementEnabled: Bool,
+        promptRefinementModel: any LanguageModel
+    ) -> Bool {
+        imageGenerationProvider == .openAI
+            && promptRefinementEnabled
+            && ModelGenerationCapabilities.isOpenAICodexLanguageModel(promptRefinementModel)
     }
 
     private func contentGenerationPrompt(

@@ -8,6 +8,49 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
+    func codexIconGenerationStaggersOnlyWhenCodexPromptRefinementCanOverlap() {
+        let base = OpenAILanguageModel(
+            baseURL: OpenAICodexBackend.backendBaseURL,
+            apiKey: "token",
+            model: "gpt-5.6-luna",
+            apiVariant: .responses
+        )
+        let codexModel = OpenAICodexLanguageModel(base: base, usesResponsesLite: true)
+        let regularModel = StubAgentLanguageModel { _, _ in "" }
+
+        #expect(
+            SingleFileToolGenerationRuntime.shouldStaggerIconGeneration(
+                imageGenerationProvider: .openAI,
+                promptRefinementEnabled: true,
+                promptRefinementModel: codexModel
+            )
+        )
+        #expect(
+            !SingleFileToolGenerationRuntime.shouldStaggerIconGeneration(
+                imageGenerationProvider: .gemini,
+                promptRefinementEnabled: true,
+                promptRefinementModel: codexModel
+            )
+        )
+        #expect(
+            !SingleFileToolGenerationRuntime.shouldStaggerIconGeneration(
+                imageGenerationProvider: .openAI,
+                promptRefinementEnabled: false,
+                promptRefinementModel: codexModel
+            )
+        )
+        #expect(
+            !SingleFileToolGenerationRuntime.shouldStaggerIconGeneration(
+                imageGenerationProvider: .openAI,
+                promptRefinementEnabled: true,
+                promptRefinementModel: regularModel
+            )
+        )
+        #expect(SingleFileToolGenerationRuntime.codexIconGenerationStagger == .seconds(1))
+    }
+
+    @MainActor
+    @Test
     func newToolSourceGenerationRunsWhileIconGenerationIsWaiting() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }

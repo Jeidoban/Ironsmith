@@ -52,12 +52,13 @@ struct ToolIconClient: Sendable {
     ) -> ToolIconClient {
         let imageClient = imageClient ?? .live()
         let fileManagerBox = ToolIconFileManager(fileManager)
-        let imageGenerator = imageGenerator ?? { request in
-            try await imageClient.generate(
-                request.imageProvider,
-                Self.iconPrompt(for: request)
-            )
-        }
+        let imageGenerator =
+            imageGenerator ?? { request in
+                try await imageClient.generate(
+                    request.imageProvider,
+                    Self.iconPrompt(for: request)
+                )
+            }
         return ToolIconClient { request in
             if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconICNSURL.path) {
                 return request.layout.cachedAppIconICNSURL
@@ -118,36 +119,37 @@ struct ToolIconClient: Sendable {
     }
 
     #if DEBUG
-    @MainActor
-    static func debugImagePlaygroundPreview(prompt: String) async throws -> NSImage {
-        try await debugImagePlaygroundPreview(
-            prompt: prompt,
-            coordinator: .shared
-        )
-    }
-
-    @MainActor
-    static func debugImagePlaygroundPreview(
-        prompt: String,
-        coordinator: ImagePlaygroundSheetCoordinator
-    ) async throws -> NSImage {
-        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else {
-            throw ToolAppBundleError.iconGenerationProducedNoImage
+        @MainActor
+        static func debugImagePlaygroundPreview(prompt: String) async throws -> NSImage {
+            try await debugImagePlaygroundPreview(
+                prompt: prompt,
+                coordinator: .shared
+            )
         }
 
-        let url = try await coordinator.generate(prompt: trimmedPrompt)
-        guard let image = NSImage(contentsOf: url) else {
-            throw ToolImageGenerationError.invalidImage
+        @MainActor
+        static func debugImagePlaygroundPreview(
+            prompt: String,
+            coordinator: ImagePlaygroundSheetCoordinator
+        ) async throws -> NSImage {
+            let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedPrompt.isEmpty else {
+                throw ToolAppBundleError.iconGenerationProducedNoImage
+            }
+
+            let url = try await coordinator.generate(prompt: trimmedPrompt)
+            guard let image = NSImage(contentsOf: url) else {
+                throw ToolImageGenerationError.invalidImage
+            }
+            return image
         }
-        return image
-    }
     #endif
 
     nonisolated static func iconPrompt(for request: ToolIconRequest) -> String {
         let subject: String
         if let prompt = request.iconPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !prompt.isEmpty {
+            !prompt.isEmpty
+        {
             subject = prompt
         } else {
             let displayName = request.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -155,10 +157,11 @@ struct ToolIconClient: Sendable {
         }
 
         guard request.imageProvider != .imagePlayground,
-              request.imageProvider != .disabled
+            request.imageProvider != .disabled
         else {
             return subject
         }
+        let palette = hostedIconPalette(for: request.displayName)
 
         return """
             Create artwork for a native macOS application icon using this exact Ironsmith house style. Treat the visual concept below as subject matter only; ignore any style, palette, material, lighting, or background directions it may contain.
@@ -170,12 +173,33 @@ struct ToolIconClient: Sendable {
             - Use smooth satin or lightly enameled surfaces with one restrained translucent accent when appropriate. Avoid realistic wood, fabric, paper fibers, grime, metallic noise, and other photographic textures.
             - Use a nearly front-facing orthographic view with only subtle depth. Avoid dramatic camera angles, deep perspective, and exaggerated foreshortening.
             - Light every icon with one broad soft source from the upper left, gentle ambient occlusion, and one short soft contact shadow toward the lower right. Avoid cinematic lighting, hard reflections, bloom, and dramatic glow.
-            - Place the symbol on a simple, calm, full-bleed two-tone gradient background with no scenery, pattern, horizon, or decorative frame. Choose restrained colors that clearly separate the subject from the background.
+            - Place the symbol on a simple, calm, full-bleed two-tone gradient background with no scenery, pattern, horizon, or decorative frame.
+
+            Mandatory palette: \(palette). Keep the background's dominant hue within this assigned family. Use restrained subject colors that remain clearly separated from the background.
 
             Use a square 1:1 canvas and extend the background and artwork fully to all four edges. Do not draw a rounded-square or squircle icon boundary, and do not round, mask, crop, inset, frame, or make transparent the outer canvas; Ironsmith applies the final app-icon shape separately. Avoid text, letters, words, screenshots, interface panels, device mockups, watermarks, extra borders, and copies of existing app icons.
 
             Visual concept: \(subject)
             """
+    }
+
+    nonisolated static func hostedIconPalette(for displayName: String) -> String {
+        let palettes = [
+            "a warm coral-to-apricot background with cream and deep plum accents",
+            "a golden amber-to-ochre background with ivory and deep cocoa accents",
+            "an emerald-to-jade background with warm ivory and dark forest accents",
+            "a violet-to-orchid background with soft lilac and deep aubergine accents",
+            "a rose-to-raspberry background with pale blush and burgundy accents",
+            "a turquoise-to-teal background with pale mint and deep teal accents",
+            "a charcoal-to-graphite background with silver and muted chartreuse accents",
+            "a warm sand-to-terracotta background with ivory and dark umber accents",
+        ]
+        var hash: UInt64 = 1_469_598_103_934_665_603
+        for byte in displayName.lowercased().utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return palettes[Int(hash % UInt64(palettes.count))]
     }
 
     private static func writeFallbackIcon(
@@ -194,18 +218,20 @@ struct ToolIconClient: Sendable {
     private static func fallbackIcon(for displayName: String) throws -> CGImage {
         let pixelSize = 1024
         let size = NSSize(width: pixelSize, height: pixelSize)
-        guard let representation = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: pixelSize,
-            pixelsHigh: pixelSize,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ), let graphicsContext = NSGraphicsContext(bitmapImageRep: representation) else {
+        guard
+            let representation = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: pixelSize,
+                pixelsHigh: pixelSize,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            ), let graphicsContext = NSGraphicsContext(bitmapImageRep: representation)
+        else {
             throw ToolAppBundleError.iconEncodingFailed
         }
         representation.size = size
@@ -215,7 +241,8 @@ struct ToolIconClient: Sendable {
         defer { NSGraphicsContext.restoreGraphicsState() }
 
         let rect = NSRect(origin: .zero, size: size)
-        let path = NSBezierPath(roundedRect: rect.insetBy(dx: 60, dy: 60), xRadius: 220, yRadius: 220)
+        let path = NSBezierPath(
+            roundedRect: rect.insetBy(dx: 60, dy: 60), xRadius: 220, yRadius: 220)
         path.addClip()
 
         let gradient = NSGradient(colors: Self.fallbackPalette(for: displayName))
@@ -243,10 +270,12 @@ struct ToolIconClient: Sendable {
     }
 
     nonisolated private static func initials(for displayName: String) -> String {
-        let words = displayName
+        let words =
+            displayName
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
-        let letters = words
+        let letters =
+            words
             .prefix(2)
             .compactMap(\.first)
             .map { String($0).uppercased() }
@@ -307,12 +336,12 @@ struct ToolIconClient: Sendable {
         let previewImage = try scaledImage(cgImage, pixelSize: previewPixelSize)
         let capacity = max(4_096, previewImage.width * previewImage.height * 4)
         guard let data = NSMutableData(capacity: capacity),
-              let destination = CGImageDestinationCreateWithData(
+            let destination = CGImageDestinationCreateWithData(
                 data,
                 "public.png" as CFString,
                 1,
                 nil
-              )
+            )
         else {
             throw ToolAppBundleError.iconEncodingFailed
         }
@@ -327,12 +356,14 @@ struct ToolIconClient: Sendable {
         guard cgImage.width > 0, cgImage.height > 0 else {
             throw ToolAppBundleError.iconEncodingFailed
         }
-        guard let destination = CGImageDestinationCreateWithURL(
-            url as CFURL,
-            "public.png" as CFString,
-            1,
-            nil
-        ) else {
+        guard
+            let destination = CGImageDestinationCreateWithURL(
+                url as CFURL,
+                "public.png" as CFString,
+                1,
+                nil
+            )
+        else {
             throw ToolAppBundleError.iconEncodingFailed
         }
         CGImageDestinationAddImage(destination, cgImage, nil)
@@ -370,7 +401,7 @@ struct ToolIconClient: Sendable {
         process.arguments = [
             "-c", "icns",
             "-o", request.layout.cachedAppIconICNSURL.path,
-            iconsetURL.path
+            iconsetURL.path,
         ]
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -378,13 +409,17 @@ struct ToolIconClient: Sendable {
         process.standardError = errorPipe
         try process.run()
         process.waitUntilExit()
-        let stdout = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stdout =
+            String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+            ?? ""
+        let stderr =
+            String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+            ?? ""
 
         try? fileManager.removeItem(at: iconsetURL)
 
         guard process.terminationStatus == 0,
-              fileManager.fileExists(atPath: request.layout.cachedAppIconICNSURL.path)
+            fileManager.fileExists(atPath: request.layout.cachedAppIconICNSURL.path)
         else {
             AgentDiagnosticsLog.append(
                 """
@@ -399,17 +434,21 @@ struct ToolIconClient: Sendable {
         }
     }
 
-    nonisolated private static func scaledImage(_ cgImage: CGImage, pixelSize: Int) throws -> CGImage {
+    nonisolated private static func scaledImage(_ cgImage: CGImage, pixelSize: Int) throws
+        -> CGImage
+    {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: nil,
-            width: pixelSize,
-            height: pixelSize,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
+        guard
+            let context = CGContext(
+                data: nil,
+                width: pixelSize,
+                height: pixelSize,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else {
             throw ToolAppBundleError.iconEncodingFailed
         }
 

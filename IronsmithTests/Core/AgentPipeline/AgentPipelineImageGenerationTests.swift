@@ -131,10 +131,28 @@ extension AgentPipelineTests {
         #expect(hostedPrompt.contains("nearly front-facing orthographic view"))
         #expect(hostedPrompt.contains("one broad soft source from the upper left"))
         #expect(hostedPrompt.contains("full-bleed two-tone gradient background"))
+        #expect(hostedPrompt.contains("Mandatory palette:"))
+        #expect(hostedPrompt.contains(ToolIconClient.hostedIconPalette(for: "Mortgage Calc")))
+        #expect(hostedPrompt.contains("do not replace it with generic blue"))
         #expect(hostedPrompt.contains("Do not draw a rounded-square or squircle icon boundary"))
         #expect(hostedPrompt.contains("Ironsmith applies the final app-icon shape separately"))
         #expect(hostedPrompt.contains("Visual concept: \(concept)"))
         #expect(playgroundPrompt == concept)
+    }
+
+    @Test
+    func hostedIconPaletteVariesDeterministicallyAcrossAppNames() {
+        let names = [
+            "Mortgage Calc", "Notes", "Timer", "Recipe Box", "Budget", "Weather",
+            "Habit Tracker", "Clipboard", "Converter", "Calendar", "Sketch", "Inventory",
+        ]
+        let palettes = names.map(ToolIconClient.hostedIconPalette(for:))
+
+        #expect(Set(palettes).count >= 6)
+        #expect(
+            ToolIconClient.hostedIconPalette(for: "Mortgage Calc")
+                == ToolIconClient.hostedIconPalette(for: "Mortgage Calc")
+        )
     }
 
     @MainActor
