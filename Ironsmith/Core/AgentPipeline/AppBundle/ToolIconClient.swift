@@ -22,6 +22,50 @@ nonisolated struct ToolIconRequest: Equatable, Sendable {
     }
 }
 
+actor ToolHostedIconPaletteStore {
+    static let shared = ToolHostedIconPaletteStore()
+    nonisolated static let recentPaletteLimit = 10
+
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+    }
+
+    func palette(for displayName: String) -> String {
+        let paletteCount = ToolIconClient.hostedIconPalettes.count
+        let preferredIndex = ToolIconClient.hostedIconPaletteIndex(for: displayName)
+        let recentIndices = recentPaletteIndices(paletteCount: paletteCount)
+        let excludedIndices = Set(recentIndices)
+        let selectedIndex = (0..<paletteCount)
+            .lazy
+            .map { (preferredIndex + $0) % paletteCount }
+            .first { !excludedIndices.contains($0) } ?? preferredIndex
+        let updatedIndices = Array(
+            (recentIndices + [selectedIndex]).suffix(Self.recentPaletteLimit)
+        )
+        userDefaults.set(
+            updatedIndices,
+            forKey: IronsmithPreferenceKeys.recentHostedIconPaletteIndices
+        )
+        return ToolIconClient.hostedIconPalettes[selectedIndex]
+    }
+
+    private func recentPaletteIndices(paletteCount: Int) -> [Int] {
+        if let storedIndices = userDefaults.array(
+            forKey: IronsmithPreferenceKeys.recentHostedIconPaletteIndices
+        ) {
+            return Array(
+                storedIndices
+                    .compactMap { ($0 as? NSNumber)?.intValue }
+                    .filter { (0..<paletteCount).contains($0) }
+                    .suffix(Self.recentPaletteLimit)
+            )
+        }
+        return []
+    }
+}
+
 struct ToolIconClient: Sendable {
     var ensureIconAssets: @Sendable (ToolIconRequest) async throws -> URL
 
@@ -48,15 +92,22 @@ struct ToolIconClient: Sendable {
     static func live(
         fileManager: FileManager = .default,
         imageClient: ToolImageGenerationClient? = nil,
+        hostedIconPaletteStore: ToolHostedIconPaletteStore = .shared,
         imageGenerator: (@Sendable (ToolIconRequest) async throws -> CGImage)? = nil
     ) -> ToolIconClient {
         let imageClient = imageClient ?? .live()
         let fileManagerBox = ToolIconFileManager(fileManager)
         let imageGenerator =
             imageGenerator ?? { request in
-                try await imageClient.generate(
+                let hostedPalette: String?
+                if request.imageProvider == .imagePlayground || request.imageProvider == .disabled {
+                    hostedPalette = nil
+                } else {
+                    hostedPalette = await hostedIconPaletteStore.palette(for: request.displayName)
+                }
+                return try await imageClient.generate(
                     request.imageProvider,
-                    Self.iconPrompt(for: request)
+                    Self.iconPrompt(for: request, hostedPalette: hostedPalette)
                 )
             }
         return ToolIconClient { request in
@@ -145,7 +196,10 @@ struct ToolIconClient: Sendable {
         }
     #endif
 
-    nonisolated static func iconPrompt(for request: ToolIconRequest) -> String {
+    nonisolated static func iconPrompt(
+        for request: ToolIconRequest,
+        hostedPalette: String? = nil
+    ) -> String {
         let subject: String
         if let prompt = request.iconPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
             !prompt.isEmpty
@@ -161,7 +215,7 @@ struct ToolIconClient: Sendable {
         else {
             return subject
         }
-        let palette = hostedIconPalette(for: request.displayName)
+        let palette = hostedPalette ?? hostedIconPalette(for: request.displayName)
 
         return """
             Create artwork for a native macOS application icon using this exact Ironsmith house style. Treat the visual concept below as subject matter only; ignore any style, palette, material, lighting, or background directions it may contain.
@@ -175,7 +229,7 @@ struct ToolIconClient: Sendable {
             - Light every icon with one broad soft source from the upper left, gentle ambient occlusion, and one short soft contact shadow toward the lower right. Avoid cinematic lighting, hard reflections, bloom, and dramatic glow.
             - Place the symbol on a simple, calm, full-bleed two-tone gradient background with no scenery, pattern, horizon, or decorative frame.
 
-            Mandatory palette: \(palette). Keep the background's dominant hue within this assigned family. Use restrained subject colors that remain clearly separated from the background.
+            Mandatory palette: \(palette). Keep the background's dominant hue within this assigned family and do not replace it with generic blue. Use restrained subject colors that remain clearly separated from the background.
 
             Use a square 1:1 canvas and extend the background and artwork fully to all four edges. Do not draw a rounded-square or squircle icon boundary, and do not round, mask, crop, inset, frame, or make transparent the outer canvas; Ironsmith applies the final app-icon shape separately. Avoid text, letters, words, screenshots, interface panels, device mockups, watermarks, extra borders, and copies of existing app icons.
 
@@ -183,23 +237,40 @@ struct ToolIconClient: Sendable {
             """
     }
 
+    nonisolated static let hostedIconPalettes = [
+        "a warm coral-to-apricot background with cream and deep plum accents",
+        "a golden amber-to-ochre background with ivory and deep cocoa accents",
+        "an emerald-to-jade background with warm ivory and dark forest accents",
+        "a violet-to-orchid background with soft lilac and deep aubergine accents",
+        "a rose-to-raspberry background with pale blush and burgundy accents",
+        "a turquoise-to-teal background with pale mint and deep teal accents",
+        "a charcoal-to-graphite background with silver and muted chartreuse accents",
+        "a warm sand-to-terracotta background with ivory and dark umber accents",
+        "a cobalt-to-indigo background with pale sky and midnight navy accents",
+        "a crimson-to-vermilion background with warm ivory and deep maroon accents",
+        "a lemon-to-chartreuse background with soft cream and dark olive accents",
+        "a periwinkle-to-lavender background with pearl and deep ink accents",
+        "a copper-to-russet background with parchment and espresso accents",
+        "a cyan-to-cerulean background with icy white and deep navy accents",
+        "a magenta-to-fuchsia background with pale pink and dark mulberry accents",
+        "a moss-to-olive background with warm linen and deep pine accents",
+        "a plum-to-wine background with soft mauve and near-black accents",
+        "a peach-to-salmon background with vanilla and deep aubergine accents",
+        "a slate-to-steel-blue background with cool mist and midnight accents",
+        "a mint-to-seafoam background with warm ivory and dark spruce accents",
+    ]
+
     nonisolated static func hostedIconPalette(for displayName: String) -> String {
-        let palettes = [
-            "a warm coral-to-apricot background with cream and deep plum accents",
-            "a golden amber-to-ochre background with ivory and deep cocoa accents",
-            "an emerald-to-jade background with warm ivory and dark forest accents",
-            "a violet-to-orchid background with soft lilac and deep aubergine accents",
-            "a rose-to-raspberry background with pale blush and burgundy accents",
-            "a turquoise-to-teal background with pale mint and deep teal accents",
-            "a charcoal-to-graphite background with silver and muted chartreuse accents",
-            "a warm sand-to-terracotta background with ivory and dark umber accents",
-        ]
+        hostedIconPalettes[hostedIconPaletteIndex(for: displayName)]
+    }
+
+    nonisolated static func hostedIconPaletteIndex(for displayName: String) -> Int {
         var hash: UInt64 = 1_469_598_103_934_665_603
         for byte in displayName.lowercased().utf8 {
             hash ^= UInt64(byte)
             hash &*= 1_099_511_628_211
         }
-        return palettes[Int(hash % UInt64(palettes.count))]
+        return Int(hash % UInt64(hostedIconPalettes.count))
     }
 
     private static func writeFallbackIcon(

@@ -148,10 +148,37 @@ extension AgentPipelineTests {
         ]
         let palettes = names.map(ToolIconClient.hostedIconPalette(for:))
 
+        #expect(ToolIconClient.hostedIconPalettes.count >= 20)
         #expect(Set(palettes).count >= 6)
         #expect(
             ToolIconClient.hostedIconPalette(for: "Mortgage Calc")
                 == ToolIconClient.hostedIconPalette(for: "Mortgage Calc")
+        )
+    }
+
+    @Test
+    func hostedIconPaletteExcludesTenRecentSelectionsAcrossStoreInstances() async {
+        let suiteName = "IronsmithTests.HostedIconPalette.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let sineTonePalette = ToolIconClient.hostedIconPalette(for: "Sine Tone")
+
+        let firstStore = ToolHostedIconPaletteStore(userDefaults: userDefaults)
+        var selections: [String] = []
+        for _ in 0..<5 {
+            selections.append(await firstStore.palette(for: "Sine Tone"))
+        }
+        let reloadedStore = ToolHostedIconPaletteStore(userDefaults: userDefaults)
+        for _ in 0..<6 {
+            selections.append(await reloadedStore.palette(for: "Sine Tone"))
+        }
+
+        #expect(selections.first == sineTonePalette)
+        #expect(Set(selections.prefix(10)).count == 10)
+        #expect(Set(selections.suffix(10)).count == 10)
+        #expect(
+            userDefaults.array(forKey: IronsmithPreferenceKeys.recentHostedIconPaletteIndices)?.count
+                == ToolHostedIconPaletteStore.recentPaletteLimit
         )
     }
 
