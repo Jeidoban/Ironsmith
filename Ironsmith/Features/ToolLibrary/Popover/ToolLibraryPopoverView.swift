@@ -13,6 +13,10 @@ struct ToolLibraryPopoverView: View {
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
     @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled) private var isStoreFeatureEnabled =
         false
+    @AppStorage(IronsmithPreferenceKeys.toolLibraryViewMode) private var viewModeRawValue =
+        ToolLibraryViewMode.list.rawValue
+    @AppStorage(IronsmithPreferenceKeys.toolLibrarySortOrder) private var sortOrderRawValue =
+        ToolLibrarySortOrder.latest.rawValue
     #if DEBUG
         @AppStorage(IronsmithPreferenceKeys.debugAlwaysShowWelcomeOnboarding)
         private var debugAlwaysShowWelcomeOnboarding = false
@@ -31,6 +35,8 @@ struct ToolLibraryPopoverView: View {
     @State private var isShowingWelcomeOnboarding = false
     @State private var isShowingModelPicker = false
     @State private var isSigningInToIronsmith = false
+    @State private var isSearchPresented = false
+    @State private var searchText = ""
     @FocusState private var isPromptFocused: Bool
 
     @MainActor
@@ -63,6 +69,10 @@ struct ToolLibraryPopoverView: View {
         // The menu bar popover stays intentionally small: tool list first, prompt last.
         VStack(spacing: 14) {
             ToolLibraryPopoverHeaderView(
+                isSearchPresented: $isSearchPresented,
+                searchText: $searchText,
+                viewMode: viewModeBinding,
+                sortOrder: sortOrderBinding,
                 appUpdateStore: appUpdateStore,
                 isLoadingModels: !inferenceStore.hasLoadedModels && !shouldForceNoModels,
                 selectedModelStatusText: selectedModelStatusText,
@@ -77,98 +87,7 @@ struct ToolLibraryPopoverView: View {
             )
 
             ScrollView {
-                LazyVStack(spacing: 10) {
-                    if shouldShowEmptyState {
-                        ToolLibraryEmptyStateView(
-                            showsNoModelActions: shouldShowNoModelsEmptyState,
-                            isSigningInToIronsmith: isSigningInToIronsmith,
-                            onSignInToIronsmith: signInToIronsmith
-                        )
-                    } else {
-                        ForEach(tools) { tool in
-                            // Clicking the row selects edit mode; the context menu
-                            // keeps secondary actions out of the main flow.
-                            ToolRowView(
-                                tool: tool,
-                                isSelected: toolLibraryStore.isSelected(tool),
-                                isRunning: toolLibraryStore.runningToolID == tool.id,
-                                isExporting: toolLibraryStore.exportingToolID == tool.id,
-                                isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
-                                isRestoring: toolLibraryStore.restoringToolID == tool.id,
-                                canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
-                                showsStoreActions: isStoreFeatureEnabled,
-                                canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
-                                activeCodingAgent: toolLibraryStore.activeCodingAgent(for: tool),
-                                canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool),
-                                onSelect: {
-                                    toolLibraryStore.toggleSelection(
-                                        for: tool,
-                                        defaultSettings: defaultGenerationSettings
-                                    )
-                                },
-                                onEdit: {
-                                    selectToolForEditing(tool)
-                                },
-                                onRun: {
-                                    Task {
-                                        await toolLibraryStore.run(tool)
-                                    }
-                                },
-                                onRename: {
-                                    beginRenaming(tool)
-                                },
-                                onRebuild: {
-                                    Task {
-                                        await toolLibraryStore.rebuild(tool, in: modelContext)
-                                    }
-                                },
-                                onPublishToStore: {
-                                    routeStore.open(.toolLibrary(.publishTool(tool.id)))
-                                },
-                                onRevert: {
-                                    Task {
-                                        await toolLibraryStore.restorePreviousVersion(
-                                            tool, in: modelContext)
-                                    }
-                                },
-                                onExport: {
-                                    Task {
-                                        await toolLibraryStore.export(tool)
-                                    }
-                                },
-                                onShowInFinder: {
-                                    Task {
-                                        await toolLibraryStore.showInFinder(tool)
-                                    }
-                                },
-                                onViewSource: {
-                                    Task {
-                                        await toolLibraryStore.viewSource(tool)
-                                    }
-                                },
-                                onShowAgentOutput: {
-                                    routeStore.open(.agentOutput(tool.id))
-                                },
-                                onContinue: {
-                                    toolLibraryStore.continueGeneration(
-                                        tool,
-                                        modelContext: modelContext,
-                                        inferenceStore: inferenceStore
-                                    )
-                                },
-                                onDiscard: {
-                                    toolLibraryStore.discardGeneration(tool, in: modelContext)
-                                },
-                                onStop: {
-                                    toolLibraryStore.cancelGeneration()
-                                },
-                                onDelete: {
-                                    toolPendingDeletion = tool
-                                }
-                            )
-                        }
-                    }
-                }
+                toolCollectionContent
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.vertical, 14)
@@ -345,6 +264,166 @@ struct ToolLibraryPopoverView: View {
         .sheet(isPresented: $isShowingModelPicker) {
             ModelPickerSheetView(size: .popover)
         }
+    }
+
+    @ViewBuilder
+    private var toolCollectionContent: some View {
+        if shouldShowEmptyState {
+            ToolLibraryEmptyStateView(
+                showsNoModelActions: shouldShowNoModelsEmptyState,
+                isSigningInToIronsmith: isSigningInToIronsmith,
+                onSignInToIronsmith: signInToIronsmith
+            )
+        } else if visibleTools.isEmpty {
+            ContentUnavailableView {
+                Label("No Apps Found", systemImage: "magnifyingglass")
+            } description: {
+                Text("Try searching for a different app name.")
+            }
+            .frame(maxWidth: .infinity, minHeight: 180)
+            .accessibilityIdentifier("tool-search-empty-state")
+        } else {
+            switch viewMode {
+            case .list:
+                LazyVStack(spacing: 10) {
+                    ForEach(visibleTools) { tool in
+                        ToolRowView(
+                            tool: tool,
+                            state: itemState(for: tool),
+                            actions: itemActions(for: tool)
+                        )
+                    }
+                }
+            case .icons:
+                LazyVGrid(columns: iconGridColumns, spacing: 14) {
+                    ForEach(visibleTools) { tool in
+                        ToolGridItemView(
+                            tool: tool,
+                            state: itemState(for: tool),
+                            actions: itemActions(for: tool)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var iconGridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    }
+
+    private var viewMode: ToolLibraryViewMode {
+        ToolLibraryViewMode.resolved(viewModeRawValue)
+    }
+
+    private var sortOrder: ToolLibrarySortOrder {
+        ToolLibrarySortOrder.resolved(sortOrderRawValue)
+    }
+
+    private var visibleTools: [Tool] {
+        ToolLibraryPresentation.visibleTools(
+            from: tools,
+            searchText: searchText,
+            sortOrder: sortOrder
+        )
+    }
+
+    private var viewModeBinding: Binding<ToolLibraryViewMode> {
+        Binding(
+            get: { viewMode },
+            set: { viewModeRawValue = $0.rawValue }
+        )
+    }
+
+    private var sortOrderBinding: Binding<ToolLibrarySortOrder> {
+        Binding(
+            get: { sortOrder },
+            set: { sortOrderRawValue = $0.rawValue }
+        )
+    }
+
+    private func itemState(for tool: Tool) -> ToolItemPresentationState {
+        ToolItemPresentationState(
+            isSelected: toolLibraryStore.isSelected(tool),
+            isRunning: toolLibraryStore.runningToolID == tool.id,
+            isExporting: toolLibraryStore.exportingToolID == tool.id,
+            isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
+            isRestoring: toolLibraryStore.restoringToolID == tool.id,
+            canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
+            showsStoreActions: isStoreFeatureEnabled,
+            canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
+            activeCodingAgent: toolLibraryStore.activeCodingAgent(for: tool),
+            canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool)
+        )
+    }
+
+    private func itemActions(for tool: Tool) -> ToolItemActions {
+        ToolItemActions(
+            onSelect: {
+                toolLibraryStore.toggleSelection(
+                    for: tool,
+                    defaultSettings: defaultGenerationSettings
+                )
+            },
+            onEdit: {
+                selectToolForEditing(tool)
+            },
+            onRun: {
+                Task {
+                    await toolLibraryStore.run(tool)
+                }
+            },
+            onRename: {
+                beginRenaming(tool)
+            },
+            onRebuild: {
+                Task {
+                    await toolLibraryStore.rebuild(tool, in: modelContext)
+                }
+            },
+            onPublishToStore: {
+                routeStore.open(.toolLibrary(.publishTool(tool.id)))
+            },
+            onRevert: {
+                Task {
+                    await toolLibraryStore.restorePreviousVersion(tool, in: modelContext)
+                }
+            },
+            onExport: {
+                Task {
+                    await toolLibraryStore.export(tool)
+                }
+            },
+            onShowInFinder: {
+                Task {
+                    await toolLibraryStore.showInFinder(tool)
+                }
+            },
+            onViewSource: {
+                Task {
+                    await toolLibraryStore.viewSource(tool)
+                }
+            },
+            onShowAgentOutput: {
+                routeStore.open(.agentOutput(tool.id))
+            },
+            onContinue: {
+                toolLibraryStore.continueGeneration(
+                    tool,
+                    modelContext: modelContext,
+                    inferenceStore: inferenceStore
+                )
+            },
+            onDiscard: {
+                toolLibraryStore.discardGeneration(tool, in: modelContext)
+            },
+            onStop: {
+                toolLibraryStore.cancelGeneration()
+            },
+            onDelete: {
+                toolPendingDeletion = tool
+            }
+        )
     }
 
     @ViewBuilder

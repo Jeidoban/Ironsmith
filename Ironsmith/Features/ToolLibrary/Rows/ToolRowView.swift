@@ -8,31 +8,8 @@ import SwiftUI
 
 struct ToolRowView: View {
     let tool: Tool
-    let isSelected: Bool
-    let isRunning: Bool
-    let isExporting: Bool
-    let isRebuilding: Bool
-    let isRestoring: Bool
-    let canRevert: Bool
-    let showsStoreActions: Bool
-    let canUpdateStoreVersion: Bool
-    let activeCodingAgent: ToolCodingAgent?
-    let canShowAgentOutput: Bool
-    let onSelect: () -> Void
-    let onEdit: () -> Void
-    let onRun: () -> Void
-    let onRename: () -> Void
-    let onRebuild: () -> Void
-    let onPublishToStore: () -> Void
-    let onRevert: () -> Void
-    let onExport: () -> Void
-    let onShowInFinder: () -> Void
-    let onViewSource: () -> Void
-    let onShowAgentOutput: () -> Void
-    let onContinue: () -> Void
-    let onDiscard: () -> Void
-    let onStop: () -> Void
-    let onDelete: () -> Void
+    let state: ToolItemPresentationState
+    let actions: ToolItemActions
     @State private var isHoveringRow = false
 
     var body: some View {
@@ -65,14 +42,14 @@ struct ToolRowView: View {
             .contentShape(RoundedRectangle(cornerRadius: 14))
             .onTapGesture {
                 guard tool.isGenerationReady else { return }
-                onSelect()
+                actions.onSelect()
             }
             .contextMenu {
-                appActionsMenu
+                ToolItemActionsMenu(tool: tool, state: state, actions: actions)
             }
 
             Menu {
-                appActionsMenu
+                ToolItemActionsMenu(tool: tool, state: state, actions: actions)
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 18, weight: .semibold))
@@ -96,7 +73,7 @@ struct ToolRowView: View {
                 .frame(width: 42, height: 42)
 
             if tool.generationState == .generating && isHoveringRow {
-                Button(action: onStop) {
+                Button(action: actions.onStop) {
                     Image(systemName: "stop.fill")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
@@ -107,16 +84,16 @@ struct ToolRowView: View {
                 .accessibilityIdentifier("stop-tool-\(tool.id.uuidString)")
             } else if tool.generationState == .generating {
                 iconProgressOverlay("Generating \(tool.name)")
-            } else if isRunning {
+            } else if state.isRunning {
                 iconProgressOverlay("Running \(tool.name)")
-            } else if isRestoring {
+            } else if state.isRestoring {
                 iconProgressOverlay("Restoring \(tool.name)")
-            } else if isRebuilding {
+            } else if state.isRebuilding {
                 iconProgressOverlay("Rebuilding \(tool.name)")
-            } else if isExporting {
+            } else if state.isExporting {
                 iconProgressOverlay("Exporting \(tool.name)")
             } else if isHoveringRow && canContinue {
-                Button(action: onContinue) {
+                Button(action: actions.onContinue) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
@@ -126,7 +103,7 @@ struct ToolRowView: View {
                 .accessibilityLabel("Continue \(tool.name)")
                 .accessibilityIdentifier("continue-tool-\(tool.id.uuidString)")
             } else if isHoveringRow && tool.isGenerationReady {
-                Button(action: onRun) {
+                Button(action: actions.onRun) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
@@ -137,76 +114,6 @@ struct ToolRowView: View {
                 .accessibilityIdentifier("run-tool-\(tool.id.uuidString)")
             }
         }
-    }
-
-    @ViewBuilder
-    private var appActionsMenu: some View {
-        Button(editActionTitle) {
-            if isSelected {
-                onSelect()
-            } else {
-                onEdit()
-            }
-        }
-        .disabled(!(isSelected || tool.isGenerationReady))
-
-        Button(launchActionTitle) {
-            if isGenerating {
-                onStop()
-            } else if canContinue {
-                onContinue()
-            } else {
-                onRun()
-            }
-        }
-        .disabled(isBusy || !(tool.isGenerationReady || canContinue || isGenerating))
-
-        Divider()
-        Button("Rename App...", action: onRename)
-            .disabled(isGenerating || isBusy)
-        Button("Rebuild App", action: onRebuild)
-            .disabled(!tool.isGenerationReady || isBusy)
-        if showsStoreActions {
-            Button(storePublishActionTitle, action: onPublishToStore)
-                .disabled(!tool.isGenerationReady || isBusy)
-        }
-        Button("Go Back to Previous Version", action: onRevert)
-            .disabled(!tool.isGenerationReady || !canRevert || isBusy)
-        Button("Export App", action: onExport)
-            .disabled(!tool.isGenerationReady || isBusy)
-        Button("View Source", action: onViewSource)
-            .disabled(!tool.isGenerationReady)
-        Button("Show Agent Output", action: onShowAgentOutput)
-            .disabled(!canShowAgentOutput)
-        Button("Show in Finder", action: onShowInFinder)
-        Divider()
-        if shouldDiscardFromMenu {
-            Button("Discard Edit", role: .destructive, action: onDiscard)
-                .disabled(isBusy)
-        } else {
-            Button("Delete App", role: .destructive, action: onDelete)
-                .disabled(isBusy)
-        }
-    }
-
-    private var editActionTitle: String {
-        isSelected ? "Exit Edit Mode" : "Edit App"
-    }
-
-    private var launchActionTitle: String {
-        if isGenerating {
-            return "Stop Generating"
-        }
-
-        if canContinue {
-            return "Continue Generating"
-        }
-
-        return "Launch App"
-    }
-
-    private var storePublishActionTitle: String {
-        canUpdateStoreVersion ? "Update Store Version..." : "Publish to App Store..."
     }
 
     private func iconProgressOverlay(_ accessibilityLabel: String) -> some View {
@@ -221,7 +128,7 @@ struct ToolRowView: View {
             return ToolRowGenerationStatusResolver.statusText(
                 phase: tool.generationPhase,
                 repairErrorCount: tool.generationRepairErrorCount,
-                activeCodingAgent: activeCodingAgent
+                activeCodingAgent: state.activeCodingAgent
             )
         case .stopped:
             return "Stopped"
@@ -234,18 +141,6 @@ struct ToolRowView: View {
         tool.generationState == .stopped || tool.generationState == .failed
     }
 
-    private var isGenerating: Bool {
-        tool.generationState == .generating
-    }
-
-    private var isBusy: Bool {
-        isRunning || isExporting || isRebuilding || isRestoring
-    }
-
-    private var shouldDiscardFromMenu: Bool {
-        canContinue && tool.generationMode == .edit
-    }
-
     private var statusStyle: some ShapeStyle {
         switch tool.generationState {
         case .ready, .generating, .stopped:
@@ -256,7 +151,7 @@ struct ToolRowView: View {
     }
 
     private var backgroundStyle: some ShapeStyle {
-        if isSelected {
+        if state.isSelected {
             return AnyShapeStyle(.tint.opacity(0.28))
         }
 
@@ -264,11 +159,11 @@ struct ToolRowView: View {
             return AnyShapeStyle(.quaternary.opacity(0.52))
         }
 
-        if isRunning {
+        if state.isRunning {
             return AnyShapeStyle(.tint.opacity(0.14))
         }
 
-        if isExporting || isRebuilding || isRestoring {
+        if state.isExporting || state.isRebuilding || state.isRestoring {
             return AnyShapeStyle(.tint.opacity(0.14))
         }
 
@@ -285,31 +180,35 @@ struct ToolRowView: View {
         tool: Tool(
             name: "Clipboard Cleaner",
             packageRootPath: "~/Library/Application Support/Ironsmith/ClipboardCleaner"),
-        isSelected: true,
-        isRunning: false,
-        isExporting: false,
-        isRebuilding: false,
-        isRestoring: false,
-        canRevert: true,
-        showsStoreActions: true,
-        canUpdateStoreVersion: false,
-        activeCodingAgent: nil,
-        canShowAgentOutput: false,
-        onSelect: {},
-        onEdit: {},
-        onRun: {},
-        onRename: {},
-        onRebuild: {},
-        onPublishToStore: {},
-        onRevert: {},
-        onExport: {},
-        onShowInFinder: {},
-        onViewSource: {},
-        onShowAgentOutput: {},
-        onContinue: {},
-        onDiscard: {},
-        onStop: {},
-        onDelete: {}
+        state: ToolItemPresentationState(
+            isSelected: true,
+            isRunning: false,
+            isExporting: false,
+            isRebuilding: false,
+            isRestoring: false,
+            canRevert: true,
+            showsStoreActions: true,
+            canUpdateStoreVersion: false,
+            activeCodingAgent: nil,
+            canShowAgentOutput: false
+        ),
+        actions: ToolItemActions(
+            onSelect: {},
+            onEdit: {},
+            onRun: {},
+            onRename: {},
+            onRebuild: {},
+            onPublishToStore: {},
+            onRevert: {},
+            onExport: {},
+            onShowInFinder: {},
+            onViewSource: {},
+            onShowAgentOutput: {},
+            onContinue: {},
+            onDiscard: {},
+            onStop: {},
+            onDelete: {}
+        )
     )
     .padding()
     .frame(width: 360)
@@ -368,9 +267,17 @@ enum ToolRowGenerationStatusResolver {
 }
 
 @MainActor
-private struct ToolIconImageView: View {
+struct ToolIconImageView: View {
     let tool: Tool
+    let size: CGFloat
+    let cornerRadius: CGFloat
     @State private var iconImage: NSImage?
+
+    init(tool: Tool, size: CGFloat = 42, cornerRadius: CGFloat = 9) {
+        self.tool = tool
+        self.size = size
+        self.cornerRadius = cornerRadius
+    }
 
     var body: some View {
         ZStack {
@@ -378,16 +285,17 @@ private struct ToolIconImageView: View {
                 Image(nsImage: iconImage)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 42, height: 42)
+                    .frame(width: size, height: size)
                     .clipped()
             } else {
-                RoundedRectangle(cornerRadius: 9)
+                RoundedRectangle(cornerRadius: cornerRadius)
                     .fill(.quaternary.opacity(0.22))
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .overlay {
-            RoundedRectangle(cornerRadius: 9)
+            RoundedRectangle(cornerRadius: cornerRadius)
                 .strokeBorder(.quaternary.opacity(0.35), lineWidth: 0.5)
         }
         .accessibilityHidden(true)
@@ -467,9 +375,15 @@ private struct RunToolButtonStyle: ButtonStyle {
     }
 }
 
-private struct IconProgressBadge: View {
+struct IconProgressBadge: View {
     let accessibilityLabel: String
+    let containerSize: CGFloat
     @State private var isSpinning = false
+
+    init(accessibilityLabel: String, containerSize: CGFloat = 42) {
+        self.accessibilityLabel = accessibilityLabel
+        self.containerSize = containerSize
+    }
 
     var body: some View {
         ZStack {
@@ -487,7 +401,7 @@ private struct IconProgressBadge: View {
                 .frame(width: 14, height: 14)
                 .rotationEffect(.degrees(isSpinning ? 360 : 0))
         }
-        .frame(width: 42, height: 42)
+        .frame(width: containerSize, height: containerSize)
         .accessibilityLabel(accessibilityLabel)
         .onAppear {
             isSpinning = false
