@@ -72,19 +72,42 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
-    func toolGridItemsLaunchOnlyReadyIdleApps() {
+    func toolGridItemsSeparateSelectionFromIconActions() {
         let readyTool = Tool(name: "Ready", packageRootPath: "/tmp/ready")
         let stoppedTool = Tool(
             name: "Stopped",
             packageRootPath: "/tmp/stopped",
             generationState: .stopped
         )
+        let failedTool = Tool(
+            name: "Failed",
+            packageRootPath: "/tmp/failed",
+            generationState: .failed
+        )
+        let generatingTool = Tool(
+            name: "Generating",
+            packageRootPath: "/tmp/generating",
+            generationState: .generating
+        )
         let idleState = Self.toolItemState()
         let runningState = Self.toolItemState(isRunning: true)
 
-        #expect(ToolGridItemInteraction.canLaunch(tool: readyTool, state: idleState))
-        #expect(!ToolGridItemInteraction.canLaunch(tool: readyTool, state: runningState))
-        #expect(!ToolGridItemInteraction.canLaunch(tool: stoppedTool, state: idleState))
+        #expect(ToolGridItemInteraction.canSelect(tool: readyTool))
+        #expect(!ToolGridItemInteraction.canSelect(tool: stoppedTool))
+        #expect(ToolGridItemInteraction.iconAction(tool: readyTool, state: idleState) == .run)
+        #expect(ToolGridItemInteraction.iconAction(tool: readyTool, state: runningState) == nil)
+        #expect(
+            ToolGridItemInteraction.iconAction(tool: stoppedTool, state: idleState)
+                == .continueGeneration
+        )
+        #expect(
+            ToolGridItemInteraction.iconAction(tool: failedTool, state: idleState)
+                == .continueGeneration
+        )
+        #expect(
+            ToolGridItemInteraction.iconAction(tool: generatingTool, state: idleState)
+                == .pauseGeneration
+        )
     }
 
     private static func toolItemState(isRunning: Bool = false) -> ToolItemPresentationState {

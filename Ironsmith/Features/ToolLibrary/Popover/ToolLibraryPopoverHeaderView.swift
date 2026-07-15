@@ -26,7 +26,7 @@ struct ToolLibraryPopoverHeaderView: View {
 
             Spacer()
 
-            if appUpdateStore.shouldShowUpdateButton {
+            if !isSearchPresented && appUpdateStore.shouldShowUpdateButton {
                 Button("Update") {
                     appUpdateStore.openAvailableUpdate()
                 }

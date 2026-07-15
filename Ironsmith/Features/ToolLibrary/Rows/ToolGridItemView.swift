@@ -5,6 +5,7 @@ struct ToolGridItemView: View {
     let state: ToolItemPresentationState
     let actions: ToolItemActions
     @State private var isHovering = false
+    @State private var isHoveringIcon = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -23,19 +24,19 @@ struct ToolGridItemView: View {
         .background(backgroundStyle, in: RoundedRectangle(cornerRadius: 12))
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture {
-            launchIfAvailable()
+            selectIfAvailable()
         }
         .contextMenu {
             ToolItemActionsMenu(tool: tool, state: state, actions: actions)
         }
         .onHover { isHovering = $0 }
         .help(tool.name)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(tool.name)
         .accessibilityHint(accessibilityHint)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction {
-            launchIfAvailable()
+            selectIfAvailable()
         }
         .accessibilityIdentifier("tool-grid-item-\(tool.id.uuidString)")
     }
@@ -44,7 +45,12 @@ struct ToolGridItemView: View {
         ZStack(alignment: .bottomTrailing) {
             ToolIconImageView(tool: tool, size: 54, cornerRadius: 12)
 
-            if let busyAccessibilityLabel {
+            if isHoveringIcon, let iconAction = ToolGridItemInteraction.iconAction(
+                tool: tool,
+                state: state
+            ) {
+                iconActionButton(iconAction)
+            } else if let busyAccessibilityLabel {
                 IconProgressBadge(
                     accessibilityLabel: busyAccessibilityLabel,
                     containerSize: 54
@@ -56,6 +62,21 @@ struct ToolGridItemView: View {
             }
         }
         .frame(width: 54, height: 54)
+        .onHover { isHoveringIcon = $0 }
+    }
+
+    private func iconActionButton(_ iconAction: ToolGridIconAction) -> some View {
+        Button {
+            perform(iconAction)
+        } label: {
+            Image(systemName: iconAction.systemImage)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .buttonStyle(RunToolButtonStyle(size: 54, cornerRadius: 12))
+        .help("\(iconAction.title) \(tool.name)")
+        .accessibilityLabel("\(iconAction.title) \(tool.name)")
+        .accessibilityIdentifier("\(iconAction.accessibilityIdentifier)-\(tool.id.uuidString)")
     }
 
     private func statusBadge(systemImage: String, color: Color) -> some View {
@@ -91,8 +112,11 @@ struct ToolGridItemView: View {
     }
 
     private var accessibilityHint: String {
-        if tool.isGenerationReady && !state.isBusy {
-            return "Launches the app. Right-click for more actions."
+        if tool.isGenerationReady {
+            return "Selects the app for editing. Hover over its icon to run it."
+        }
+        if tool.generationState == .stopped || tool.generationState == .failed {
+            return "Hover over its icon to continue generation. Right-click for more actions."
         }
         return "Right-click for available actions."
     }
@@ -107,16 +131,81 @@ struct ToolGridItemView: View {
         return AnyShapeStyle(.clear)
     }
 
-    private func launchIfAvailable() {
-        guard ToolGridItemInteraction.canLaunch(tool: tool, state: state) else { return }
-        actions.onRun()
+    private func selectIfAvailable() {
+        guard ToolGridItemInteraction.canSelect(tool: tool) else { return }
+        actions.onSelect()
+    }
+
+    private func perform(_ iconAction: ToolGridIconAction) {
+        switch iconAction {
+        case .run:
+            actions.onRun()
+        case .pauseGeneration:
+            actions.onStop()
+        case .continueGeneration:
+            actions.onContinue()
+        }
     }
 }
 
 @MainActor
 enum ToolGridItemInteraction {
-    static func canLaunch(tool: Tool, state: ToolItemPresentationState) -> Bool {
-        tool.isGenerationReady && !state.isBusy
+    static func canSelect(tool: Tool) -> Bool {
+        tool.isGenerationReady
+    }
+
+    static func iconAction(
+        tool: Tool,
+        state: ToolItemPresentationState
+    ) -> ToolGridIconAction? {
+        if tool.generationState == .generating {
+            return .pauseGeneration
+        }
+        guard !state.isBusy else { return nil }
+        if tool.generationState == .stopped || tool.generationState == .failed {
+            return .continueGeneration
+        }
+        if tool.isGenerationReady {
+            return .run
+        }
+        return nil
+    }
+}
+
+enum ToolGridIconAction: Equatable {
+    case run
+    case pauseGeneration
+    case continueGeneration
+
+    var title: String {
+        switch self {
+        case .run:
+            return "Run"
+        case .pauseGeneration:
+            return "Pause"
+        case .continueGeneration:
+            return "Continue"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .run, .continueGeneration:
+            return "play.fill"
+        case .pauseGeneration:
+            return "pause.fill"
+        }
+    }
+
+    var accessibilityIdentifier: String {
+        switch self {
+        case .run:
+            return "run-tool"
+        case .pauseGeneration:
+            return "pause-tool"
+        case .continueGeneration:
+            return "continue-tool"
+        }
     }
 }
 

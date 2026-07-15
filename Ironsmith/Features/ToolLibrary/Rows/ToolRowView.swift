@@ -74,14 +74,14 @@ struct ToolRowView: View {
 
             if tool.generationState == .generating && isHoveringRow {
                 Button(action: actions.onStop) {
-                    Image(systemName: "stop.fill")
+                    Image(systemName: "pause.fill")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
                 }
                 .buttonStyle(RunToolButtonStyle())
-                .help("Stop \(tool.name)")
-                .accessibilityLabel("Stop \(tool.name)")
-                .accessibilityIdentifier("stop-tool-\(tool.id.uuidString)")
+                .help("Pause \(tool.name)")
+                .accessibilityLabel("Pause \(tool.name)")
+                .accessibilityIdentifier("pause-tool-\(tool.id.uuidString)")
             } else if tool.generationState == .generating {
                 iconProgressOverlay("Generating \(tool.name)")
             } else if state.isRunning {
@@ -131,7 +131,7 @@ struct ToolRowView: View {
                 activeCodingAgent: state.activeCodingAgent
             )
         case .stopped:
-            return "Stopped"
+            return "Paused"
         case .failed:
             return "Failed"
         }
@@ -365,11 +365,14 @@ private enum ToolIconImageCache {
     }
 }
 
-private struct RunToolButtonStyle: ButtonStyle {
+struct RunToolButtonStyle: ButtonStyle {
+    var size: CGFloat = 42
+    var cornerRadius: CGFloat = 9
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .frame(width: 42, height: 42)
-            .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 9))
+            .frame(width: size, height: size)
+            .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: cornerRadius))
             .scaleEffect(configuration.isPressed ? 0.88 : 1)
             .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
     }

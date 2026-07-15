@@ -113,7 +113,7 @@ struct ToolItemActionsMenu: View {
 
     private var launchActionTitle: String {
         if isGenerating {
-            return "Stop Generating"
+            return "Pause Generation"
         }
         if canContinue {
             return "Continue Generating"

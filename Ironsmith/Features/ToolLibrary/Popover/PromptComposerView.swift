@@ -243,7 +243,7 @@ struct PromptComposerView: View {
             }
         } label: {
             if isSubmitting {
-                Image(systemName: "stop.circle.fill")
+                Image(systemName: "pause.circle.fill")
                     .font(.system(size: 24))
             } else {
                 Image(systemName: "arrow.up.circle.fill")
@@ -253,20 +253,20 @@ struct PromptComposerView: View {
         .buttonStyle(.plain)
         .foregroundStyle(submitButtonForegroundStyle)
         .disabled(!isSubmitEnabled && !isSubmitting)
-        .help(isSubmitting ? "Stop generation" : "Generate")
-        .accessibilityLabel(isSubmitting ? "Stop generation" : "Generate app")
+        .help(isSubmitting ? "Pause generation" : "Generate")
+        .accessibilityLabel(isSubmitting ? "Pause generation" : "Generate app")
         .accessibilityHint(
             isSubmitting
-                ? "Cancels the current app generation."
+                ? "Pauses the current app generation so it can be continued later."
                 : "Starts generating an app from the prompt."
         )
         .accessibilityIdentifier(
-            isSubmitting ? "stop-generation-button" : "submit-generation-button")
+            isSubmitting ? "pause-generation-button" : "submit-generation-button")
     }
 
     private var submitButtonForegroundStyle: some ShapeStyle {
         if isSubmitting {
-            return AnyShapeStyle(.red)
+            return AnyShapeStyle(.secondary)
         }
 
         if isSubmitEnabled {
