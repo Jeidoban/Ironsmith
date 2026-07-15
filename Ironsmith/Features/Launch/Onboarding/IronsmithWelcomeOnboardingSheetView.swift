@@ -79,9 +79,9 @@ struct IronsmithWelcomeOnboardingSheetView: View {
             optionDivider
 
             setupOptionRow(
-                title: "Add your own API key",
+                title: "Use an API key or ChatGPT login",
                 subtitle:
-                    "Bring your own API key and create with ChatGPT, Claude and Gemini directly.",
+                    "Bring your own API key for OpenAI, Claude or Gemini, or sign in with your ChatGPT account.",
                 action: {
                     completeWithProvider(.openAI)
                 },

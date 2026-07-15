@@ -84,7 +84,7 @@ struct ToolRowView: View {
                 .accessibilityIdentifier("pause-tool-\(tool.id.uuidString)")
             } else if tool.generationState == .generating {
                 iconProgressOverlay("Generating \(tool.name)")
-            } else if state.isRunning {
+            } else if state.isLaunching {
                 iconProgressOverlay("Running \(tool.name)")
             } else if state.isRestoring {
                 iconProgressOverlay("Restoring \(tool.name)")
@@ -183,6 +183,7 @@ struct ToolRowView: View {
         state: ToolItemPresentationState(
             isSelected: true,
             isRunning: false,
+            isLaunching: false,
             isExporting: false,
             isRebuilding: false,
             isRestoring: false,
@@ -196,6 +197,7 @@ struct ToolRowView: View {
             onSelect: {},
             onEdit: {},
             onRun: {},
+            onQuit: {},
             onRename: {},
             onRebuild: {},
             onPublishToStore: {},

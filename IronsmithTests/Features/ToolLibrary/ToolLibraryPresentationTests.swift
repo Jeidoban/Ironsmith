@@ -91,11 +91,16 @@ extension ToolLibraryTests {
         )
         let idleState = Self.toolItemState()
         let runningState = Self.toolItemState(isRunning: true)
+        let launchingState = Self.toolItemState(isLaunching: true)
 
         #expect(ToolGridItemInteraction.canSelect(tool: readyTool))
         #expect(!ToolGridItemInteraction.canSelect(tool: stoppedTool))
         #expect(ToolGridItemInteraction.iconAction(tool: readyTool, state: idleState) == .run)
-        #expect(ToolGridItemInteraction.iconAction(tool: readyTool, state: runningState) == nil)
+        #expect(ToolGridItemInteraction.iconAction(tool: readyTool, state: runningState) == .run)
+        #expect(ToolGridItemInteraction.iconAction(tool: readyTool, state: launchingState) == nil)
+        #expect(ToolItemLaunchAction.resolve(tool: readyTool, state: idleState) == .launch)
+        #expect(ToolItemLaunchAction.resolve(tool: readyTool, state: runningState) == .quit)
+        #expect(ToolItemLaunchAction.resolve(tool: readyTool, state: runningState).title == "Quit App")
         #expect(
             ToolGridItemInteraction.iconAction(tool: stoppedTool, state: idleState)
                 == .continueGeneration
@@ -110,10 +115,14 @@ extension ToolLibraryTests {
         )
     }
 
-    private static func toolItemState(isRunning: Bool = false) -> ToolItemPresentationState {
+    private static func toolItemState(
+        isRunning: Bool = false,
+        isLaunching: Bool = false
+    ) -> ToolItemPresentationState {
         ToolItemPresentationState(
             isSelected: false,
             isRunning: isRunning,
+            isLaunching: isLaunching,
             isExporting: false,
             isRebuilding: false,
             isRestoring: false,

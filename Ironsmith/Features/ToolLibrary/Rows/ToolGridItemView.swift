@@ -96,7 +96,7 @@ struct ToolGridItemView: View {
         if tool.generationState == .generating {
             return "Generating \(tool.name)"
         }
-        if state.isRunning {
+        if state.isLaunching {
             return "Running \(tool.name)"
         }
         if state.isRestoring {
@@ -219,6 +219,7 @@ enum ToolGridIconAction: Equatable {
     let state = ToolItemPresentationState(
         isSelected: false,
         isRunning: false,
+        isLaunching: false,
         isExporting: false,
         isRebuilding: false,
         isRestoring: false,

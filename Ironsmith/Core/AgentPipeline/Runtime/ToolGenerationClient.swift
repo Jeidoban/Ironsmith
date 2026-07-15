@@ -124,17 +124,37 @@ struct ToolGenerationClient {
 
 struct ToolRunnerClient {
     var runTool: (_ tool: Tool) async throws -> Void
+    var quitTool: (_ tool: Tool) async throws -> Void
+    var isToolRunning: (_ tool: Tool) async -> Bool
+
+    init(
+        _ runTool: @escaping (_ tool: Tool) async throws -> Void,
+        quitTool: @escaping (_ tool: Tool) async throws -> Void = { _ in },
+        isToolRunning: @escaping (_ tool: Tool) async -> Bool = { _ in false }
+    ) {
+        self.runTool = runTool
+        self.quitTool = quitTool
+        self.isToolRunning = isToolRunning
+    }
 
     static func live(appBundleClient: ToolAppBundleClient = .live()) -> Self {
-        Self { tool in
-            let request = ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(tool)
-            if !appBundleClient.appExists(request.internalAppBundleURL)
-                || needsQuitOnCloseRebuild(request)
-            {
-                _ = try await appBundleClient.buildInternalApp(request)
+        Self(
+            { tool in
+                let request = ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(tool)
+                if !appBundleClient.appExists(request.internalAppBundleURL)
+                    || needsQuitOnCloseRebuild(request)
+                {
+                    _ = try await appBundleClient.buildInternalApp(request)
+                }
+                try await appBundleClient.launchApp(request.internalAppBundleURL)
+            },
+            quitTool: { tool in
+                try await appBundleClient.terminateApp(tool.appBundleURL)
+            },
+            isToolRunning: { tool in
+                await appBundleClient.isAppRunning(tool.appBundleURL)
             }
-            try await appBundleClient.launchApp(request.internalAppBundleURL)
-        }
+        )
     }
 
     private static func needsQuitOnCloseRebuild(_ request: ToolAppBundleRequest) -> Bool {

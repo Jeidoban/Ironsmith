@@ -46,6 +46,8 @@ struct SwiftPackageProcessClient: Sendable {
     var showReleaseBinPath: @Sendable (URL) async throws -> URL
     var launch: @Sendable (URL) async throws -> Void
     var launchApp: @Sendable (URL) async throws -> Void
+    var terminateApp: @Sendable (URL) async throws -> Void
+    var isAppRunning: @Sendable (URL) async -> Bool
     var stripQuarantine: @Sendable (URL) async -> Void
     var formatSwiftSource: @Sendable (URL) async -> SwiftPackageBuildResult
     var signAdHoc: @Sendable (_ appBundleURL: URL, _ entitlementsURL: URL?) async throws -> SwiftPackageBuildResult
@@ -58,6 +60,8 @@ struct SwiftPackageProcessClient: Sendable {
         showReleaseBinPath: (@Sendable (URL) async throws -> URL)? = nil,
         launch: @escaping @Sendable (URL) async throws -> Void,
         launchApp: (@Sendable (URL) async throws -> Void)? = nil,
+        terminateApp: (@Sendable (URL) async throws -> Void)? = nil,
+        isAppRunning: (@Sendable (URL) async -> Bool)? = nil,
         stripQuarantine: @escaping @Sendable (URL) async -> Void,
         formatSwiftSource: @escaping @Sendable (URL) async -> SwiftPackageBuildResult = { _ in
             SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
@@ -75,6 +79,8 @@ struct SwiftPackageProcessClient: Sendable {
         self.showReleaseBinPath = showReleaseBinPath ?? showBinPath
         self.launch = launch
         self.launchApp = launchApp ?? launch
+        self.terminateApp = terminateApp ?? { _ in }
+        self.isAppRunning = isAppRunning ?? { _ in false }
         self.stripQuarantine = stripQuarantine
         self.formatSwiftSource = formatSwiftSource
         self.signAdHoc = signAdHoc
@@ -162,6 +168,12 @@ struct SwiftPackageProcessClient: Sendable {
         },
         launchApp: { appBundleURL in
             try await launchAppBundle(appBundleURL)
+        },
+        terminateApp: { appBundleURL in
+            try await terminateRunningApplications(for: appBundleURL)
+        },
+        isAppRunning: { appBundleURL in
+            await hasRunningApplications(for: appBundleURL)
         },
         stripQuarantine: { binaryURL in
             _ = try? await runProcess(
@@ -482,6 +494,15 @@ struct SwiftPackageProcessClient: Sendable {
             application.forceTerminate()
         }
         _ = await waitForTermination(of: runningApplications, attempts: 20)
+    }
+
+    @MainActor
+    private static func hasRunningApplications(for appBundleURL: URL) -> Bool {
+        guard let bundleIdentifier = Bundle(url: appBundleURL)?.bundleIdentifier else {
+            return false
+        }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .contains { !$0.isTerminated }
     }
 
     @MainActor

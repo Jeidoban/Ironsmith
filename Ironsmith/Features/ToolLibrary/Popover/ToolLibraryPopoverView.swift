@@ -167,6 +167,9 @@ struct ToolLibraryPopoverView: View {
         .task(id: inferenceStore.hasLoadedModels) {
             presentWelcomeOnboardingIfNeeded()
         }
+        .task(id: runningApplicationsRefreshID) {
+            await toolLibraryStore.refreshRunningApplications(for: tools)
+        }
         .onChange(of: tools.map(\.id)) { _, _ in
             toolLibraryStore.syncSelection(with: tools, defaultSettings: defaultGenerationSettings)
             applyPendingToolLibraryRoute()
@@ -262,7 +265,7 @@ struct ToolLibraryPopoverView: View {
             storePublishSheet
         }
         .sheet(isPresented: $isShowingModelPicker) {
-            ModelPickerSheetView(size: .popover)
+            ModelPickerSheetView()
         }
     }
 
@@ -345,7 +348,8 @@ struct ToolLibraryPopoverView: View {
     private func itemState(for tool: Tool) -> ToolItemPresentationState {
         ToolItemPresentationState(
             isSelected: toolLibraryStore.isSelected(tool),
-            isRunning: toolLibraryStore.runningToolID == tool.id,
+            isRunning: toolLibraryStore.isRunning(tool),
+            isLaunching: toolLibraryStore.launchingToolID == tool.id,
             isExporting: toolLibraryStore.exportingToolID == tool.id,
             isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
             isRestoring: toolLibraryStore.restoringToolID == tool.id,
@@ -371,6 +375,11 @@ struct ToolLibraryPopoverView: View {
             onRun: {
                 Task {
                     await toolLibraryStore.run(tool)
+                }
+            },
+            onQuit: {
+                Task {
+                    await toolLibraryStore.quit(tool)
                 }
             },
             onRename: {
@@ -494,6 +503,11 @@ struct ToolLibraryPopoverView: View {
 
     private var restoreAvailabilityRefreshID: [String] {
         tools.map { "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)" }
+    }
+
+    private var runningApplicationsRefreshID: String {
+        let toolIDs = tools.map(\.id.uuidString).sorted().joined(separator: "|")
+        return "\(menuBarPopoverPresentationStore.showCount)|\(toolIDs)"
     }
 
     private var publishedStoreLinkRefreshID: String {

@@ -1,83 +1,9 @@
 import SwiftUI
 
-struct SettingsModelSelectionSectionView: View {
-    @Environment(InferenceStore.self) private var inferenceStore
-    @State private var isShowingModelPicker = false
-
-    private var selectedModel: ModelConfig? {
-        inferenceStore.selectedModel
-    }
-
-    private var selectedProvider: ProviderConfig? {
-        guard let selectedModel else { return nil }
-        return inferenceStore.provider(for: selectedModel)
-    }
-
-    var body: some View {
-        Section {
-            selectedModelRow
-        } header: {
-            Text("AI Model")
-        }
-        .sheet(isPresented: $isShowingModelPicker) {
-            ModelPickerSheetView()
-        }
-    }
-
-    @ViewBuilder
-    private var selectedModelRow: some View {
-        if let selectedModel {
-            HStack(alignment: .center, spacing: 12) {
-                Text("Selected Model")
-                    .frame(width: 128, alignment: .leading)
-
-                Spacer()
-
-                ModelLogoView(model: selectedModel, provider: selectedProvider, size: 28)
-
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(
-                        SettingsModelPresentation.displayName(
-                            for: selectedModel, provider: selectedProvider)
-                    )
-                    .font(.body.weight(.medium))
-                    .lineLimit(1)
-
-                    Text(
-                        "\(selectedModel.providerLabel(provider: selectedProvider)) · \(selectedModel.sourceLabel(provider: selectedProvider))"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                }
-
-                Button("Choose...") {
-                    isShowingModelPicker = true
-                }
-                .controlSize(.small)
-            }
-        } else {
-            HStack(alignment: .center) {
-                Text("Selected Model")
-                    .frame(width: 128, alignment: .leading)
-                Spacer()
-                Button("Choose AI model...") {
-                    isShowingModelPicker = true
-                }
-            }
-        }
-    }
-}
-
 struct ModelPickerSheetView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     @Environment(\.dismiss) private var dismiss
-    let size: ModelPickerSheetSize
     @State private var searchText = ""
-
-    init(size: ModelPickerSheetSize = .settings) {
-        self.size = size
-    }
 
     private var providersWithModels: [(provider: ProviderConfig, models: [ModelConfig])] {
         inferenceStore.providers.compactMap { provider in
@@ -135,14 +61,7 @@ struct ModelPickerSheetView: View {
                 }
             }
         }
-        .frame(
-            width: size.width,
-            height: size.height
-        )
-        .frame(
-            minWidth: size.minWidth,
-            minHeight: size.minHeight
-        )
+        .frame(width: 380, height: 480)
     }
 
     private func matchesSearch(_ model: ModelConfig) -> Bool {
@@ -152,47 +71,6 @@ struct ModelPickerSheetView: View {
         return SettingsModelPresentation.displayName(for: model, provider: provider)
             .localizedCaseInsensitiveContains(trimmedSearch)
             || model.identifier.localizedCaseInsensitiveContains(trimmedSearch)
-    }
-}
-
-enum ModelPickerSheetSize {
-    case settings
-    case popover
-
-    var width: CGFloat? {
-        switch self {
-        case .settings:
-            return nil
-        case .popover:
-            return 380
-        }
-    }
-
-    var height: CGFloat? {
-        switch self {
-        case .settings:
-            return nil
-        case .popover:
-            return 480
-        }
-    }
-
-    var minWidth: CGFloat? {
-        switch self {
-        case .settings:
-            return 560
-        case .popover:
-            return nil
-        }
-    }
-
-    var minHeight: CGFloat? {
-        switch self {
-        case .settings:
-            return 520
-        case .popover:
-            return nil
-        }
     }
 }
 
@@ -259,11 +137,6 @@ private struct ModelPickerRowView: View {
 }
 
 extension ModelConfig {
-    fileprivate func providerLabel(provider: ProviderConfig?) -> String {
-        source == .appleFoundation
-            ? "Apple Foundation" : (provider?.displayName ?? "Unknown Provider")
-    }
-
     fileprivate func sourceLabel(provider: ProviderConfig?) -> String {
         switch source {
         case .appleFoundation: "Local"
@@ -275,20 +148,15 @@ extension ModelConfig {
 }
 
 @MainActor
-private struct SettingsModelSelectionSectionPreview: View {
+private struct ModelPickerSheetPreview: View {
     @State private var inferenceStore = SettingsPreviewState.make(selectedModel: .remote)
 
     var body: some View {
-        Form {
-            SettingsModelSelectionSectionView()
-        }
-        .formStyle(.grouped)
-        .environment(inferenceStore)
-        .padding(20)
-        .frame(width: 620, height: 680)
+        ModelPickerSheetView()
+            .environment(inferenceStore)
     }
 }
 
-#Preview("AI Model Section") {
-    SettingsModelSelectionSectionPreview()
+#Preview("Model Picker") {
+    ModelPickerSheetPreview()
 }

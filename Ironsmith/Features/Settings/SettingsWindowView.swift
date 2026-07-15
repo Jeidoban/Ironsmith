@@ -17,7 +17,6 @@ struct SettingsWindowView: View {
 
     var body: some View {
         Form {
-            SettingsModelSelectionSectionView()
             SettingsProvidersSectionView(
                 onAddProvider: { presentedSheet = .addProvider(initialKind: nil) },
                 onEditProvider: { presentedSheet = .editProvider($0, showsCreditPacks: false) }

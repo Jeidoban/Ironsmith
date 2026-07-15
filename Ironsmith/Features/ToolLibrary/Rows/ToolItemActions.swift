@@ -3,6 +3,7 @@ import SwiftUI
 struct ToolItemPresentationState {
     let isSelected: Bool
     let isRunning: Bool
+    let isLaunching: Bool
     let isExporting: Bool
     let isRebuilding: Bool
     let isRestoring: Bool
@@ -13,7 +14,7 @@ struct ToolItemPresentationState {
     let canShowAgentOutput: Bool
 
     var isBusy: Bool {
-        isRunning || isExporting || isRebuilding || isRestoring
+        isLaunching || isExporting || isRebuilding || isRestoring
     }
 }
 
@@ -21,6 +22,7 @@ struct ToolItemActions {
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onRun: () -> Void
+    let onQuit: () -> Void
     let onRename: () -> Void
     let onRebuild: () -> Void
     let onPublishToStore: () -> Void
@@ -38,6 +40,7 @@ struct ToolItemActions {
         onSelect: {},
         onEdit: {},
         onRun: {},
+        onQuit: {},
         onRename: {},
         onRebuild: {},
         onPublishToStore: {},
@@ -68,12 +71,15 @@ struct ToolItemActionsMenu: View {
         }
         .disabled(!(state.isSelected || tool.isGenerationReady))
 
-        Button(launchActionTitle) {
-            if isGenerating {
+        Button(launchAction.title) {
+            switch launchAction {
+            case .pauseGeneration:
                 actions.onStop()
-            } else if canContinue {
+            case .continueGeneration:
                 actions.onContinue()
-            } else {
+            case .quit:
+                actions.onQuit()
+            case .launch:
                 actions.onRun()
             }
         }
@@ -83,7 +89,7 @@ struct ToolItemActionsMenu: View {
         Button("Rename App...", action: actions.onRename)
             .disabled(isGenerating || state.isBusy)
         Button("Rebuild App", action: actions.onRebuild)
-            .disabled(!tool.isGenerationReady || state.isBusy)
+            .disabled(!tool.isRebuildable || state.isBusy)
         if state.showsStoreActions {
             Button(storePublishActionTitle, action: actions.onPublishToStore)
                 .disabled(!tool.isGenerationReady || state.isBusy)
@@ -111,14 +117,8 @@ struct ToolItemActionsMenu: View {
         state.isSelected ? "Exit Edit Mode" : "Edit App"
     }
 
-    private var launchActionTitle: String {
-        if isGenerating {
-            return "Pause Generation"
-        }
-        if canContinue {
-            return "Continue Generating"
-        }
-        return "Launch App"
+    private var launchAction: ToolItemLaunchAction {
+        ToolItemLaunchAction.resolve(tool: tool, state: state)
     }
 
     private var storePublishActionTitle: String {
@@ -135,5 +135,42 @@ struct ToolItemActionsMenu: View {
 
     private var shouldDiscardFromMenu: Bool {
         canContinue && tool.generationMode == .edit
+    }
+}
+
+@MainActor
+enum ToolItemLaunchAction: Equatable {
+    case pauseGeneration
+    case continueGeneration
+    case quit
+    case launch
+
+    static func resolve(
+        tool: Tool,
+        state: ToolItemPresentationState
+    ) -> ToolItemLaunchAction {
+        if tool.generationState == .generating {
+            return .pauseGeneration
+        }
+        if tool.generationState == .stopped || tool.generationState == .failed {
+            return .continueGeneration
+        }
+        if state.isRunning {
+            return .quit
+        }
+        return .launch
+    }
+
+    var title: String {
+        switch self {
+        case .pauseGeneration:
+            return "Pause Generation"
+        case .continueGeneration:
+            return "Continue Generating"
+        case .quit:
+            return "Quit App"
+        case .launch:
+            return "Launch App"
+        }
     }
 }

@@ -299,6 +299,8 @@ actor AppBundleCapture {
     private(set) var builtRequests: [ToolAppBundleRequest] = []
     private(set) var exportedRequests: [ToolAppBundleRequest] = []
     private(set) var launchedURL: URL?
+    private(set) var terminatedURL: URL?
+    private var runningURL: URL?
 
     func recordBuild(_ request: ToolAppBundleRequest) {
         builtRequests.append(request)
@@ -310,6 +312,18 @@ actor AppBundleCapture {
 
     func recordLaunch(_ url: URL) {
         launchedURL = url
+        runningURL = url
+    }
+
+    func recordTermination(_ url: URL) {
+        terminatedURL = url
+        if runningURL == url {
+            runningURL = nil
+        }
+    }
+
+    func isRunning(_ url: URL) -> Bool {
+        runningURL == url
     }
 }
 

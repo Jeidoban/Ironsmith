@@ -54,7 +54,8 @@ final class ToolLibraryStore {
     var menuBarSystemImage = ToolMenuBarSymbol.fallback
     var sandboxPermissions = GeneratedAppSandboxPermissions.default
     var resourcePermissions = GeneratedAppResourcePermissions.none
-    var runningToolID: UUID?
+    private(set) var launchingToolID: UUID?
+    private(set) var runningToolIDs = Set<UUID>()
     var exportingToolID: UUID?
     var rebuildingToolID: UUID?
     var restoringToolID: UUID?
@@ -370,7 +371,11 @@ final class ToolLibraryStore {
     }
 
     func rebuild(_ tool: Tool, in modelContext: ModelContext) async {
-        guard !isGenerating, rebuildingToolID == nil, restoringToolID == nil, tool.isGenerationReady else { return }
+        guard !isGenerating,
+              rebuildingToolID == nil,
+              restoringToolID == nil,
+              tool.isRebuildable
+        else { return }
         rebuildingToolID = tool.id
         clearPresentedErrorState()
         defer {
@@ -389,7 +394,11 @@ final class ToolLibraryStore {
                 settings: settings
             )
             try await dependencies.buildClient.buildTool(tool)
-            tool.updatedAt = .now
+            if tool.generationState == .failed {
+                clearPendingGeneration(on: tool)
+            } else {
+                tool.updatedAt = .now
+            }
             try modelContext.save()
         } catch {
             modelContext.rollback()
@@ -583,14 +592,56 @@ final class ToolLibraryStore {
     }
 
     func run(_ tool: Tool) async {
-        guard tool.isGenerationReady, runningToolID == nil, rebuildingToolID == nil, restoringToolID == nil else { return }
-        runningToolID = tool.id
-        defer { runningToolID = nil }
+        guard tool.isGenerationReady,
+              launchingToolID == nil,
+              rebuildingToolID == nil,
+              restoringToolID == nil
+        else { return }
+        launchingToolID = tool.id
+        defer { launchingToolID = nil }
 
         do {
             try await dependencies.runnerClient.runTool(tool)
+            await refreshRunningApplication(for: tool)
         } catch {
             presentError(error.localizedDescription)
+        }
+    }
+
+    func quit(_ tool: Tool) async {
+        guard launchingToolID == nil,
+              rebuildingToolID == nil,
+              restoringToolID == nil,
+              runningToolIDs.contains(tool.id)
+        else { return }
+
+        do {
+            try await dependencies.runnerClient.quitTool(tool)
+            runningToolIDs.remove(tool.id)
+        } catch {
+            presentError(error.localizedDescription)
+        }
+    }
+
+    func isRunning(_ tool: Tool) -> Bool {
+        runningToolIDs.contains(tool.id)
+    }
+
+    func refreshRunningApplications(for tools: [Tool]) async {
+        var runningIDs = Set<UUID>()
+        for tool in tools {
+            if await dependencies.runnerClient.isToolRunning(tool) {
+                runningIDs.insert(tool.id)
+            }
+        }
+        runningToolIDs = runningIDs
+    }
+
+    private func refreshRunningApplication(for tool: Tool) async {
+        if await dependencies.runnerClient.isToolRunning(tool) {
+            runningToolIDs.insert(tool.id)
+        } else {
+            runningToolIDs.remove(tool.id)
         }
     }
 
