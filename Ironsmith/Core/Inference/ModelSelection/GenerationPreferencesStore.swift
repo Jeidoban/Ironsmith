@@ -133,7 +133,7 @@ final class GenerationPreferencesStore {
             .flatMap(ToolReasoningEffort.init(rawValue:)) ?? .default
         self.imageGenerationProvider = userDefaults
             .string(forKey: Key.imageGenerationProvider)
-            .flatMap(ToolImageGenerationProvider.init(rawValue:)) ?? .imagePlayground
+            .flatMap(ToolImageGenerationProvider.init(rawValue:)) ?? .automatic
         self.generatedAppMicrophoneAccessEnabled = userDefaults.bool(
             forKey: GeneratedAppResourcePermission.microphone.userDefaultsKey
         )

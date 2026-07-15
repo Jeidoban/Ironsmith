@@ -219,7 +219,7 @@ struct ToolMetadataClient: Sendable {
         switch provider {
         case .gemini, .openAI, .ironsmith:
             return "Hosted image generation; visual concept only."
-        case .imagePlayground, .disabled:
+        case .automatic, .imagePlayground, .disabled:
             return "Compact Image Playground-compatible concept."
         }
     }
@@ -236,7 +236,7 @@ struct ToolMetadataClient: Sendable {
             - Do not specify icon shape, canvas, background, palette, materials, lighting, depth, style, rendering quality, legibility, macOS conventions, or generation instructions.
             - Good examples: A small house sheltering a calculator, with one coin orbiting the roofline. A calendar page whose date square becomes a checkmark.
             """
-        case .imagePlayground, .disabled:
+        case .automatic, .imagePlayground, .disabled:
             return """
             - Must be a tiny object phrase, not a sentence or description.
             - Must be 2 to 5 words.

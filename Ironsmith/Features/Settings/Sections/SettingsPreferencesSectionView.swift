@@ -108,7 +108,7 @@ struct SettingsPreferencesSectionView: View {
 
     private var imageGenerationProviderBinding: Binding<ToolImageGenerationProvider> {
         Binding(
-            get: { inferenceStore.effectiveImageGenerationProvider },
+            get: { inferenceStore.generationPreferences.imageGenerationProvider },
             set: { inferenceStore.generationPreferences.imageGenerationProvider = $0 }
         )
     }

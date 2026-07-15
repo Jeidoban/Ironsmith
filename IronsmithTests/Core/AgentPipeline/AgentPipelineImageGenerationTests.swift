@@ -23,7 +23,19 @@ extension AgentPipelineTests {
             )!
             if request.url?.host == "generativelanguage.googleapis.com" {
                 let geminiData = try JSONSerialization.data(withJSONObject: [
-                    "output_image": ["data": png.base64EncodedString()],
+                    "steps": [
+                        [
+                            "type": "model_output",
+                            "content": [
+                                ["type": "text", "text": "Generated image"],
+                                [
+                                    "type": "image",
+                                    "mime_type": "image/png",
+                                    "data": png.base64EncodedString(),
+                                ],
+                            ],
+                        ],
+                    ],
                 ])
                 return (geminiData, response)
             }

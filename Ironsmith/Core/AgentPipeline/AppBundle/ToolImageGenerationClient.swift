@@ -107,7 +107,7 @@ nonisolated struct ToolImageGenerationClient: Sendable {
                     accountClient: accountClient,
                     httpClient: httpClient
                 )
-            case .disabled:
+            case .automatic, .disabled:
                 throw ToolImageGenerationError.invalidResponse
             }
         }
@@ -214,7 +214,9 @@ nonisolated struct ToolImageGenerationClient: Sendable {
         )
         let data = try await perform(request, httpClient: httpClient)
         let response = try JSONDecoder().decode(GeminiImageResponse.self, from: data)
-        guard let imageData = Data(base64Encoded: response.outputImage.data) else {
+        guard let encodedImage = response.encodedImage,
+              let imageData = Data(base64Encoded: encodedImage)
+        else {
             throw ToolImageGenerationError.invalidImage
         }
         return try decodeImage(imageData)
@@ -349,13 +351,39 @@ nonisolated private struct ProviderErrorEnvelope: Decodable {
 
 nonisolated private struct GeminiImageResponse: Decodable {
     struct Image: Decodable {
-        let data: String
+        let data: String?
     }
 
-    let outputImage: Image
+    struct Content: Decodable {
+        let type: String
+        let data: String?
+    }
+
+    struct Step: Decodable {
+        let content: [Content]?
+    }
+
+    let outputImage: Image?
+    let steps: [Step]?
+
+    var encodedImage: String? {
+        if let data = outputImage?.data, !data.isEmpty {
+            return data
+        }
+        for step in (steps ?? []).reversed() {
+            for content in (step.content ?? []).reversed()
+            where content.type == "image" {
+                if let data = content.data, !data.isEmpty {
+                    return data
+                }
+            }
+        }
+        return nil
+    }
 
     enum CodingKeys: String, CodingKey {
         case outputImage = "output_image"
+        case steps
     }
 }
 

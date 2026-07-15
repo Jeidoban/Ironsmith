@@ -1,6 +1,7 @@
 import Foundation
 
 nonisolated enum ToolImageGenerationProvider: String, CaseIterable, Codable, Identifiable, Sendable {
+    case automatic
     case imagePlayground = "image_playground"
     case gemini
     case openAI = "openai"
@@ -11,6 +12,8 @@ nonisolated enum ToolImageGenerationProvider: String, CaseIterable, Codable, Ide
 
     var displayName: String {
         switch self {
+        case .automatic:
+            return "Automatic"
         case .imagePlayground:
             return "Image Playground"
         case .gemini:
