@@ -1,4 +1,5 @@
 import AnyLanguageModel
+import AppKit
 import Foundation
 import ImageIO
 import SwiftData
@@ -957,6 +958,18 @@ extension AgentPipelineTests {
         #expect(!(pngData.isEmpty))
         let pngSize = try Self.imagePixelSize(at: layout.cachedAppIconPNGURL)
         #expect(max(pngSize.width, pngSize.height) <= 256)
+
+        let imageRep = try #require(NSBitmapImageRep(data: pngData))
+        let corners = [
+            NSPoint(x: 0, y: 0),
+            NSPoint(x: imageRep.pixelsWide - 1, y: 0),
+            NSPoint(x: 0, y: imageRep.pixelsHigh - 1),
+            NSPoint(x: imageRep.pixelsWide - 1, y: imageRep.pixelsHigh - 1),
+        ]
+        for corner in corners {
+            let color = try #require(imageRep.colorAt(x: Int(corner.x), y: Int(corner.y)))
+            #expect(color.alphaComponent > 0.99)
+        }
     }
 
     @MainActor

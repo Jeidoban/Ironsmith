@@ -457,10 +457,6 @@ struct ToolIconClient: Sendable {
         defer { NSGraphicsContext.restoreGraphicsState() }
 
         let rect = NSRect(origin: .zero, size: size)
-        let path = NSBezierPath(
-            roundedRect: rect.insetBy(dx: 60, dy: 60), xRadius: 220, yRadius: 220)
-        path.addClip()
-
         let palette = Self.iconPalettes[paletteIndex]
         let gradient = NSGradient(colors: [
             Self.color(rgb: palette.backgroundStartRGB),
