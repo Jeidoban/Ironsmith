@@ -433,20 +433,69 @@ struct SwiftPackageProcessClient: Sendable {
     private static func launchAppBundle(_ appBundleURL: URL) async throws {
         let _: Void = try await withCheckedThrowingContinuation { continuation in
             Task { @MainActor in
-                let configuration = NSWorkspace.OpenConfiguration()
-                configuration.activates = true
-                configuration.createsNewApplicationInstance = true
-                NSWorkspace.shared.openApplication(at: appBundleURL, configuration: configuration) { app, error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                        return
-                    }
+                do {
+                    try await terminateRunningApplications(for: appBundleURL)
 
-                    _ = app?.activate(options: [.activateAllWindows])
-                    continuation.resume()
+                    let configuration = NSWorkspace.OpenConfiguration()
+                    configuration.activates = true
+                    configuration.createsNewApplicationInstance = false
+                    NSWorkspace.shared.openApplication(
+                        at: appBundleURL,
+                        configuration: configuration
+                    ) { app, error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                            return
+                        }
+
+                        _ = app?.activate(options: [.activateAllWindows])
+                        continuation.resume()
+                    }
+                } catch {
+                    continuation.resume(throwing: error)
                 }
             }
         }
+    }
+
+    @MainActor
+    private static func terminateRunningApplications(for appBundleURL: URL) async throws {
+        guard let bundleIdentifier = Bundle(url: appBundleURL)?.bundleIdentifier else {
+            return
+        }
+
+        let runningApplications = NSRunningApplication.runningApplications(
+            withBundleIdentifier: bundleIdentifier
+        )
+        guard !runningApplications.isEmpty else {
+            return
+        }
+
+        for application in runningApplications where !application.isTerminated {
+            application.terminate()
+        }
+        if await waitForTermination(of: runningApplications, attempts: 40) {
+            return
+        }
+
+        for application in runningApplications where !application.isTerminated {
+            application.forceTerminate()
+        }
+        _ = await waitForTermination(of: runningApplications, attempts: 20)
+    }
+
+    @MainActor
+    private static func waitForTermination(
+        of applications: [NSRunningApplication],
+        attempts: Int
+    ) async -> Bool {
+        for _ in 0..<attempts {
+            if applications.allSatisfy(\.isTerminated) {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return applications.allSatisfy(\.isTerminated)
     }
 }
 

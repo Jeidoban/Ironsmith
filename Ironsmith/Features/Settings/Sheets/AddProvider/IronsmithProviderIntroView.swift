@@ -13,7 +13,7 @@ struct IronsmithProviderIntroView: View {
 
                 Text(
                     "Add Ironsmith as a provider to support the project and access ChatGPT, Claude, Gemini and more. "
-                        + "New users get 10 free credits to get started."
+                        + "New users get 20 free credits to get started."
                 )
                 .font(.body)
                 .foregroundStyle(.secondary)

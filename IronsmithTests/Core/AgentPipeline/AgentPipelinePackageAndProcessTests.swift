@@ -964,8 +964,12 @@ extension AgentPipelineTests {
     func iconClientFallbackPaletteVariesByToolName() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
+        let suiteName = "IronsmithTests.FallbackIconPalette.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
         let client = ToolIconClient.live(
+            hostedIconPaletteStore: ToolHostedIconPaletteStore(userDefaults: userDefaults),
             imageGenerator: { _ in
                 throw ToolAppBundleError.iconGenerationProducedNoImage
             }
@@ -995,6 +999,43 @@ extension AgentPipelineTests {
         let amberPNG = try Data(contentsOf: amberLayout.cachedAppIconPNGURL)
         let azurePNG = try Data(contentsOf: azureLayout.cachedAppIconPNGURL)
         #expect(amberPNG != azurePNG)
+    }
+
+    @MainActor
+    @Test
+    func iconClientFallbackPaletteExcludesTenRecentSelections() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suiteName = "IronsmithTests.FallbackIconPaletteHistory.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let client = ToolIconClient.live(
+            hostedIconPaletteStore: ToolHostedIconPaletteStore(userDefaults: userDefaults)
+        )
+
+        var generatedPNGs: [Data] = []
+        for index in 0...ToolHostedIconPaletteStore.recentPaletteLimit {
+            let executableName = "RepeatedName\(index)"
+            let layout = ToolPackageLayout(
+                packageRootURL: root.appendingPathComponent(executableName, isDirectory: true),
+                executableName: executableName
+            )
+            _ = try await client.ensureIconAssets(
+                ToolIconRequest(
+                    displayName: "Repeated Name",
+                    layout: layout,
+                    imageProvider: .disabled
+                )
+            )
+            generatedPNGs.append(try Data(contentsOf: layout.cachedAppIconPNGURL))
+        }
+
+        #expect(Set(generatedPNGs.prefix(10)).count == 10)
+        #expect(Set(generatedPNGs.suffix(10)).count == 10)
+        #expect(
+            userDefaults.array(forKey: IronsmithPreferenceKeys.recentHostedIconPaletteIndices)?.count
+                == ToolHostedIconPaletteStore.recentPaletteLimit
+        )
     }
 
     @Test

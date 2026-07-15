@@ -22,6 +22,13 @@ nonisolated struct ToolIconRequest: Equatable, Sendable {
     }
 }
 
+nonisolated private struct ToolIconPalette: Sendable {
+    let description: String
+    let backgroundStartRGB: UInt32
+    let backgroundEndRGB: UInt32
+    let foregroundRGB: UInt32
+}
+
 actor ToolHostedIconPaletteStore {
     static let shared = ToolHostedIconPaletteStore()
     nonisolated static let recentPaletteLimit = 10
@@ -33,6 +40,10 @@ actor ToolHostedIconPaletteStore {
     }
 
     func palette(for displayName: String) -> String {
+        ToolIconClient.hostedIconPalettes[paletteIndex(for: displayName)]
+    }
+
+    func paletteIndex(for displayName: String) -> Int {
         let paletteCount = ToolIconClient.hostedIconPalettes.count
         let preferredIndex = ToolIconClient.hostedIconPaletteIndex(for: displayName)
         let recentIndices = recentPaletteIndices(paletteCount: paletteCount)
@@ -48,7 +59,7 @@ actor ToolHostedIconPaletteStore {
             updatedIndices,
             forKey: IronsmithPreferenceKeys.recentHostedIconPaletteIndices
         )
-        return ToolIconClient.hostedIconPalettes[selectedIndex]
+        return selectedIndex
     }
 
     private func recentPaletteIndices(paletteCount: Int) -> [Int] {
@@ -97,19 +108,6 @@ struct ToolIconClient: Sendable {
     ) -> ToolIconClient {
         let imageClient = imageClient ?? .live()
         let fileManagerBox = ToolIconFileManager(fileManager)
-        let imageGenerator =
-            imageGenerator ?? { request in
-                let hostedPalette: String?
-                if request.imageProvider == .imagePlayground || request.imageProvider == .disabled {
-                    hostedPalette = nil
-                } else {
-                    hostedPalette = await hostedIconPaletteStore.palette(for: request.displayName)
-                }
-                return try await imageClient.generate(
-                    request.imageProvider,
-                    Self.iconPrompt(for: request, hostedPalette: hostedPalette)
-                )
-            }
         return ToolIconClient { request in
             if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconICNSURL.path) {
                 return request.layout.cachedAppIconICNSURL
@@ -120,15 +118,42 @@ struct ToolIconClient: Sendable {
                 withIntermediateDirectories: true
             )
 
+            var selectedPaletteIndex: Int?
+            if request.imageProvider != .imagePlayground {
+                selectedPaletteIndex = await hostedIconPaletteStore.paletteIndex(
+                    for: request.displayName
+                )
+            }
+
             if request.imageProvider == .disabled {
+                let fallbackPaletteIndex: Int
+                if let selectedPaletteIndex {
+                    fallbackPaletteIndex = selectedPaletteIndex
+                } else {
+                    fallbackPaletteIndex = await hostedIconPaletteStore.paletteIndex(
+                        for: request.displayName
+                    )
+                }
                 return try await Self.writeFallbackIcon(
                     for: request,
+                    paletteIndex: fallbackPaletteIndex,
                     fileManager: fileManagerBox.value
                 )
             }
 
             do {
-                let cgImage = try await imageGenerator(request)
+                let cgImage: CGImage
+                if let imageGenerator {
+                    cgImage = try await imageGenerator(request)
+                } else {
+                    let hostedPalette = selectedPaletteIndex.map {
+                        Self.hostedIconPalettes[$0]
+                    }
+                    cgImage = try await imageClient.generate(
+                        request.imageProvider,
+                        Self.iconPrompt(for: request, hostedPalette: hostedPalette)
+                    )
+                }
                 try Self.writePNG(cgImage, to: request.layout.cachedAppIconPNGURL)
                 try Self.writeICNS(cgImage, request: request, fileManager: fileManagerBox.value)
                 return request.layout.cachedAppIconICNSURL
@@ -145,8 +170,17 @@ struct ToolIconClient: Sendable {
                     """
                 )
                 do {
+                    let fallbackPaletteIndex: Int
+                    if let selectedPaletteIndex {
+                        fallbackPaletteIndex = selectedPaletteIndex
+                    } else {
+                        fallbackPaletteIndex = await hostedIconPaletteStore.paletteIndex(
+                            for: request.displayName
+                        )
+                    }
                     return try await Self.writeFallbackIcon(
                         for: request,
+                        paletteIndex: fallbackPaletteIndex,
                         fileManager: fileManagerBox.value
                     )
                 } catch {
@@ -237,28 +271,132 @@ struct ToolIconClient: Sendable {
             """
     }
 
-    nonisolated static let hostedIconPalettes = [
-        "a warm coral-to-apricot background with cream and deep plum accents",
-        "a golden amber-to-ochre background with ivory and deep cocoa accents",
-        "an emerald-to-jade background with warm ivory and dark forest accents",
-        "a violet-to-orchid background with soft lilac and deep aubergine accents",
-        "a rose-to-raspberry background with pale blush and burgundy accents",
-        "a turquoise-to-teal background with pale mint and deep teal accents",
-        "a charcoal-to-graphite background with silver and muted chartreuse accents",
-        "a warm sand-to-terracotta background with ivory and dark umber accents",
-        "a cobalt-to-indigo background with pale sky and midnight navy accents",
-        "a crimson-to-vermilion background with warm ivory and deep maroon accents",
-        "a lemon-to-chartreuse background with soft cream and dark olive accents",
-        "a periwinkle-to-lavender background with pearl and deep ink accents",
-        "a copper-to-russet background with parchment and espresso accents",
-        "a cyan-to-cerulean background with icy white and deep navy accents",
-        "a magenta-to-fuchsia background with pale pink and dark mulberry accents",
-        "a moss-to-olive background with warm linen and deep pine accents",
-        "a plum-to-wine background with soft mauve and near-black accents",
-        "a peach-to-salmon background with vanilla and deep aubergine accents",
-        "a slate-to-steel-blue background with cool mist and midnight accents",
-        "a mint-to-seafoam background with warm ivory and dark spruce accents",
+    nonisolated private static let iconPalettes = [
+        ToolIconPalette(
+            description: "a warm coral-to-apricot background with cream and deep plum accents",
+            backgroundStartRGB: 0xF2645A,
+            backgroundEndRGB: 0xF6AE6B,
+            foregroundRGB: 0xFFF4E6
+        ),
+        ToolIconPalette(
+            description: "a golden amber-to-ochre background with ivory and deep cocoa accents",
+            backgroundStartRGB: 0xF2A93B,
+            backgroundEndRGB: 0xC78316,
+            foregroundRGB: 0xFFF8E5
+        ),
+        ToolIconPalette(
+            description: "an emerald-to-jade background with warm ivory and dark forest accents",
+            backgroundStartRGB: 0x087F5B,
+            backgroundEndRGB: 0x3DB58B,
+            foregroundRGB: 0xFBF3D5
+        ),
+        ToolIconPalette(
+            description: "a violet-to-orchid background with soft lilac and deep aubergine accents",
+            backgroundStartRGB: 0x6750C8,
+            backgroundEndRGB: 0xB15BC3,
+            foregroundRGB: 0xEADFFF
+        ),
+        ToolIconPalette(
+            description: "a rose-to-raspberry background with pale blush and burgundy accents",
+            backgroundStartRGB: 0xE34D78,
+            backgroundEndRGB: 0xA71952,
+            foregroundRGB: 0xFFE1E9
+        ),
+        ToolIconPalette(
+            description: "a turquoise-to-teal background with pale mint and deep teal accents",
+            backgroundStartRGB: 0x19A7A0,
+            backgroundEndRGB: 0x087F80,
+            foregroundRGB: 0xD9FFF4
+        ),
+        ToolIconPalette(
+            description: "a charcoal-to-graphite background with silver and muted chartreuse accents",
+            backgroundStartRGB: 0x2F3338,
+            backgroundEndRGB: 0x59616A,
+            foregroundRGB: 0xE7EBEF
+        ),
+        ToolIconPalette(
+            description: "a warm sand-to-terracotta background with ivory and dark umber accents",
+            backgroundStartRGB: 0xD8A56D,
+            backgroundEndRGB: 0xB85C3C,
+            foregroundRGB: 0xFFF3DC
+        ),
+        ToolIconPalette(
+            description: "a cobalt-to-indigo background with pale sky and midnight navy accents",
+            backgroundStartRGB: 0x2563D9,
+            backgroundEndRGB: 0x4338A8,
+            foregroundRGB: 0xDCEEFF
+        ),
+        ToolIconPalette(
+            description: "a crimson-to-vermilion background with warm ivory and deep maroon accents",
+            backgroundStartRGB: 0xC92A3B,
+            backgroundEndRGB: 0xF04E32,
+            foregroundRGB: 0xFFF1E3
+        ),
+        ToolIconPalette(
+            description: "a lemon-to-chartreuse background with soft cream and dark olive accents",
+            backgroundStartRGB: 0xF0D63C,
+            backgroundEndRGB: 0xA8C832,
+            foregroundRGB: 0x384218
+        ),
+        ToolIconPalette(
+            description: "a periwinkle-to-lavender background with pearl and deep ink accents",
+            backgroundStartRGB: 0x7C83E6,
+            backgroundEndRGB: 0xB9A7ED,
+            foregroundRGB: 0xF8F4FF
+        ),
+        ToolIconPalette(
+            description: "a copper-to-russet background with parchment and espresso accents",
+            backgroundStartRGB: 0xB76536,
+            backgroundEndRGB: 0x7C3A25,
+            foregroundRGB: 0xF6E4C5
+        ),
+        ToolIconPalette(
+            description: "a cyan-to-cerulean background with icy white and deep navy accents",
+            backgroundStartRGB: 0x19BEE6,
+            backgroundEndRGB: 0x1677C8,
+            foregroundRGB: 0xE8FAFF
+        ),
+        ToolIconPalette(
+            description: "a magenta-to-fuchsia background with pale pink and dark mulberry accents",
+            backgroundStartRGB: 0xCC3FAF,
+            backgroundEndRGB: 0xF05ACB,
+            foregroundRGB: 0xFFE0F5
+        ),
+        ToolIconPalette(
+            description: "a moss-to-olive background with warm linen and deep pine accents",
+            backgroundStartRGB: 0x6E8B3D,
+            backgroundEndRGB: 0x9A9B42,
+            foregroundRGB: 0xF5E8CE
+        ),
+        ToolIconPalette(
+            description: "a plum-to-wine background with soft mauve and near-black accents",
+            backgroundStartRGB: 0x5F2B68,
+            backgroundEndRGB: 0x8A274A,
+            foregroundRGB: 0xE8C4DA
+        ),
+        ToolIconPalette(
+            description: "a peach-to-salmon background with vanilla and deep aubergine accents",
+            backgroundStartRGB: 0xF6A675,
+            backgroundEndRGB: 0xE96F68,
+            foregroundRGB: 0xFFF0D1
+        ),
+        ToolIconPalette(
+            description: "a slate-to-steel-blue background with cool mist and midnight accents",
+            backgroundStartRGB: 0x52677D,
+            backgroundEndRGB: 0x708EAA,
+            foregroundRGB: 0xE3EDF4
+        ),
+        ToolIconPalette(
+            description: "a mint-to-seafoam background with warm ivory and dark spruce accents",
+            backgroundStartRGB: 0x7ADFC2,
+            backgroundEndRGB: 0x3FAF99,
+            foregroundRGB: 0xFFF5DE
+        ),
     ]
+
+    nonisolated static var hostedIconPalettes: [String] {
+        iconPalettes.map(\.description)
+    }
 
     nonisolated static func hostedIconPalette(for displayName: String) -> String {
         hostedIconPalettes[hostedIconPaletteIndex(for: displayName)]
@@ -270,15 +408,19 @@ struct ToolIconClient: Sendable {
             hash ^= UInt64(byte)
             hash &*= 1_099_511_628_211
         }
-        return Int(hash % UInt64(hostedIconPalettes.count))
+        return Int(hash % UInt64(iconPalettes.count))
     }
 
     private static func writeFallbackIcon(
         for request: ToolIconRequest,
+        paletteIndex: Int,
         fileManager: FileManager
     ) async throws -> URL {
         let fallback = try await MainActor.run {
-            try Self.fallbackIcon(for: request.displayName)
+            try Self.fallbackIcon(
+                for: request.displayName,
+                paletteIndex: paletteIndex
+            )
         }
         try Self.writePNG(fallback, to: request.layout.cachedAppIconPNGURL)
         try Self.writeICNS(fallback, request: request, fileManager: fileManager)
@@ -286,7 +428,10 @@ struct ToolIconClient: Sendable {
     }
 
     @MainActor
-    private static func fallbackIcon(for displayName: String) throws -> CGImage {
+    private static func fallbackIcon(
+        for displayName: String,
+        paletteIndex: Int
+    ) throws -> CGImage {
         let pixelSize = 1024
         let size = NSSize(width: pixelSize, height: pixelSize)
         guard
@@ -316,13 +461,17 @@ struct ToolIconClient: Sendable {
             roundedRect: rect.insetBy(dx: 60, dy: 60), xRadius: 220, yRadius: 220)
         path.addClip()
 
-        let gradient = NSGradient(colors: Self.fallbackPalette(for: displayName))
+        let palette = Self.iconPalettes[paletteIndex]
+        let gradient = NSGradient(colors: [
+            Self.color(rgb: palette.backgroundStartRGB),
+            Self.color(rgb: palette.backgroundEndRGB),
+        ])
         gradient?.draw(in: rect, angle: 35)
 
         let initials = Self.initials(for: displayName)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: initials.count > 1 ? 320 : 390, weight: .black),
-            .foregroundColor: NSColor.white,
+            .foregroundColor: Self.color(rgb: palette.foregroundRGB),
         ]
         let attributed = NSAttributedString(string: initials, attributes: attributes)
         let textSize = attributed.size()
@@ -354,49 +503,14 @@ struct ToolIconClient: Sendable {
         return letters.isEmpty ? "I" : letters
     }
 
-    nonisolated private static func fallbackPalette(for displayName: String) -> [NSColor] {
-        let palettes: [[NSColor]] = [
-            [
-                NSColor(calibratedRed: 0.12, green: 0.20, blue: 0.25, alpha: 1),
-                NSColor(calibratedRed: 0.12, green: 0.48, blue: 0.44, alpha: 1),
-                NSColor(calibratedRed: 0.88, green: 0.64, blue: 0.24, alpha: 1),
-            ],
-            [
-                NSColor(calibratedRed: 0.16, green: 0.14, blue: 0.28, alpha: 1),
-                NSColor(calibratedRed: 0.36, green: 0.30, blue: 0.68, alpha: 1),
-                NSColor(calibratedRed: 0.92, green: 0.48, blue: 0.40, alpha: 1),
-            ],
-            [
-                NSColor(calibratedRed: 0.08, green: 0.20, blue: 0.18, alpha: 1),
-                NSColor(calibratedRed: 0.12, green: 0.50, blue: 0.36, alpha: 1),
-                NSColor(calibratedRed: 0.66, green: 0.86, blue: 0.62, alpha: 1),
-            ],
-            [
-                NSColor(calibratedRed: 0.22, green: 0.12, blue: 0.22, alpha: 1),
-                NSColor(calibratedRed: 0.62, green: 0.22, blue: 0.42, alpha: 1),
-                NSColor(calibratedRed: 0.94, green: 0.62, blue: 0.42, alpha: 1),
-            ],
-            [
-                NSColor(calibratedRed: 0.08, green: 0.18, blue: 0.32, alpha: 1),
-                NSColor(calibratedRed: 0.12, green: 0.44, blue: 0.70, alpha: 1),
-                NSColor(calibratedRed: 0.60, green: 0.84, blue: 0.78, alpha: 1),
-            ],
-            [
-                NSColor(calibratedRed: 0.20, green: 0.14, blue: 0.10, alpha: 1),
-                NSColor(calibratedRed: 0.62, green: 0.30, blue: 0.18, alpha: 1),
-                NSColor(calibratedRed: 0.92, green: 0.76, blue: 0.42, alpha: 1),
-            ],
-        ]
-        return palettes[Int(stableHash(displayName) % UInt64(palettes.count))]
-    }
-
-    nonisolated private static func stableHash(_ string: String) -> UInt64 {
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in string.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return hash
+    @MainActor
+    private static func color(rgb: UInt32) -> NSColor {
+        NSColor(
+            calibratedRed: CGFloat((rgb >> 16) & 0xFF) / 255,
+            green: CGFloat((rgb >> 8) & 0xFF) / 255,
+            blue: CGFloat(rgb & 0xFF) / 255,
+            alpha: 1
+        )
     }
 
     nonisolated private static func writePNG(_ cgImage: CGImage, to url: URL) throws {
