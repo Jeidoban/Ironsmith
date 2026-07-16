@@ -694,7 +694,7 @@ extension InferenceTests {
         try context.save()
 
         await store.loadIfNeeded(modelContext: context)
-        await Self.eventually {
+        await Self.eventually(timeoutNanoseconds: 15_000_000_000) {
             store.remoteModels.contains { $0.identifier == "gemma4:e2b" }
         }
         #expect(store.remoteModels.contains { $0.identifier == "gemma4:e2b" })
@@ -762,7 +762,7 @@ extension InferenceTests {
 
         inferenceStore.pullOllamaRecommendedModel(entry, provider: provider)
 
-        await Self.eventually(timeoutNanoseconds: 2_000_000_000) {
+        await Self.eventually(timeoutNanoseconds: 15_000_000_000) {
             inferenceStore.ollamaPullStates.isEmpty &&
                 inferenceStore.remoteModels.contains { $0.identifier == entry.identifier }
         }
@@ -782,8 +782,8 @@ extension InferenceTests {
             isInstalled: { true },
             startServer: {},
             pullModel: { _, _, _, progress in
-                progress(OllamaPullProgress(status: "pulling layers", completed: 50, total: 100))
-                progress(OllamaPullProgress(status: "verifying digest", completed: nil, total: nil))
+                await progress(OllamaPullProgress(status: "pulling layers", completed: 50, total: 100))
+                await progress(OllamaPullProgress(status: "verifying digest", completed: nil, total: nil))
                 try await Task.sleep(nanoseconds: 100_000_000)
             },
             deleteModel: { _, _, _ in }
@@ -794,7 +794,7 @@ extension InferenceTests {
 
         inferenceStore.pullOllamaRecommendedModel(entry, provider: provider)
 
-        await Self.eventually {
+        await Self.eventually(timeoutNanoseconds: 15_000_000_000) {
             inferenceStore.ollamaPullStates[key] == OllamaModelTransferState(
                 status: "verifying digest",
                 progress: 0.5

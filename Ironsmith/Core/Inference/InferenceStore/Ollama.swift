@@ -76,7 +76,7 @@ extension InferenceStore {
                     baseURLString,
                     apiKey
                 ) { progress in
-                    Task { @MainActor in
+                    await MainActor.run {
                         guard let currentState = store.ollamaPullStates[key] else { return }
                         let previousProgress = currentState.progress
                         store.ollamaPullStates[key] = OllamaModelTransferState(
