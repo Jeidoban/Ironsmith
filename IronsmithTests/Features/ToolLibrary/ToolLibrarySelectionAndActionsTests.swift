@@ -631,7 +631,7 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
-    func toolLibraryStoreRebuildsFailedToolAndMarksItReady() async throws {
+    func toolLibraryStoreDoesNotRebuildFailedTool() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -671,12 +671,12 @@ extension ToolLibraryTests {
 
         await store.rebuild(tool, in: context)
 
-        #expect(await buildCapture.builtPackageRoot == packageRoot)
-        #expect(tool.generationState == .ready)
-        #expect(tool.generationPhase == .completed)
-        #expect(tool.generationMode == nil)
-        #expect(tool.pendingPrompt == nil)
-        #expect(tool.generationErrorSummary == nil)
+        #expect(await buildCapture.builtPackageRoot == nil)
+        #expect(tool.generationState == .failed)
+        #expect(tool.generationPhase == .packaging)
+        #expect(tool.generationMode == .create)
+        #expect(tool.pendingPrompt == "Build an app")
+        #expect(tool.generationErrorSummary == "Packaging failed")
         #expect(store.rebuildingToolID == nil)
         #expect(store.presentedErrorMessage == nil)
     }

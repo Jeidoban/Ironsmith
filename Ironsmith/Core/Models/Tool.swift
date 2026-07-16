@@ -95,10 +95,6 @@ extension Tool {
         generationState == .ready
     }
 
-    var isRebuildable: Bool {
-        generationState == .ready || generationState == .failed
-    }
-
     var packageRootURL: URL {
         URL(fileURLWithPath: packageRootPath, isDirectory: true)
     }

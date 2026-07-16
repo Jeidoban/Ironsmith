@@ -1144,7 +1144,7 @@ struct SingleFileToolGenerationRuntime {
         try Task.checkCancellation()
         if let iconTask {
             try await lifecycle.updatePhase(.generating, .waitingForIcon, nil)
-            try await iconTask.value
+            try await Self.waitForIconTask(iconTask)
         }
         try Task.checkCancellation()
         try await lifecycle.updatePhase(.generating, .packaging, nil)
@@ -1167,6 +1167,14 @@ struct SingleFileToolGenerationRuntime {
             settings: settings,
             packageRootURL: packageRootURL
         )
+    }
+
+    nonisolated static func waitForIconTask(_ iconTask: Task<Void, Error>) async throws {
+        try await withTaskCancellationHandler {
+            try await iconTask.value
+        } onCancel: {
+            iconTask.cancel()
+        }
     }
 
     private func trimPendingSourceDraftToCleanBoundary(layout: ToolPackageLayout) throws {

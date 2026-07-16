@@ -374,7 +374,7 @@ final class ToolLibraryStore {
         guard !isGenerating,
               rebuildingToolID == nil,
               restoringToolID == nil,
-              tool.isRebuildable
+              tool.isGenerationReady
         else { return }
         rebuildingToolID = tool.id
         clearPresentedErrorState()
@@ -394,11 +394,7 @@ final class ToolLibraryStore {
                 settings: settings
             )
             try await dependencies.buildClient.buildTool(tool)
-            if tool.generationState == .failed {
-                clearPendingGeneration(on: tool)
-            } else {
-                tool.updatedAt = .now
-            }
+            tool.updatedAt = .now
             try modelContext.save()
         } catch {
             modelContext.rollback()

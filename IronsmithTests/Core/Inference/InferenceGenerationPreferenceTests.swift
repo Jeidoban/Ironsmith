@@ -38,6 +38,35 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func startupPreservesCodexBackedOpenAIImageProviderSelection() async throws {
+        let preferences = Self.generationPreferences()
+        preferences.imageGenerationProvider = .openAI
+        let credential = OpenAICodexCredential(accessToken: "codex-token")
+        let authClient = OpenAICodexAuthClient(
+            credential: { credential },
+            signIn: { credential },
+            signOut: {},
+            validCredential: { credential },
+            discoverModels: { [] }
+        )
+        let store = InferenceStore(
+            dependencies: Self.dependencies(openAICodexAuthClient: authClient),
+            generationPreferences: preferences,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let modelContext = ModelContext(container)
+        modelContext.insert(ProviderCatalog.makeProvider(for: .openAI)!)
+        try modelContext.save()
+
+        await store.loadIfNeeded(modelContext: modelContext)
+
+        #expect(store.hasOpenAICodexCredential)
+        #expect(preferences.imageGenerationProvider == .openAI)
+    }
+
+    @MainActor
+    @Test
     func automaticImageProviderMatchesSelectedModelProvider() throws {
         let preferences = Self.generationPreferences()
         let dependencies = Self.dependencies()

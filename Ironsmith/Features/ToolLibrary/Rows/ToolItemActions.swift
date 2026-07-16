@@ -89,7 +89,7 @@ struct ToolItemActionsMenu: View {
         Button("Rename App...", action: actions.onRename)
             .disabled(isGenerating || state.isBusy)
         Button("Rebuild App", action: actions.onRebuild)
-            .disabled(!tool.isRebuildable || state.isBusy)
+            .disabled(!tool.isGenerationReady || state.isBusy)
         if state.showsStoreActions {
             Button(storePublishActionTitle, action: actions.onPublishToStore)
                 .disabled(!tool.isGenerationReady || state.isBusy)

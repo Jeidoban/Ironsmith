@@ -99,6 +99,26 @@ extension AgentPipelineTests {
         }
     }
 
+    @Test
+    func waitingForIconCancelsTheParallelIconTask() async throws {
+        let iconTask = Task<Void, Error> {
+            try await Task.sleep(for: .seconds(10))
+        }
+        let waitingTask = Task {
+            try await SingleFileToolGenerationRuntime.waitForIconTask(iconTask)
+        }
+
+        waitingTask.cancel()
+
+        do {
+            try await waitingTask.value
+            Issue.record("Expected cancellation while waiting for the icon task.")
+        } catch is CancellationError {
+            // Expected.
+        }
+        #expect(iconTask.isCancelled)
+    }
+
     @MainActor
     @Test
     func cancelledNewToolGenerationRemovesPartialPackage() async throws {
