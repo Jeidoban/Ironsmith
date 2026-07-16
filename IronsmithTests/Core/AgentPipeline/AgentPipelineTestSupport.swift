@@ -805,6 +805,7 @@ actor StreamingResponseProbe {
     private(set) var prompts: [String] = []
     private(set) var didStart = false
     private(set) var didCancel = false
+    private(set) var didFinish = false
 
     func recordStart(promptDescription: String) {
         didStart = true
@@ -813,6 +814,32 @@ actor StreamingResponseProbe {
 
     func recordCancel() {
         didCancel = true
+    }
+
+    func recordFinish() {
+        didFinish = true
+    }
+}
+
+actor AsyncTestGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        for waiter in pendingWaiters {
+            waiter.resume()
+        }
     }
 }
 

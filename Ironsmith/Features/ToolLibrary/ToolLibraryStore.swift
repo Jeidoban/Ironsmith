@@ -178,6 +178,7 @@ final class ToolLibraryStore {
             return
         }
 
+        cancelIconGeneration(for: packageRootURL)
         do {
             try removePackageIfExists(packageRootURL)
         } catch {
@@ -308,6 +309,7 @@ final class ToolLibraryStore {
                 handleDeletedTool(tool)
                 modelContext.delete(tool)
                 try modelContext.save()
+                cancelIconGeneration(for: packageRootURL)
                 try removePackageIfExists(packageRootURL)
             case .edit:
                 do {
@@ -331,6 +333,12 @@ final class ToolLibraryStore {
         } catch {
             modelContext.rollback()
             presentError(error.localizedDescription)
+        }
+    }
+
+    private func cancelIconGeneration(for packageRootURL: URL) {
+        Task {
+            await dependencies.generationClient.cancelIconGeneration(for: packageRootURL)
         }
     }
 

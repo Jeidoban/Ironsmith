@@ -206,18 +206,21 @@ struct SingleFileToolGenerationRuntime {
                 promptRefinementEnabled: context.promptRefinementEnabled,
                 promptRefinementModel: context.promptRefinement.languageModel
             )
-            let iconTask = Task {
+            let iconClient = context.iconClient
+            let iconGeneration = await context.iconGenerationCoordinator.generation(
+                for: setup.layout.packageRootURL
+            ) {
                 if staggerIconGeneration {
                     try await Task.sleep(for: Self.codexIconGenerationStagger)
                 }
-                try await generateIconAssets(
+                try await Self.generateIconAssets(
                     displayName: setup.displayName,
                     iconPrompt: setup.iconPrompt,
                     layout: setup.layout,
-                    imageGenerationProvider: imageGenerationProvider
+                    imageGenerationProvider: imageGenerationProvider,
+                    iconClient: iconClient
                 )
             }
-            defer { iconTask.cancel() }
 
             let contentPrompt: String
             if startingPhase == .generatingSource
@@ -244,7 +247,7 @@ struct SingleFileToolGenerationRuntime {
                     packageRootURL: setup.layout.packageRootURL,
                     settings: setup.settings,
                     iconPrompt: setup.iconPrompt,
-                    iconTask: iconTask,
+                    iconGeneration: iconGeneration,
                     lifecycle: lifecycle
                 )
             }
@@ -265,7 +268,7 @@ struct SingleFileToolGenerationRuntime {
                     packageRootURL: setup.layout.packageRootURL,
                     settings: setup.settings,
                     iconPrompt: setup.iconPrompt,
-                    iconTask: iconTask,
+                    iconGeneration: iconGeneration,
                     lifecycle: lifecycle
                 )
             }
@@ -296,14 +299,22 @@ struct SingleFileToolGenerationRuntime {
                 packageRootURL: setup.layout.packageRootURL,
                 settings: setup.settings,
                 iconPrompt: setup.iconPrompt,
-                iconTask: iconTask,
+                iconGeneration: iconGeneration,
                 lifecycle: lifecycle
             )
         } catch is CancellationError {
             if !lifecycle.preservesCreatedPackageOnCancellation {
+                await context.iconGenerationCoordinator.cancelGeneration(
+                    for: setup.layout.packageRootURL
+                )
                 try? context.fileClient.removeItemIfExists(setup.layout.packageRootURL)
             }
             throw CancellationError()
+        } catch {
+            await context.iconGenerationCoordinator.cancelGeneration(
+                for: setup.layout.packageRootURL
+            )
+            throw error
         }
     }
 
@@ -797,15 +808,16 @@ struct SingleFileToolGenerationRuntime {
         )
     }
 
-    private func generateIconAssets(
+    nonisolated private static func generateIconAssets(
         displayName: String,
         iconPrompt: String?,
         layout: ToolPackageLayout,
-        imageGenerationProvider: ToolImageGenerationProvider
+        imageGenerationProvider: ToolImageGenerationProvider,
+        iconClient: ToolIconClient
     ) async throws {
         do {
             try Task.checkCancellation()
-            _ = try await context.iconClient.ensureIconAssets(
+            _ = try await iconClient.ensureIconAssets(
                 ToolIconRequest(
                     displayName: displayName,
                     iconPrompt: iconPrompt,
@@ -1132,7 +1144,7 @@ struct SingleFileToolGenerationRuntime {
         packageRootURL: URL,
         settings: ToolGenerationSettings,
         iconPrompt: String?,
-        iconTask: Task<Void, Error>? = nil,
+        iconGeneration: ToolIconGenerationHandle? = nil,
         lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
@@ -1142,9 +1154,9 @@ struct SingleFileToolGenerationRuntime {
         await context.processClient.stripQuarantine(binaryURL)
 
         try Task.checkCancellation()
-        if let iconTask {
+        if let iconGeneration {
             try await lifecycle.updatePhase(.generating, .waitingForIcon, nil)
-            try await Self.waitForIconTask(iconTask)
+            try await iconGeneration.wait()
         }
         try Task.checkCancellation()
         try await lifecycle.updatePhase(.generating, .packaging, nil)
@@ -1167,14 +1179,6 @@ struct SingleFileToolGenerationRuntime {
             settings: settings,
             packageRootURL: packageRootURL
         )
-    }
-
-    nonisolated static func waitForIconTask(_ iconTask: Task<Void, Error>) async throws {
-        try await withTaskCancellationHandler {
-            try await iconTask.value
-        } onCancel: {
-            iconTask.cancel()
-        }
     }
 
     private func trimPendingSourceDraftToCleanBoundary(layout: ToolPackageLayout) throws {

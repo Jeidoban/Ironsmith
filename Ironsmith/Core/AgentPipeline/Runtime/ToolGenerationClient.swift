@@ -89,15 +89,22 @@ nonisolated struct ToolGenerationRequest {
 
 struct ToolGenerationClient {
     private var generate: (ToolGenerationRequest) async throws -> ToolGenerationResult
+    private var cancelIconGeneration: @Sendable (URL) async -> Void
 
     func generateTool(_ request: ToolGenerationRequest) async throws -> ToolGenerationResult {
         try await generate(request)
     }
 
+    func cancelIconGeneration(for packageRootURL: URL) async {
+        await cancelIconGeneration(packageRootURL)
+    }
+
     init(
-        _ generate: @escaping (ToolGenerationRequest) async throws -> ToolGenerationResult
+        _ generate: @escaping (ToolGenerationRequest) async throws -> ToolGenerationResult,
+        cancelIconGeneration: @escaping @Sendable (URL) async -> Void = { _ in }
     ) {
         self.generate = generate
+        self.cancelIconGeneration = cancelIconGeneration
     }
 
     @MainActor
@@ -105,20 +112,25 @@ struct ToolGenerationClient {
         dependencies: ToolGenerationRuntimeDependencies? = nil
     ) -> Self {
         let dependencies = dependencies ?? .live()
-        return Self { request in
-            let context = ToolGenerationRuntimeContext(
-                languageModelContext: request.languageModelContext,
-                dependencies: dependencies
-            )
-            let runtime = SingleFileToolGenerationRuntime(context: context)
-            return try await runtime.generateTool(
-                for: request.prompt,
-                existingTool: request.existingTool,
-                settings: request.settings,
-                imageGenerationProvider: request.imageGenerationProvider,
-                lifecycle: request.lifecycle
-            )
-        }
+        return Self(
+            { request in
+                let context = ToolGenerationRuntimeContext(
+                    languageModelContext: request.languageModelContext,
+                    dependencies: dependencies
+                )
+                let runtime = SingleFileToolGenerationRuntime(context: context)
+                return try await runtime.generateTool(
+                    for: request.prompt,
+                    existingTool: request.existingTool,
+                    settings: request.settings,
+                    imageGenerationProvider: request.imageGenerationProvider,
+                    lifecycle: request.lifecycle
+                )
+            },
+            cancelIconGeneration: { packageRootURL in
+                await dependencies.iconGenerationCoordinator.cancelGeneration(for: packageRootURL)
+            }
+        )
     }
 }
 

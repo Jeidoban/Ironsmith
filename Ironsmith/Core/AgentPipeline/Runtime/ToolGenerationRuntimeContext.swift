@@ -148,6 +148,7 @@ struct ToolGenerationRuntimeDependencies {
     let processClient: SwiftPackageProcessClient
     let appBundleClient: ToolAppBundleClient
     let iconClient: ToolIconClient
+    let iconGenerationCoordinator: ToolIconGenerationCoordinator
     let metadataClient: ToolMetadataClient
     let promptRefinementClient: ToolPromptRefinementClient
     let versionBackupClient: ToolVersionBackupClient
@@ -160,6 +161,7 @@ struct ToolGenerationRuntimeDependencies {
         processClient: SwiftPackageProcessClient,
         appBundleClient: ToolAppBundleClient,
         iconClient: ToolIconClient = .noOp,
+        iconGenerationCoordinator: ToolIconGenerationCoordinator = ToolIconGenerationCoordinator(),
         metadataClient: ToolMetadataClient = .fallback(),
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         versionBackupClient: ToolVersionBackupClient,
@@ -171,6 +173,7 @@ struct ToolGenerationRuntimeDependencies {
         self.processClient = processClient
         self.appBundleClient = appBundleClient
         self.iconClient = iconClient
+        self.iconGenerationCoordinator = iconGenerationCoordinator
         self.metadataClient = metadataClient
         self.promptRefinementClient = promptRefinementClient
         self.versionBackupClient = versionBackupClient
@@ -185,6 +188,7 @@ struct ToolGenerationRuntimeDependencies {
         processClient: SwiftPackageProcessClient = .live,
         appBundleClient: ToolAppBundleClient? = nil,
         iconClient: ToolIconClient? = nil,
+        iconGenerationCoordinator: ToolIconGenerationCoordinator = ToolIconGenerationCoordinator(),
         metadataClient: ToolMetadataClient? = nil,
         promptRefinementClient: ToolPromptRefinementClient? = nil,
         versionBackupClient: ToolVersionBackupClient = .live,
@@ -197,6 +201,7 @@ struct ToolGenerationRuntimeDependencies {
             processClient: processClient,
             appBundleClient: appBundleClient ?? .live(),
             iconClient: iconClient ?? .live(),
+            iconGenerationCoordinator: iconGenerationCoordinator,
             metadataClient: metadataClient ?? .live(),
             promptRefinementClient: promptRefinementClient ?? .live(),
             versionBackupClient: versionBackupClient,
@@ -215,6 +220,7 @@ struct ToolGenerationRuntimeContext {
     let processClient: SwiftPackageProcessClient
     let appBundleClient: ToolAppBundleClient
     let iconClient: ToolIconClient
+    let iconGenerationCoordinator: ToolIconGenerationCoordinator
     let metadataClient: ToolMetadataClient
     let promptRefinementClient: ToolPromptRefinementClient
     let promptRefinementEnabled: Bool
@@ -253,6 +259,7 @@ struct ToolGenerationRuntimeContext {
         self.processClient = dependencies.processClient
         self.appBundleClient = dependencies.appBundleClient
         self.iconClient = dependencies.iconClient
+        self.iconGenerationCoordinator = dependencies.iconGenerationCoordinator
         self.metadataClient = dependencies.metadataClient
         self.promptRefinementClient = dependencies.promptRefinementClient
         self.promptRefinementEnabled = languageModelContext.promptRefinementEnabled
