@@ -560,6 +560,7 @@ actor BudgetExhaustionResponses {
     private let regeneratedSource: String
     private(set) var generationCount = 0
     private(set) var repairCount = 0
+    private(set) var diagnosticRewriteCount = 0
 
     init(brokenSource: String, regeneratedSource: String) {
         self.brokenSource = brokenSource
@@ -567,6 +568,10 @@ actor BudgetExhaustionResponses {
     }
 
     func next(_ prompt: Prompt) throws -> String {
+        if prompt.description.contains("Narrow compiler repair stalled on this app.") {
+            diagnosticRewriteCount += 1
+            return regeneratedSource
+        }
         if prompt.description.contains("Build failed for ContentView.swift.") {
             repairCount += 1
             return """

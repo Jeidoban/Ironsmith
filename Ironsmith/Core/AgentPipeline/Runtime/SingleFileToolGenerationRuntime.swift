@@ -275,6 +275,7 @@ struct SingleFileToolGenerationRuntime {
 
             let generator = createGenerator(
                 userPrompt: contentPrompt,
+                originalUserPrompt: prompt,
                 appKind: setup.settings.appKind,
                 sandboxEnabled: setup.settings.sandboxEnabled,
                 layout: setup.layout,
@@ -836,6 +837,7 @@ struct SingleFileToolGenerationRuntime {
 
     private func createGenerator(
         userPrompt: String,
+        originalUserPrompt: String,
         appKind: ToolAppKind,
         sandboxEnabled: Bool,
         layout: ToolPackageLayout,
@@ -855,7 +857,22 @@ struct SingleFileToolGenerationRuntime {
         )
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialSource ? "continue create" : "create"
+            modeDescription: resumePartialSource ? "continue create" : "create",
+            diagnosticRewrite: makeDiagnosticRewrite(
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle
+            ) { currentSource, diagnostics in
+                ToolGenerationPrompts.diagnosticCreateWholeFileRewritePrompt(
+                    userPrompt: originalUserPrompt,
+                    generationPrompt: userPrompt,
+                    executableName: layout.executableName,
+                    sandboxEnabled: sandboxEnabled,
+                    appKind: appKind,
+                    currentSource: currentSource,
+                    diagnostics: diagnostics
+                )
+            }
         ) { session in
             if useCurrentSourceOnFirstAttempt && !didUseCurrentSource {
                 didUseCurrentSource = true
@@ -971,7 +988,19 @@ struct SingleFileToolGenerationRuntime {
                         session: session
                     )
                 }
-                : nil
+                : nil,
+            diagnosticRewrite: makeDiagnosticRewrite(
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle
+            ) { currentSource, diagnostics in
+                ToolGenerationPrompts.diagnosticEditWholeFileRewritePrompt(
+                    userPrompt: userPrompt,
+                    executableName: layout.executableName,
+                    currentSource: currentSource,
+                    diagnostics: diagnostics
+                )
+            }
         ) { session in
             if useCurrentSourceOnFirstAttempt && !didUseCurrentSource {
                 didUseCurrentSource = true
@@ -1048,6 +1077,69 @@ struct SingleFileToolGenerationRuntime {
         }
     }
 
+    private func makeDiagnosticRewrite(
+        layout: ToolPackageLayout,
+        contentViewPath: String,
+        lifecycle: ToolGenerationLifecycle,
+        prompt: @escaping (
+            _ currentSource: String,
+            _ diagnostics: [SwiftCompilerDiagnostic]
+        ) -> String
+    ) -> ContentViewCandidateGenerator.DiagnosticRewrite {
+        ContentViewCandidateGenerator.DiagnosticRewrite { currentSource, diagnostics, session in
+            try await regenerateContentViewFromDiagnostics(
+                prompt: prompt(currentSource, diagnostics),
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle,
+                session: session
+            )
+        }
+    }
+
+    private func regenerateContentViewFromDiagnostics(
+        prompt: String,
+        layout: ToolPackageLayout,
+        contentViewPath: String,
+        lifecycle: ToolGenerationLifecycle,
+        session: LanguageModelSession
+    ) async throws {
+        let draftPath = ToolPackageLayout.pendingContentViewDraftPath
+        do {
+            try Task.checkCancellation()
+            try await lifecycle.updatePhase(.generating, .generatingSource, nil)
+            let response = try await context.languageModelInvoker.respond(
+                stage: .codingAgent,
+                in: session,
+                to: prompt,
+                generating: String.self
+            ) { partialSource in
+                try context.write(
+                    partialSource,
+                    to: draftPath,
+                    packageRootURL: layout.packageRootURL
+                )
+            }
+            try Task.checkCancellation()
+            try context.write(
+                response,
+                to: contentViewPath,
+                packageRootURL: layout.packageRootURL
+            )
+        } catch {
+            AgentDiagnosticsLog.append(
+                """
+                Diagnostic whole-file rewrite request failed.
+                packageRoot: \(layout.packageRootURL.path)
+                error:
+                \(AgentDiagnosticsLog.renderError(error, limit: 1_500))
+                """
+            )
+            try? trimPendingSourceDraftToCleanBoundary(layout: layout)
+            throw error
+        }
+    }
+
     private func wholeFileEditGenerator(
         userPrompt: String,
         layout: ToolPackageLayout,
@@ -1064,7 +1156,19 @@ struct SingleFileToolGenerationRuntime {
         )
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialSource ? "continue edit source" : "edit"
+            modeDescription: resumePartialSource ? "continue edit source" : "edit",
+            diagnosticRewrite: makeDiagnosticRewrite(
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle
+            ) { currentSource, diagnostics in
+                ToolGenerationPrompts.diagnosticEditWholeFileRewritePrompt(
+                    userPrompt: userPrompt,
+                    executableName: layout.executableName,
+                    currentSource: currentSource,
+                    diagnostics: diagnostics
+                )
+            }
         ) { session in
             if resumePartialSource && !didAttemptContinuation {
                 didAttemptContinuation = true

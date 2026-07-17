@@ -770,7 +770,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func exhaustedModelRepairBudgetRegeneratesInsteadOfFailingCandidate() async throws {
+    func exhaustedModelRepairBudgetUsesDiagnosticRewriteBeforeScratchRegeneration() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -843,14 +843,15 @@ extension AgentPipelineTests {
             encoding: .utf8
         )
         #expect(contentView.contains(#"Text("Regenerated after budget")"#))
-        #expect(await responses.generationCount == 2)
+        #expect(await responses.generationCount == 1)
+        #expect(await responses.diagnosticRewriteCount == 1)
         #expect(await responses.repairCount == ToolGenerationRepairPolicy.modelMaximumRepairAttempts)
         #expect(await builds.count == ToolGenerationRepairPolicy.modelMaximumRepairAttempts + 2)
     }
 
     @MainActor
     @Test
-    func smallModelPatchEditRequestsFreshPatchAfterRepairPatchStalls() async throws {
+    func smallModelPatchEditUsesWholeFileRewriteAfterRepairPatchStalls() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -865,11 +866,13 @@ extension AgentPipelineTests {
             Self.breakOldTextUnifiedDiff,
             "not a patch",
             "still not a patch",
-            Self.renameOldToNewUnifiedDiff
+            Self.simpleContentViewSource(text: "new")
         ])
+        let prompts = PromptCapture()
         let runtime = Self.makeRuntime(
-            languageModel: StubAgentLanguageModel { _, _ in
-                try await responses.next()
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await prompts.record(prompt)
+                return try await responses.next()
             },
             generationOptions: GenerationOptions(),
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
@@ -894,7 +897,13 @@ extension AgentPipelineTests {
         )
 
         let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        let capturedPrompts = await prompts.prompts
+        let rewritePrompt = try #require(capturedPrompts.first {
+            $0.contains("Narrow compiler repair stalled on this app.")
+        })
         #expect(contentView.contains(#"Text("new")"#))
+        #expect(rewritePrompt.contains("Original edit request: Change old to new"))
+        #expect(rewritePrompt.contains(#"Text("broken").definitelyNotReal()"#))
         #expect(await responses.count == 4)
         #expect(await builds.count == 2)
     }

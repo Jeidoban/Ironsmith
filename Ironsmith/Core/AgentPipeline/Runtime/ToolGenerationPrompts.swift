@@ -158,6 +158,48 @@ enum ToolGenerationPrompts {
         """
     }
 
+    static func diagnosticCreateWholeFileRewritePrompt(
+        userPrompt: String,
+        generationPrompt: String,
+        executableName: String,
+        sandboxEnabled: Bool,
+        appKind: ToolAppKind,
+        currentSource: String,
+        diagnostics: [SwiftCompilerDiagnostic]
+    ) -> String {
+        let refinedContext = generationPrompt == userPrompt
+            ? ""
+            : "Refined generation brief: \(generationPrompt)"
+        return diagnosticWholeFileRewritePrompt(
+            requestContext: """
+            Original create request: \(userPrompt)
+            \(refinedContext)
+            Fixed package and target name: \(executableName).
+            \(appPresentationContext(appKind: appKind))
+            \(sandboxContext(sandboxEnabled: sandboxEnabled))
+            """,
+            currentSource: currentSource,
+            diagnostics: diagnostics
+        )
+    }
+
+    static func diagnosticEditWholeFileRewritePrompt(
+        userPrompt: String,
+        executableName: String,
+        currentSource: String,
+        diagnostics: [SwiftCompilerDiagnostic]
+    ) -> String {
+        diagnosticWholeFileRewritePrompt(
+            requestContext: """
+            Original edit request: \(userPrompt)
+            Fixed package and target name: \(executableName).
+            Preserve the requested edit and all working behavior in the current implementation.
+            """,
+            currentSource: currentSource,
+            diagnostics: diagnostics
+        )
+    }
+
     static func singleFileEditPatchPrompt(
         userPrompt: String,
         executableName: String,
@@ -196,6 +238,29 @@ enum ToolGenerationPrompts {
         ```swift
         \(partialSource)
         ```
+        """
+    }
+
+    private static func diagnosticWholeFileRewritePrompt(
+        requestContext: String,
+        currentSource: String,
+        diagnostics: [SwiftCompilerDiagnostic]
+    ) -> String {
+        return """
+        Narrow compiler repair stalled on this app.
+        Rewrite the complete ContentView.swift to fix every compiler error listed below.
+        Preserve the current app's working behavior, structure, and visual design wherever possible.
+        Return only the complete corrected Swift source file. Do not return a diff, patch, explanation, or markdown fence.
+
+        \(requestContext)
+
+        Current authoritative ContentView.swift:
+        ```swift
+        \(currentSource)
+        ```
+
+        Current actionable compiler errors:
+        \(formattedDiagnostics(diagnostics))
         """
     }
 
