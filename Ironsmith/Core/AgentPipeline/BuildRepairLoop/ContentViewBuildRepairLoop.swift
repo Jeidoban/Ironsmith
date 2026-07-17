@@ -107,7 +107,7 @@ struct ContentViewBuildRepairLoop {
                 do {
                     try await activeGenerator.writeFreshCandidate(makeGenerationSession(instructions: activeGenerator.instructions))
                     try Task.checkCancellation()
-                    try await Self.cleanContentViewSource(contentViewPath, layout: layout, context: context)
+                    try await Self.prepareContentViewSource(contentViewPath, layout: layout, context: context)
                     consecutiveRetryableCandidateFailures = 0
                 } catch where ToolGenerationError.isContextWindowExceeded(error) {
                     AgentDiagnosticsLog.append(

@@ -240,6 +240,17 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
     let fallsBackToWholeFileEditAfterInvalidInitialPatch: Bool
     let maximumModelRepairAttempts: Int?
 
+    var sourcePreparationPolicy: ToolSourcePreparationPolicy {
+        switch codingAgent {
+        case .ironsmithSpark:
+            return .normalizeAndFormat
+        case .ironsmithFlame:
+            return .extractModelEnvelope
+        case .codex:
+            return .none
+        }
+    }
+
     static func ironsmithSpark(repairStrategy: ToolRepairStrategy) -> Self {
         ToolGenerationPipelineConfiguration(
             codingAgent: .ironsmithSpark,
@@ -281,6 +292,12 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
             maximumModelRepairAttempts: nil
         )
     }
+}
+
+enum ToolSourcePreparationPolicy: Equatable, Sendable {
+    case none
+    case extractModelEnvelope
+    case normalizeAndFormat
 }
 
 enum ToolRepairStrategy: Equatable, Sendable {

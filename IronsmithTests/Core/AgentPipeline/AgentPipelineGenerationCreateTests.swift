@@ -276,6 +276,74 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func flameOnlyExtractsTheModelEnvelopeBeforeItsInitialBuild() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let generatedSource = """
+        import SwiftUI
+
+        private struct AppFeedback {}
+
+        struct ContentView: View {
+            @State private var feedback: AppFeedback?
+
+            var body: some View {
+                Text("Flame source")
+            }
+        }
+        """
+        let response = """
+        <thinking>This explanation should not be written into ContentView.swift.</thinking>
+        Here is the completed ContentView.swift:
+        ```swift
+        \(generatedSource)
+        ```
+        The implementation is complete.
+        """
+        let formatCapture = FormatCapture()
+        let processClient = SwiftPackageProcessClient(
+            build: { _ in
+                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            },
+            showBinPath: { packageRoot in
+                packageRoot.appendingPathComponent(".build/debug", isDirectory: true)
+            },
+            launch: { _ in },
+            stripQuarantine: { _ in },
+            formatSwiftSource: { url in
+                await formatCapture.record(url)
+                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel.fixed(response),
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .ironsmithFlame(
+                repairStrategy: .modelSearchReplace(
+                    maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn
+                )
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: processClient,
+            appBundleClient: .noOp(),
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(displayName: "Flame Envelope", iconPrompt: "")
+            }
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Build a Flame envelope test",
+            settings: .default
+        )
+
+        let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        #expect(contentView == generatedSource)
+        #expect(await formatCapture.formattedURLs.isEmpty)
+    }
+
+    @MainActor
+    @Test
     func liveGenerationClientCreatesPackageAndPersistsToolWithFakeModel() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }

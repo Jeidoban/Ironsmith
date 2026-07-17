@@ -2,6 +2,11 @@ import AnyLanguageModel
 import Foundation
 
 extension ContentViewBuildRepairLoop {
+    enum SourceMutationOrigin: Equatable {
+        case deterministicRepair
+        case modelRepair
+    }
+
     struct SourceMutationRequest {
         let source: String
         let originalSource: String
@@ -9,6 +14,7 @@ extension ContentViewBuildRepairLoop {
         let phase: String
         let rollbackSubject: String
         let allowsIncreasedContentViewErrors: Bool
+        let origin: SourceMutationOrigin
 
         init(
             source: String,
@@ -16,7 +22,8 @@ extension ContentViewBuildRepairLoop {
             previousContentViewErrorCount: Int,
             phase: String,
             rollbackSubject: String,
-            allowsIncreasedContentViewErrors: Bool = false
+            allowsIncreasedContentViewErrors: Bool = false,
+            origin: SourceMutationOrigin
         ) {
             self.source = source
             self.originalSource = originalSource
@@ -24,6 +31,7 @@ extension ContentViewBuildRepairLoop {
             self.phase = phase
             self.rollbackSubject = rollbackSubject
             self.allowsIncreasedContentViewErrors = allowsIncreasedContentViewErrors
+            self.origin = origin
         }
     }
 
@@ -185,7 +193,9 @@ extension ContentViewBuildRepairLoop {
     ) async throws -> SourceMutationBuildResult {
         try Task.checkCancellation()
         try context.write(request.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
-        try await Self.cleanContentViewSource(contentViewPath, layout: layout, context: context)
+        if request.origin == .deterministicRepair {
+            try await Self.prepareContentViewSource(contentViewPath, layout: layout, context: context)
+        }
 
         guard let state = try await buildCurrentSource(phase: request.phase) else {
             if try compiledContentViewIsPlaceholder(phase: request.phase) {

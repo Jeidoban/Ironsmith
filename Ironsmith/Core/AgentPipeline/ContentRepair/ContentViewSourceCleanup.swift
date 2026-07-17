@@ -104,7 +104,10 @@ enum ContentViewSourceCleanup {
     }
 
     private static func isForbiddenTopLevelBlock(_ trimmedLine: String) -> Bool {
-        trimmedLine.contains(": App")
+        trimmedLine.range(
+            of: #":\s*App(?:\s*\{|\s*,|\s+where\b|\s*$)"#,
+            options: .regularExpression
+        ) != nil
             || trimmedLine.contains("AppDelegate")
             || trimmedLine.contains("SceneDelegate")
             || trimmedLine.contains(": PreviewProvider")

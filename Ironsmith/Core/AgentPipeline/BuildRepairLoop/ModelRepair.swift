@@ -96,21 +96,16 @@ extension ContentViewBuildRepairLoop {
                     previousContentViewErrorCount: contentViewErrors.count,
                     phase: "repair attempt \(attempt)",
                     rollbackSubject: "Repair patch",
-                    allowsIncreasedContentViewErrors: !context.pipelineConfiguration.rollsBackModelRepairWhenErrorCountIncreases
+                    allowsIncreasedContentViewErrors: !context.pipelineConfiguration.rollsBackModelRepairWhenErrorCountIncreases,
+                    origin: .modelRepair
                 )
             ) {
             case .finished:
                 return .finished
             case .accepted(let acceptedState):
-                guard let stableState = try await applyDeterministicRepairsUntilStable(
-                    startingFrom: acceptedState,
-                    phasePrefix: "model repair \(attempt) deterministic repair"
-                ) else {
-                    return .finished
-                }
                 let progressOutcome: String
-                if stableState.contentViewErrors.count < contentViewErrors.count {
-                    progressOutcome = "accepted; ContentView error count \(contentViewErrors.count) -> \(stableState.contentViewErrors.count)"
+                if acceptedState.contentViewErrors.count < contentViewErrors.count {
+                    progressOutcome = "accepted; ContentView error count \(contentViewErrors.count) -> \(acceptedState.contentViewErrors.count)"
                 } else {
                     progressOutcome = """
                     accepted but made no compiler progress; ContentView error count stayed \(contentViewErrors.count).
@@ -122,7 +117,7 @@ extension ContentViewBuildRepairLoop {
                     repairSummary: repairCandidate.summary
                 )
                 repairConversation.keepAuthoritativeSourceInSession(outcome: outcome)
-                state = stableState
+                state = acceptedState
                 recordBestCandidate(from: state, phase: "repair attempt \(attempt)", bestCandidate: &bestCandidate)
                 if state.contentViewErrors.isEmpty {
                     return .failed(state)

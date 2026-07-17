@@ -8,6 +8,7 @@ import SwiftUI
 
 struct PromptComposerView: View {
     @Binding var prompt: String
+    @Binding var isExpanded: Bool
     @Binding var sandboxEnabled: Bool
     @Binding var appKind: ToolAppKind
     @Binding var sandboxPermissions: GeneratedAppSandboxPermissions
@@ -31,6 +32,7 @@ struct PromptComposerView: View {
     var body: some View {
         VStack(spacing: 12) {
             promptEditor
+                .layoutPriority(isExpanded ? 1 : 0)
 
             HStack {
                 generationSettingsMenu
@@ -71,23 +73,32 @@ struct PromptComposerView: View {
     }
 
     private var promptEditor: some View {
+        VStack(spacing: 0) {
+            promptTextEditor
+                .frame(maxHeight: .infinity)
+
+            promptAccessoryBar
+        }
+        .frame(
+            height: isExpanded
+                ? nil
+                : PromptEditorLayout.compactTextEditorHeight
+                    + PromptEditorLayout.accessoryBarHeight
+        )
+        .frame(maxHeight: isExpanded ? .infinity : nil)
+        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var promptTextEditor: some View {
         ZStack(alignment: .topLeading) {
-            TextEditor(text: $prompt)
-                .font(.body)
-                .scrollContentBackground(.hidden)
+            PromptTextEditor(
+                text: $prompt,
+                isFocused: isPromptFocused,
+                isSubmitEnabled: isSubmitEnabled,
+                onSubmit: onSubmit
+            )
                 .padding(.horizontal, PromptEditorLayout.textEditorHorizontalPadding)
-                .padding(.vertical, PromptEditorLayout.textEditorVerticalPadding)
-                .focused(isPromptFocused)
-                .onKeyPress(.return, phases: .down) { keyPress in
-                    if keyPress.modifiers.contains(.shift) {
-                        return .ignored
-                    }
-                    guard isSubmitEnabled else {
-                        return .handled
-                    }
-                    onSubmit()
-                    return .handled
-                }
+                .padding(.top, PromptEditorLayout.textEditorTopPadding)
                 .accessibilityIdentifier("tool-prompt-field")
 
             if prompt.isEmpty {
@@ -99,14 +110,38 @@ struct PromptComposerView: View {
                     .allowsHitTesting(false)
             }
         }
-        .frame(height: promptEditorHeight)
-        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
     }
 
-    private var promptEditorHeight: CGFloat {
-        let visibleLines = min(max(prompt.components(separatedBy: .newlines).count, 3), 6)
-        return PromptEditorLayout.baseHeight
-            + CGFloat(visibleLines - 3) * PromptEditorLayout.lineHeightIncrement
+    private var promptAccessoryBar: some View {
+        HStack(spacing: 8) {
+            Spacer()
+            expansionButton
+        }
+        .padding(.horizontal, 8)
+        .padding(.bottom, PromptEditorLayout.accessoryBarBottomPadding)
+        .frame(height: PromptEditorLayout.accessoryBarHeight, alignment: .top)
+    }
+
+    private var expansionButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.24)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            Image(
+                systemName: isExpanded
+                    ? "arrow.down.right.and.arrow.up.left"
+                    : "arrow.up.left.and.arrow.down.right"
+            )
+            .font(.system(size: 11, weight: .semibold))
+            .frame(width: 24, height: 24)
+            .background(.regularMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(isExpanded ? "Collapse prompt" : "Expand prompt")
+        .accessibilityLabel(isExpanded ? "Collapse prompt" : "Expand prompt")
+        .accessibilityIdentifier("prompt-expansion-button")
     }
 
     private var generationSettingsMenu: some View {
@@ -376,10 +411,11 @@ private enum CodingAgentMenuHelp {
 }
 
 private enum PromptEditorLayout {
-    static let baseHeight: CGFloat = 72
-    static let lineHeightIncrement: CGFloat = 16
+    static let compactTextEditorHeight: CGFloat = 46
+    static let accessoryBarHeight: CGFloat = 28
+    static let accessoryBarBottomPadding: CGFloat = 4
     static let textEditorHorizontalPadding: CGFloat = 8
-    static let textEditorVerticalPadding: CGFloat = 12
+    static let textEditorTopPadding: CGFloat = 12
     static let placeholderLeadingPadding: CGFloat = 13
     static let placeholderTopPadding: CGFloat = 12
 }
@@ -394,11 +430,13 @@ private enum PromptEditorLayout {
 
 private struct PromptComposerPreview: View {
     let isEditing: Bool
+    @State private var isExpanded = false
     @FocusState private var isPromptFocused: Bool
 
     var body: some View {
         PromptComposerView(
             prompt: .constant(""),
+            isExpanded: $isExpanded,
             sandboxEnabled: .constant(!isEditing),
             appKind: .constant(isEditing ? .menuBar : .window),
             sandboxPermissions: .constant(.default),
@@ -423,6 +461,6 @@ private struct PromptComposerPreview: View {
             onCancel: {}
         )
         .padding()
-        .frame(width: 360)
+        .frame(width: 360, height: 440)
     }
 }

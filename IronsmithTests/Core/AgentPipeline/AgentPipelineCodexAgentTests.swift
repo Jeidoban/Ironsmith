@@ -752,6 +752,19 @@ extension AgentPipelineTests {
 
         let requestCapture = CodexAgentRequestCapture()
         let invocationCapture = LanguageModelInvocationCapture()
+        let generatedSource = """
+        import SwiftUI
+
+        private struct AppFeedback {}
+
+        struct ContentView: View {
+            @State private var feedback: AppFeedback?
+
+            var body: some View {
+                Text("codex generated")
+            }
+        }
+        """
         let codexAgentClient = CodexAgentClient(run: { request in
             await requestCapture.record(request)
             let layout = ToolPackageLayout(
@@ -759,16 +772,7 @@ extension AgentPipelineTests {
                 executableName: request.executableName
             )
             #expect(!FileManager.default.fileExists(atPath: try layout.packageFileURL(for: layout.contentViewSourcePath).path))
-            let source = """
-            import SwiftUI
-
-            struct ContentView: View {
-                var body: some View {
-                    Text("codex generated")
-                }
-            }
-            """
-            try source.write(
+            try generatedSource.write(
                 to: try layout.packageFileURL(for: layout.contentViewSourcePath),
                 atomically: true,
                 encoding: .utf8
@@ -810,7 +814,7 @@ extension AgentPipelineTests {
         #expect(request.userPrompt == "Refined codex prompt")
         #expect(request.modelIdentifier == "gpt-5.5")
         #expect(request.authentication == .apiKey("sk-test"))
-        #expect(contentView.contains(#"Text("codex generated")"#))
+        #expect(contentView == generatedSource)
         #expect(await invocationCapture.count == 1)
     }
 

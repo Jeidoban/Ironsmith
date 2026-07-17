@@ -672,6 +672,38 @@ actor UnsupportedModifierBuilds {
     }
 }
 
+actor ModelConversationBuilds {
+    private let executableName: String
+    private(set) var count = 0
+
+    init(executableName: String) {
+        self.executableName = executableName
+    }
+
+    func next(packageRoot: URL) -> SwiftPackageBuildResult {
+        count += 1
+        let contentViewURL = packageRoot.appendingPathComponent("Sources/\(executableName)/ContentView.swift")
+        let source = (try? String(contentsOf: contentViewURL, encoding: .utf8)) ?? ""
+        let lines = source.components(separatedBy: .newlines)
+        if let index = lines.firstIndex(where: { $0.contains("definitelyNotReal") }) {
+            let line = index + 1
+            let output = """
+            \(contentViewURL.path):\(line):45: error: value of type 'Text' has no member 'definitelyNotReal'
+            """
+            return SwiftPackageBuildResult(succeeded: false, stdout: output, stderr: "", terminationStatus: 1)
+        }
+        if let index = lines.firstIndex(where: { $0.contains("newIdx< tokens.count") }) {
+            let line = index + 1
+            let output = """
+            \(contentViewURL.path):\(line):30: error: expected '{' after 'if' condition
+            \(line) |                 if newIdx< tokens.count {
+            """
+            return SwiftPackageBuildResult(succeeded: false, stdout: output, stderr: "", terminationStatus: 1)
+        }
+        return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+    }
+}
+
 actor MultipleUnsupportedModifierBuilds {
     private let executableName: String
     private(set) var count = 0

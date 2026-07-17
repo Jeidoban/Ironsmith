@@ -750,17 +750,12 @@ struct SingleFileToolGenerationRuntime {
             throw CodexAgentError.missingContentView
         }
 
-        let sourceBeforeCleanup = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
-        guard !sourceBeforeCleanup.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let generatedSource = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
+        guard !generatedSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CodexAgentError.missingContentView
         }
 
         try await lifecycle.updatePhase(.generating, .repairing, nil)
-        try await ContentViewBuildRepairLoop.cleanContentViewSource(
-            contentViewPath,
-            layout: layout,
-            context: context
-        )
 
         let result = try await context.processClient.build(layout.packageRootURL)
         guard result.succeeded else {
@@ -789,8 +784,7 @@ struct SingleFileToolGenerationRuntime {
             )
         }
 
-        let source = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
-        if ContentViewSourceCleanup.isPlaceholderScaffold(source) {
+        if ContentViewSourceCleanup.isPlaceholderScaffold(generatedSource) {
             throw ToolGenerationError.compileFailed(
                 "ContentView.swift compiled but only contains the placeholder Generated App scaffold."
             )

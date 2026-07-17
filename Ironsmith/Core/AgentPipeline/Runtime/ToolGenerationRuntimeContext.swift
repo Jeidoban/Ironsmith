@@ -314,26 +314,48 @@ struct ToolGenerationRuntimeContext {
     static func cleanedSource(_ response: String) -> String {
         let strippedThinking = stripThinkingBlocks(from: response)
         let trimmed = strippedThinking.trimmingCharacters(in: .whitespacesAndNewlines)
-        let unfenced: String
-        if trimmed.hasPrefix("```") {
-            let lines = trimmed.components(separatedBy: .newlines)
-            var remaining = Array(lines.dropFirst())
-            if let last = remaining.last, last.trimmingCharacters(in: .whitespacesAndNewlines) == "```" {
-                remaining.removeLast()
-            }
-            unfenced = remaining.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
-            unfenced = trimmed
+        if let fencedSource = firstFencedSwiftSource(in: trimmed) {
+            return fencedSource
         }
 
-        let lines = unfenced.components(separatedBy: .newlines)
+        let lines = trimmed.components(separatedBy: .newlines)
         if let startIndex = lines.firstIndex(where: { isLikelySwiftSourceLine($0) }) {
             return lines[startIndex...]
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        return unfenced
+        return trimmed
+    }
+
+    private static func firstFencedSwiftSource(in response: String) -> String? {
+        let lines = response.components(separatedBy: .newlines)
+        var openingIndex = 0
+
+        while openingIndex < lines.count {
+            let opening = lines[openingIndex]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard opening == "```" || opening.hasPrefix("```swift") else {
+                openingIndex += 1
+                continue
+            }
+
+            let contentStart = openingIndex + 1
+            let closingIndex = lines[(contentStart)...].firstIndex { line in
+                line.trimmingCharacters(in: .whitespacesAndNewlines) == "```"
+            } ?? lines.endIndex
+            let candidateLines = lines[contentStart..<closingIndex]
+            if candidateLines.contains(where: { isLikelySwiftSourceLine($0) }) {
+                return candidateLines
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            openingIndex = closingIndex < lines.endIndex ? closingIndex + 1 : lines.endIndex
+        }
+
+        return nil
     }
 
     private static func stripThinkingBlocks(from response: String) -> String {
