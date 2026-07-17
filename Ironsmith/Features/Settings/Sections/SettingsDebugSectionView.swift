@@ -15,6 +15,8 @@
             .rawValue
         @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled)
         private var storeFeatureEnabled = false
+        @AppStorage(IronsmithPreferenceKeys.featureDiagnosticWholeFileRewriteEnabled)
+        private var diagnosticWholeFileRewriteEnabled = false
         @State private var imagePlaygroundPrompt = ""
         @State private var imagePlaygroundPreview: NSImage?
         @State private var imagePlaygroundErrorMessage: String?
@@ -51,6 +53,12 @@
 
                     Toggle("App Store", isOn: $storeFeatureEnabled)
                         .toggleStyle(.switch)
+
+                    Toggle(
+                        "Spark diagnostic whole-file recovery",
+                        isOn: $diagnosticWholeFileRewriteEnabled
+                    )
+                    .toggleStyle(.switch)
                 }
 
                 VStack(alignment: .leading, spacing: 10) {

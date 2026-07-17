@@ -129,7 +129,7 @@ struct ContentViewBuildRepairLoop {
         var pendingRegenerationReason: String?
         var consecutiveRetryableCandidateFailures = 0
         var attemptedDiagnosticWholeFileRewrite = false
-        let diagnosticRewrite = context.pipelineConfiguration.codingAgent == .ironsmithSpark
+        let diagnosticRewrite = context.pipelineConfiguration.diagnosticWholeFileRewriteEnabled
             ? generator.diagnosticRewrite
             : nil
 

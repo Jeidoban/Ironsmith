@@ -827,7 +827,12 @@ extension AgentPipelineTests {
                 try await responses.next(prompt)
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(
+                    maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn
+                ),
+                diagnosticWholeFileRewriteEnabled: true
+            ),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -875,7 +880,10 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: true
+            ),
             toolsDirectoryURL: toolsDirectory,
             processClient: SwiftPackageProcessClient(
                 build: { packageRoot in

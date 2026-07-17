@@ -238,6 +238,7 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
     let rollsBackModelRepairWhenErrorCountIncreases: Bool
     let regeneratesAfterModelRepairStall: Bool
     let fallsBackToWholeFileEditAfterInvalidInitialPatch: Bool
+    let diagnosticWholeFileRewriteEnabled: Bool
     let maximumModelRepairAttempts: Int?
 
     var sourcePreparationPolicy: ToolSourcePreparationPolicy {
@@ -251,7 +252,11 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
         }
     }
 
-    static func ironsmithSpark(repairStrategy: ToolRepairStrategy) -> Self {
+    static func ironsmithSpark(
+        repairStrategy: ToolRepairStrategy,
+        diagnosticWholeFileRewriteEnabled: Bool = IronsmithFeatureFlags
+            .isDiagnosticWholeFileRewriteEnabled()
+    ) -> Self {
         ToolGenerationPipelineConfiguration(
             codingAgent: .ironsmithSpark,
             repairStrategy: repairStrategy,
@@ -261,6 +266,7 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
             rollsBackModelRepairWhenErrorCountIncreases: true,
             regeneratesAfterModelRepairStall: true,
             fallsBackToWholeFileEditAfterInvalidInitialPatch: true,
+            diagnosticWholeFileRewriteEnabled: diagnosticWholeFileRewriteEnabled,
             maximumModelRepairAttempts: nil
         )
     }
@@ -275,6 +281,7 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
             rollsBackModelRepairWhenErrorCountIncreases: false,
             regeneratesAfterModelRepairStall: false,
             fallsBackToWholeFileEditAfterInvalidInitialPatch: false,
+            diagnosticWholeFileRewriteEnabled: false,
             maximumModelRepairAttempts: ToolGenerationRepairPolicy.largeModelMaximumRepairAttempts
         )
     }
@@ -289,6 +296,7 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
             rollsBackModelRepairWhenErrorCountIncreases: false,
             regeneratesAfterModelRepairStall: false,
             fallsBackToWholeFileEditAfterInvalidInitialPatch: false,
+            diagnosticWholeFileRewriteEnabled: false,
             maximumModelRepairAttempts: nil
         )
     }

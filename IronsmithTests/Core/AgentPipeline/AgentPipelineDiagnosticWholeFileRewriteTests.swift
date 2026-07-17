@@ -6,6 +6,56 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
+    func disabledDiagnosticWholeFileRewriteUsesScratchGeneration() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let executableName = "DisabledRewriteTool"
+        let brokenSource = Self.sourceWithMissingMembers(["missing1"])
+        let scratchSource = Self.simpleContentViewSource(text: "Scratch with rewrite disabled")
+        let responses = LanguageModelResponseQueue([
+            brokenSource,
+            "not a diff",
+            "still not a diff",
+            scratchSource,
+        ])
+        let prompts = PromptCapture()
+        let builds = DistinctUnsupportedModifierBuilds(executableName: executableName)
+        let formats = FormatCapture()
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await prompts.record(prompt)
+                return try await responses.next()
+            },
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: false
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(displayName: "Disabled Rewrite Tool", iconPrompt: "")
+            }
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Build a disabled rewrite tool",
+            settings: .default
+        )
+
+        let source = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        let capturedPrompts = await prompts.prompts
+        #expect(source.contains("Scratch with rewrite disabled"))
+        #expect(!capturedPrompts.contains {
+            $0.contains("Narrow compiler repair stalled on this app.")
+        })
+        #expect(await responses.count == 4)
+        #expect(await builds.count == 2)
+        #expect(await formats.formattedURLs.count == 2)
+    }
+
+    @MainActor
+    @Test
     func sparkDiagnosticRewriteReceivesCompleteActionableErrorSet() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
@@ -28,7 +78,8 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             pipelineConfiguration: .ironsmithSpark(
-                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: true
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
@@ -97,7 +148,8 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             pipelineConfiguration: .ironsmithSpark(
-                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: true
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
@@ -151,7 +203,8 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             pipelineConfiguration: .ironsmithSpark(
-                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: true
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
@@ -198,7 +251,8 @@ extension AgentPipelineTests {
                 return try await responses.next(prompt)
             },
             pipelineConfiguration: .ironsmithSpark(
-                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: true
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
@@ -245,7 +299,8 @@ extension AgentPipelineTests {
                 return try await responses.next()
             },
             pipelineConfiguration: .ironsmithSpark(
-                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: true
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
