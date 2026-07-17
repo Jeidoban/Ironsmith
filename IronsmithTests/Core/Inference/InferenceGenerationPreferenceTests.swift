@@ -8,6 +8,190 @@ import Testing
 extension InferenceTests {
     @MainActor
     @Test
+    func imageGenerationProviderDefaultsToAutomaticAndPersists() {
+        let suiteName = "IronsmithTests.ImageGenerationProvider.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(preferences.imageGenerationProvider == .automatic)
+
+        preferences.imageGenerationProvider = .gemini
+        #expect(
+            GenerationPreferencesStore(userDefaults: userDefaults).imageGenerationProvider == .gemini
+        )
+    }
+
+    @MainActor
+    @Test
+    func unavailableImageProviderReconcilesToAutomatic() {
+        let preferences = Self.generationPreferences()
+        preferences.imageGenerationProvider = .gemini
+        let store = Self.dependenciesBackedStore(generationPreferences: preferences)
+        store.providers = []
+
+        #expect(!store.availableImageGenerationProviders.contains(.gemini))
+        store.reconcileImageGenerationProvider()
+
+        #expect(preferences.imageGenerationProvider == .automatic)
+    }
+
+    @MainActor
+    @Test
+    func startupPreservesCodexBackedOpenAIImageProviderSelection() async throws {
+        let preferences = Self.generationPreferences()
+        preferences.imageGenerationProvider = .openAI
+        let credential = OpenAICodexCredential(accessToken: "codex-token")
+        let authClient = OpenAICodexAuthClient(
+            credential: { credential },
+            signIn: { credential },
+            signOut: {},
+            validCredential: { credential },
+            discoverModels: { [] }
+        )
+        let store = InferenceStore(
+            dependencies: Self.dependencies(openAICodexAuthClient: authClient),
+            generationPreferences: preferences,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let modelContext = ModelContext(container)
+        modelContext.insert(ProviderCatalog.makeProvider(for: .openAI)!)
+        try modelContext.save()
+
+        await store.loadIfNeeded(modelContext: modelContext)
+
+        #expect(store.hasOpenAICodexCredential)
+        #expect(preferences.imageGenerationProvider == .openAI)
+    }
+
+    @MainActor
+    @Test
+    func automaticImageProviderMatchesSelectedModelProvider() throws {
+        let preferences = Self.generationPreferences()
+        let dependencies = Self.dependencies()
+        let store = InferenceStore(
+            dependencies: dependencies,
+            generationPreferences: preferences,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
+        let openAI = ProviderCatalog.makeProvider(for: .openAI)!
+        let gemini = ProviderCatalog.makeProvider(for: .gemini)!
+        let ironsmith = ProviderCatalog.makeProvider(for: .ironsmith)!
+        try dependencies.credentialClient.saveAPIKey("openai-key", openAI.apiKeyReference!)
+        try dependencies.credentialClient.saveAPIKey("gemini-key", gemini.apiKeyReference!)
+        store.providers = [openAI, gemini, ironsmith]
+        store.ironsmithSession = Self.ironsmithSession()
+        store.remoteModels = [
+            Self.imageProviderTestModel(provider: openAI),
+            Self.imageProviderTestModel(provider: gemini),
+            Self.imageProviderTestModel(provider: ironsmith),
+        ]
+
+        store.selectModel(store.remoteModels[0].selectionIdentifier)
+        #expect(store.effectiveImageGenerationProvider == .openAI)
+
+        store.selectModel(store.remoteModels[1].selectionIdentifier)
+        #expect(store.effectiveImageGenerationProvider == .gemini)
+
+        store.selectModel(store.remoteModels[2].selectionIdentifier)
+        #expect(store.effectiveImageGenerationProvider == .ironsmith)
+    }
+
+    @MainActor
+    @Test
+    func automaticImageProviderUsesFallbackOrderForUnsupportedModelProvider() throws {
+        let preferences = Self.generationPreferences()
+        let dependencies = Self.dependencies()
+        let store = InferenceStore(
+            dependencies: dependencies,
+            generationPreferences: preferences,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
+        let openAI = ProviderCatalog.makeProvider(for: .openAI)!
+        let gemini = ProviderCatalog.makeProvider(for: .gemini)!
+        let ironsmith = ProviderCatalog.makeProvider(for: .ironsmith)!
+        let anthropic = ProviderCatalog.makeProvider(for: .anthropic)!
+        try dependencies.credentialClient.saveAPIKey("openai-key", openAI.apiKeyReference!)
+        try dependencies.credentialClient.saveAPIKey("gemini-key", gemini.apiKeyReference!)
+        store.providers = [openAI, gemini, ironsmith, anthropic]
+        store.ironsmithSession = Self.ironsmithSession()
+        store.openAICodexCredential = OpenAICodexCredential(accessToken: "codex-token")
+        let selectedModel = Self.imageProviderTestModel(provider: anthropic)
+        store.remoteModels = [selectedModel]
+        store.selectModel(selectedModel.selectionIdentifier)
+
+        #expect(store.effectiveImageGenerationProvider == .openAI)
+
+        store.openAICodexCredential = nil
+        #expect(store.effectiveImageGenerationProvider == .openAI)
+
+        try dependencies.credentialClient.deleteAPIKey(openAI.apiKeyReference!)
+        #expect(store.effectiveImageGenerationProvider == .gemini)
+
+        try dependencies.credentialClient.deleteAPIKey(gemini.apiKeyReference!)
+        let expected: ToolImageGenerationProvider = store.availableImageGenerationProviders.contains(
+            .imagePlayground
+        ) ? .imagePlayground : .ironsmith
+        #expect(store.effectiveImageGenerationProvider == expected)
+    }
+
+    @MainActor
+    @Test
+    func manuallySelectedImageProviderOverridesAutomaticMatching() throws {
+        let preferences = Self.generationPreferences()
+        preferences.imageGenerationProvider = .gemini
+        let dependencies = Self.dependencies()
+        let store = InferenceStore(
+            dependencies: dependencies,
+            generationPreferences: preferences,
+            appleFoundationModelPreferenceStore: Self.appleFoundationModelPreferenceStore()
+        )
+        let gemini = ProviderCatalog.makeProvider(for: .gemini)!
+        let ironsmith = ProviderCatalog.makeProvider(for: .ironsmith)!
+        try dependencies.credentialClient.saveAPIKey("gemini-key", gemini.apiKeyReference!)
+        store.providers = [gemini, ironsmith]
+        store.ironsmithSession = Self.ironsmithSession()
+        let selectedModel = Self.imageProviderTestModel(provider: ironsmith)
+        store.remoteModels = [selectedModel]
+        store.selectModel(selectedModel.selectionIdentifier)
+
+        #expect(store.effectiveImageGenerationProvider == .gemini)
+    }
+
+    @MainActor
+    @Test
+    func availableImageProvidersUseAutomaticFallbackOrder() throws {
+        let store = Self.dependenciesBackedStore()
+        let openAI = ProviderCatalog.makeProvider(for: .openAI)!
+        let gemini = ProviderCatalog.makeProvider(for: .gemini)!
+        let ironsmith = ProviderCatalog.makeProvider(for: .ironsmith)!
+        try store.dependencies.credentialClient.saveAPIKey("openai-key", openAI.apiKeyReference!)
+        try store.dependencies.credentialClient.saveAPIKey("gemini-key", gemini.apiKeyReference!)
+        store.providers = [ironsmith, gemini, openAI]
+        store.ironsmithSession = Self.ironsmithSession()
+
+        var expected: [ToolImageGenerationProvider] = [.automatic, .openAI, .gemini]
+        if store.availableImageGenerationProviders.contains(.imagePlayground) {
+            expected.append(.imagePlayground)
+        }
+        expected.append(contentsOf: [.ironsmith, .disabled])
+
+        #expect(store.availableImageGenerationProviders == expected)
+    }
+
+    private static func imageProviderTestModel(provider: ProviderConfig) -> ModelConfig {
+        ModelConfig(
+            identifier: "\(provider.identifier)-image-test",
+            displayName: "Image Test",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
+    }
+
+    @MainActor
+    @Test
     func generatedPromptRefinementPreferenceDefaultsEnabledAndPersists() {
         let suiteName = "IronsmithTests.GeneratedPromptRefinement.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!

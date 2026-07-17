@@ -243,6 +243,26 @@ actor ToolExportCapture {
     }
 }
 
+actor ToolRunningCapture {
+    private(set) var launchedToolIDs: [UUID] = []
+    private(set) var quitToolIDs: [UUID] = []
+    private var runningToolIDs = Set<UUID>()
+
+    func recordLaunch(_ tool: StoredTool) {
+        launchedToolIDs.append(tool.id)
+        runningToolIDs.insert(tool.id)
+    }
+
+    func recordQuit(_ tool: StoredTool) {
+        quitToolIDs.append(tool.id)
+        runningToolIDs.remove(tool.id)
+    }
+
+    func isRunning(_ tool: StoredTool) -> Bool {
+        runningToolIDs.contains(tool.id)
+    }
+}
+
 actor ToolFinderCapture {
     private(set) var openedURL: URL?
 

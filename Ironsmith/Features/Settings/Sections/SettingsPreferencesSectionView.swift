@@ -9,6 +9,13 @@ struct SettingsPreferencesSectionView: View {
 
     var body: some View {
         Section {
+            Picker("App icon generator", selection: imageGenerationProviderBinding) {
+                ForEach(inferenceStore.availableImageGenerationProviders) { provider in
+                    Text(provider.displayName).tag(provider)
+                }
+            }
+            .pickerStyle(.menu)
+
             VStack(alignment: .leading, spacing: 4) {
                 Toggle(
                     "Enhance app prompts",
@@ -96,6 +103,13 @@ struct SettingsPreferencesSectionView: View {
                     showSandboxOverride = false
                 }
             }
+        )
+    }
+
+    private var imageGenerationProviderBinding: Binding<ToolImageGenerationProvider> {
+        Binding(
+            get: { inferenceStore.generationPreferences.imageGenerationProvider },
+            set: { inferenceStore.generationPreferences.imageGenerationProvider = $0 }
         )
     }
 

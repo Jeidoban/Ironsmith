@@ -67,6 +67,7 @@ nonisolated struct ToolGenerationRequest {
     let existingTool: Tool?
     let settings: ToolGenerationSettings
     let languageModelContext: AgentLanguageModelContext
+    let imageGenerationProvider: ToolImageGenerationProvider
     let lifecycle: ToolGenerationLifecycle
 
     init(
@@ -74,61 +75,98 @@ nonisolated struct ToolGenerationRequest {
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
         languageModelContext: AgentLanguageModelContext,
+        imageGenerationProvider: ToolImageGenerationProvider = .disabled,
         lifecycle: ToolGenerationLifecycle = .noop
     ) {
         self.prompt = prompt
         self.existingTool = existingTool
         self.settings = settings
         self.languageModelContext = languageModelContext
+        self.imageGenerationProvider = imageGenerationProvider
         self.lifecycle = lifecycle
     }
 }
 
 struct ToolGenerationClient {
     private var generate: (ToolGenerationRequest) async throws -> ToolGenerationResult
+    private var cancelIconGeneration: @Sendable (URL) async -> Void
 
     func generateTool(_ request: ToolGenerationRequest) async throws -> ToolGenerationResult {
         try await generate(request)
     }
 
-    init(
-        _ generate: @escaping (ToolGenerationRequest) async throws -> ToolGenerationResult
-    ) {
-        self.generate = generate
+    func cancelIconGeneration(for packageRootURL: URL) async {
+        await cancelIconGeneration(packageRootURL)
     }
 
+    init(
+        _ generate: @escaping (ToolGenerationRequest) async throws -> ToolGenerationResult,
+        cancelIconGeneration: @escaping @Sendable (URL) async -> Void = { _ in }
+    ) {
+        self.generate = generate
+        self.cancelIconGeneration = cancelIconGeneration
+    }
+
+    @MainActor
     static func live(
-        dependencies: ToolGenerationRuntimeDependencies = .live()
+        dependencies: ToolGenerationRuntimeDependencies? = nil
     ) -> Self {
-        Self { request in
-            let context = ToolGenerationRuntimeContext(
-                languageModelContext: request.languageModelContext,
-                dependencies: dependencies
-            )
-            let runtime = SingleFileToolGenerationRuntime(context: context)
-            return try await runtime.generateTool(
-                for: request.prompt,
-                existingTool: request.existingTool,
-                settings: request.settings,
-                lifecycle: request.lifecycle
-            )
-        }
+        let dependencies = dependencies ?? .live()
+        return Self(
+            { request in
+                let context = ToolGenerationRuntimeContext(
+                    languageModelContext: request.languageModelContext,
+                    dependencies: dependencies
+                )
+                let runtime = SingleFileToolGenerationRuntime(context: context)
+                return try await runtime.generateTool(
+                    for: request.prompt,
+                    existingTool: request.existingTool,
+                    settings: request.settings,
+                    imageGenerationProvider: request.imageGenerationProvider,
+                    lifecycle: request.lifecycle
+                )
+            },
+            cancelIconGeneration: { packageRootURL in
+                await dependencies.iconGenerationCoordinator.cancelGeneration(for: packageRootURL)
+            }
+        )
     }
 }
 
 struct ToolRunnerClient {
     var runTool: (_ tool: Tool) async throws -> Void
+    var quitTool: (_ tool: Tool) async throws -> Void
+    var isToolRunning: (_ tool: Tool) async -> Bool
+
+    init(
+        _ runTool: @escaping (_ tool: Tool) async throws -> Void,
+        quitTool: @escaping (_ tool: Tool) async throws -> Void = { _ in },
+        isToolRunning: @escaping (_ tool: Tool) async -> Bool = { _ in false }
+    ) {
+        self.runTool = runTool
+        self.quitTool = quitTool
+        self.isToolRunning = isToolRunning
+    }
 
     static func live(appBundleClient: ToolAppBundleClient = .live()) -> Self {
-        Self { tool in
-            let request = ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(tool)
-            if !appBundleClient.appExists(request.internalAppBundleURL)
-                || needsQuitOnCloseRebuild(request)
-            {
-                _ = try await appBundleClient.buildInternalApp(request)
+        Self(
+            { tool in
+                let request = ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(tool)
+                if !appBundleClient.appExists(request.internalAppBundleURL)
+                    || needsQuitOnCloseRebuild(request)
+                {
+                    _ = try await appBundleClient.buildInternalApp(request)
+                }
+                try await appBundleClient.launchApp(request.internalAppBundleURL)
+            },
+            quitTool: { tool in
+                try await appBundleClient.terminateApp(tool.appBundleURL)
+            },
+            isToolRunning: { tool in
+                await appBundleClient.isAppRunning(tool.appBundleURL)
             }
-            try await appBundleClient.launchApp(request.internalAppBundleURL)
-        }
+        )
     }
 
     private static func needsQuitOnCloseRebuild(_ request: ToolAppBundleRequest) -> Bool {

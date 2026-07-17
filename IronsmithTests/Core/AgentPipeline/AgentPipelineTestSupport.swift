@@ -299,6 +299,8 @@ actor AppBundleCapture {
     private(set) var builtRequests: [ToolAppBundleRequest] = []
     private(set) var exportedRequests: [ToolAppBundleRequest] = []
     private(set) var launchedURL: URL?
+    private(set) var terminatedURL: URL?
+    private var runningURL: URL?
 
     func recordBuild(_ request: ToolAppBundleRequest) {
         builtRequests.append(request)
@@ -310,6 +312,18 @@ actor AppBundleCapture {
 
     func recordLaunch(_ url: URL) {
         launchedURL = url
+        runningURL = url
+    }
+
+    func recordTermination(_ url: URL) {
+        terminatedURL = url
+        if runningURL == url {
+            runningURL = nil
+        }
+    }
+
+    func isRunning(_ url: URL) -> Bool {
+        runningURL == url
     }
 }
 
@@ -791,6 +805,7 @@ actor StreamingResponseProbe {
     private(set) var prompts: [String] = []
     private(set) var didStart = false
     private(set) var didCancel = false
+    private(set) var didFinish = false
 
     func recordStart(promptDescription: String) {
         didStart = true
@@ -799,6 +814,32 @@ actor StreamingResponseProbe {
 
     func recordCancel() {
         didCancel = true
+    }
+
+    func recordFinish() {
+        didFinish = true
+    }
+}
+
+actor AsyncTestGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        for waiter in pendingWaiters {
+            waiter.resume()
+        }
     }
 }
 

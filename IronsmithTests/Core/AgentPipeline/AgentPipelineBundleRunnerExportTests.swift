@@ -24,6 +24,12 @@ extension AgentPipelineTests {
             launchApp: { url in
                 await capture.recordLaunch(url)
             },
+            terminateApp: { url in
+                await capture.recordTermination(url)
+            },
+            isAppRunning: { url in
+                await capture.isRunning(url)
+            },
             appExists: { _ in true }
         )
         let runner = ToolRunnerClient.live(appBundleClient: appBundleClient)
@@ -55,6 +61,12 @@ extension AgentPipelineTests {
 
         #expect(await capture.builtRequests.isEmpty)
         #expect(await capture.launchedURL == tool.appBundleURL)
+        #expect(await runner.isToolRunning(tool))
+
+        try await runner.quitTool(tool)
+
+        #expect(await capture.terminatedURL == tool.appBundleURL)
+        #expect(await runner.isToolRunning(tool) == false)
     }
 
     @MainActor

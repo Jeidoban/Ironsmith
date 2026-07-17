@@ -105,7 +105,10 @@ final class InferenceStore {
 
         do {
             try repository?.bootstrapIfNeeded()
-            try refreshData(reconcileSelection: false)
+            try refreshData(
+                reconcileSelection: false,
+                reconcileImageProvider: false
+            )
         } catch {
             presentError(error)
             return
@@ -113,6 +116,7 @@ final class InferenceStore {
 
         ironsmithSession = dependencies.accountClient.currentSession()
         refreshOpenAICodexCredential()
+        reconcileImageGenerationProvider()
         let selectedRemoteProvider = providers.first { provider in
             provider.kind != .local
                 && selectedModelID?.hasPrefix("\(provider.identifier)::") == true
@@ -164,12 +168,18 @@ final class InferenceStore {
         }
     }
 
-    func refreshData(reconcileSelection: Bool = true) throws {
+    func refreshData(
+        reconcileSelection: Bool = true,
+        reconcileImageProvider: Bool = true
+    ) throws {
         guard let repository else { return }
         providers = try repository.fetchProviders()
         persistedModels = try repository.fetchPersistedModels()
         if reconcileSelection {
             reconcileSelectedModel()
+        }
+        if reconcileImageProvider {
+            reconcileImageGenerationProvider()
         }
     }
 }

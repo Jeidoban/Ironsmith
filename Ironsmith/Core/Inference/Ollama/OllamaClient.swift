@@ -18,7 +18,7 @@ struct OllamaClient {
         _ identifier: String,
         _ baseURLString: String,
         _ apiKey: String?,
-        _ progress: @escaping @Sendable (OllamaPullProgress) -> Void
+        _ progress: @escaping @Sendable (OllamaPullProgress) async -> Void
     ) async throws -> Void
     var deleteModel: @Sendable (_ identifier: String, _ baseURLString: String, _ apiKey: String?) async throws -> Void
 
@@ -60,7 +60,7 @@ struct OllamaClient {
                         continue
                     }
                     if let progressResponse = try? JSONDecoder().decode(PullResponse.self, from: data) {
-                        progress(
+                        await progress(
                             OllamaPullProgress(
                                 status: progressResponse.status,
                                 completed: progressResponse.completed,

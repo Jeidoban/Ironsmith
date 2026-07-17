@@ -401,7 +401,49 @@ extension ToolLibraryTests {
         await store.run(tool)
 
         #expect(await runCapture.ranToolIDs == [tool.id])
-        #expect(store.runningToolID == nil)
+        #expect(store.launchingToolID == nil)
+        #expect(!store.isRunning(tool))
+        #expect(store.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreTracksAndQuitsRunningTools() async {
+        let tool = Tool(name: "Runner", packageRootPath: "/tmp/runner")
+        let runningCapture = ToolRunningCapture()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { request in
+                    ToolGenerationResult(
+                        toolName: "Runner",
+                        executableName: "Runner",
+                        settings: request.settings,
+                        packageRootURL: tool.packageRootURL
+                    )
+                },
+                runnerClient: ToolRunnerClient(
+                    { tool in
+                        await runningCapture.recordLaunch(tool)
+                    },
+                    quitTool: { tool in
+                        await runningCapture.recordQuit(tool)
+                    },
+                    isToolRunning: { tool in
+                        await runningCapture.isRunning(tool)
+                    }
+                )
+            )
+        )
+
+        await store.run(tool)
+
+        #expect(store.isRunning(tool))
+        #expect(await runningCapture.launchedToolIDs == [tool.id])
+
+        await store.quit(tool)
+
+        #expect(!store.isRunning(tool))
+        #expect(await runningCapture.quitToolIDs == [tool.id])
         #expect(store.presentedErrorMessage == nil)
     }
 
@@ -583,6 +625,58 @@ extension ToolLibraryTests {
         #expect(!(rebuiltAppEntrySource.contains("WindowGroup")))
         #expect(await buildCapture.builtPackageRoot == packageRoot)
         #expect(await buildCapture.builtSettings == rebuiltSettings)
+        #expect(store.rebuildingToolID == nil)
+        #expect(store.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryStoreDoesNotRebuildFailedTool() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let executableName = "FailedRebuildTool"
+        let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let tool = Tool(
+            name: executableName,
+            packageRootPath: packageRoot.path,
+            generationState: .failed,
+            generationPhase: .packaging,
+            generationMode: .create,
+            pendingPrompt: "Build an app",
+            generationErrorSummary: "Packaging failed"
+        )
+        context.insert(tool)
+        try context.save()
+
+        let buildCapture = ToolBuildCapture()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { request in
+                    ToolGenerationResult(
+                        toolName: executableName,
+                        executableName: executableName,
+                        settings: request.settings,
+                        packageRootURL: packageRoot
+                    )
+                },
+                runnerClient: ToolRunnerClient { _ in },
+                buildClient: ToolBuildClient { tool in
+                    await buildCapture.record(tool)
+                }
+            )
+        )
+
+        await store.rebuild(tool, in: context)
+
+        #expect(await buildCapture.builtPackageRoot == nil)
+        #expect(tool.generationState == .failed)
+        #expect(tool.generationPhase == .packaging)
+        #expect(tool.generationMode == .create)
+        #expect(tool.pendingPrompt == "Build an app")
+        #expect(tool.generationErrorSummary == "Packaging failed")
         #expect(store.rebuildingToolID == nil)
         #expect(store.presentedErrorMessage == nil)
     }

@@ -135,7 +135,7 @@ extension InferenceTests {
                 },
                 pullModel: { _, _, _, progress in
                     for update in ollamaPullProgresses {
-                        progress(update)
+                        await progress(update)
                     }
                     try ollamaPullResult.get()
                 },

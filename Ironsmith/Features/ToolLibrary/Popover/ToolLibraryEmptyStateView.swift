@@ -67,6 +67,6 @@ struct ToolLibraryEmptyStateView: View {
         }
 
         return
-            "Create a new one from the prompt box below, or change the selected AI model in Settings."
+            "Create a new one from the prompt box below."
     }
 }

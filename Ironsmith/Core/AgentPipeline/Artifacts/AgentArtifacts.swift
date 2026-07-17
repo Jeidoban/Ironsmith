@@ -300,7 +300,7 @@ enum ToolNameSanitizer {
     }
 }
 
-struct ToolPackageLayout: Equatable, Sendable {
+nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let packageMetadataDirectoryName = ".ironsmith"
     nonisolated static let versionsDirectoryName = "versions"
     nonisolated static let pendingContentViewDraftFilename = "pending-ContentView.swift"

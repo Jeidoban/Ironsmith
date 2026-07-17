@@ -4,7 +4,28 @@ struct ToolAppBundleClient {
     var buildInternalApp: (_ request: ToolAppBundleRequest) async throws -> URL
     var exportApp: (_ request: ToolAppBundleRequest, _ applicationsDirectoryURL: URL) async throws -> URL
     var launchApp: (_ appBundleURL: URL) async throws -> Void
+    var terminateApp: (_ appBundleURL: URL) async throws -> Void
+    var isAppRunning: (_ appBundleURL: URL) async -> Bool
     var appExists: (_ appBundleURL: URL) -> Bool
+
+    init(
+        buildInternalApp: @escaping (_ request: ToolAppBundleRequest) async throws -> URL,
+        exportApp: @escaping (
+            _ request: ToolAppBundleRequest,
+            _ applicationsDirectoryURL: URL
+        ) async throws -> URL,
+        launchApp: @escaping (_ appBundleURL: URL) async throws -> Void,
+        terminateApp: @escaping (_ appBundleURL: URL) async throws -> Void = { _ in },
+        isAppRunning: @escaping (_ appBundleURL: URL) async -> Bool = { _ in false },
+        appExists: @escaping (_ appBundleURL: URL) -> Bool
+    ) {
+        self.buildInternalApp = buildInternalApp
+        self.exportApp = exportApp
+        self.launchApp = launchApp
+        self.terminateApp = terminateApp
+        self.isAppRunning = isAppRunning
+        self.appExists = appExists
+    }
 
     static let applicationsDirectoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
 
@@ -18,6 +39,8 @@ struct ToolAppBundleClient {
                 )
             },
             launchApp: { _ in },
+            terminateApp: { _ in },
+            isAppRunning: { _ in false },
             appExists: { _ in true }
         )
     }
@@ -28,7 +51,7 @@ struct ToolAppBundleClient {
         processClient: SwiftPackageProcessClient = .live,
         iconClient: ToolIconClient? = nil
     ) -> ToolAppBundleClient {
-        let iconClient = iconClient ?? ToolIconClient.live()
+        let iconClient = iconClient ?? ToolIconClient.cachedOnly()
         return ToolAppBundleClient(
             buildInternalApp: { request in
                 try await buildApp(
@@ -61,6 +84,12 @@ struct ToolAppBundleClient {
             },
             launchApp: { appBundleURL in
                 try await processClient.launchApp(appBundleURL)
+            },
+            terminateApp: { appBundleURL in
+                try await processClient.terminateApp(appBundleURL)
+            },
+            isAppRunning: { appBundleURL in
+                await processClient.isAppRunning(appBundleURL)
             },
             appExists: { appBundleURL in
                 isCompleteAppBundle(appBundleURL, fileManager: fileManager)

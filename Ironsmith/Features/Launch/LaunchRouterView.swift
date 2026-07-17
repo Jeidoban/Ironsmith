@@ -5,17 +5,20 @@
 
 import SwiftData
 import SwiftUI
+import ImagePlayground
 
 struct LaunchRouterView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(InferenceStore.self) private var inferenceStore
     @State private var appUpdateStore: AppUpdateStore
+    @State private var imagePlaygroundCoordinator: ImagePlaygroundSheetCoordinator
     let gate: CommandLineToolsGate
 
     @MainActor
     init(gate: CommandLineToolsGate) {
         self.gate = gate
         _appUpdateStore = State(initialValue: AppUpdateStore())
+        _imagePlaygroundCoordinator = State(initialValue: .shared)
     }
 
     var body: some View {
@@ -41,6 +44,15 @@ struct LaunchRouterView: View {
             appUpdateStore.startAutomaticChecks()
             await inferenceStore.loadIfNeeded(modelContext: modelContext)
         }
+        .imagePlaygroundSheet(
+            isPresented: Binding(
+                get: { imagePlaygroundCoordinator.isPresented },
+                set: { imagePlaygroundCoordinator.presentationChanged($0) }
+            ),
+            concept: imagePlaygroundCoordinator.prompt,
+            onCompletion: imagePlaygroundCoordinator.completed(with:),
+            onCancellation: imagePlaygroundCoordinator.canceled
+        )
     }
 }
 

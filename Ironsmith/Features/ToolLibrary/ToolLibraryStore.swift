@@ -54,7 +54,8 @@ final class ToolLibraryStore {
     var menuBarSystemImage = ToolMenuBarSymbol.fallback
     var sandboxPermissions = GeneratedAppSandboxPermissions.default
     var resourcePermissions = GeneratedAppResourcePermissions.none
-    var runningToolID: UUID?
+    private(set) var launchingToolID: UUID?
+    private(set) var runningToolIDs = Set<UUID>()
     var exportingToolID: UUID?
     var rebuildingToolID: UUID?
     var restoringToolID: UUID?
@@ -177,6 +178,7 @@ final class ToolLibraryStore {
             return
         }
 
+        cancelIconGeneration(for: packageRootURL)
         do {
             try removePackageIfExists(packageRootURL)
         } catch {
@@ -307,6 +309,7 @@ final class ToolLibraryStore {
                 handleDeletedTool(tool)
                 modelContext.delete(tool)
                 try modelContext.save()
+                cancelIconGeneration(for: packageRootURL)
                 try removePackageIfExists(packageRootURL)
             case .edit:
                 do {
@@ -330,6 +333,12 @@ final class ToolLibraryStore {
         } catch {
             modelContext.rollback()
             presentError(error.localizedDescription)
+        }
+    }
+
+    private func cancelIconGeneration(for packageRootURL: URL) {
+        Task {
+            await dependencies.generationClient.cancelIconGeneration(for: packageRootURL)
         }
     }
 
@@ -370,7 +379,11 @@ final class ToolLibraryStore {
     }
 
     func rebuild(_ tool: Tool, in modelContext: ModelContext) async {
-        guard !isGenerating, rebuildingToolID == nil, restoringToolID == nil, tool.isGenerationReady else { return }
+        guard !isGenerating,
+              rebuildingToolID == nil,
+              restoringToolID == nil,
+              tool.isGenerationReady
+        else { return }
         rebuildingToolID = tool.id
         clearPresentedErrorState()
         defer {
@@ -453,6 +466,7 @@ final class ToolLibraryStore {
                     existingTool: selectedTool,
                     settings: submittedSettings,
                     languageModelContext: languageModelContext,
+                    imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
                     lifecycle: lifecycle
                 )
             )
@@ -582,14 +596,56 @@ final class ToolLibraryStore {
     }
 
     func run(_ tool: Tool) async {
-        guard tool.isGenerationReady, runningToolID == nil, rebuildingToolID == nil, restoringToolID == nil else { return }
-        runningToolID = tool.id
-        defer { runningToolID = nil }
+        guard tool.isGenerationReady,
+              launchingToolID == nil,
+              rebuildingToolID == nil,
+              restoringToolID == nil
+        else { return }
+        launchingToolID = tool.id
+        defer { launchingToolID = nil }
 
         do {
             try await dependencies.runnerClient.runTool(tool)
+            await refreshRunningApplication(for: tool)
         } catch {
             presentError(error.localizedDescription)
+        }
+    }
+
+    func quit(_ tool: Tool) async {
+        guard launchingToolID == nil,
+              rebuildingToolID == nil,
+              restoringToolID == nil,
+              runningToolIDs.contains(tool.id)
+        else { return }
+
+        do {
+            try await dependencies.runnerClient.quitTool(tool)
+            runningToolIDs.remove(tool.id)
+        } catch {
+            presentError(error.localizedDescription)
+        }
+    }
+
+    func isRunning(_ tool: Tool) -> Bool {
+        runningToolIDs.contains(tool.id)
+    }
+
+    func refreshRunningApplications(for tools: [Tool]) async {
+        var runningIDs = Set<UUID>()
+        for tool in tools {
+            if await dependencies.runnerClient.isToolRunning(tool) {
+                runningIDs.insert(tool.id)
+            }
+        }
+        runningToolIDs = runningIDs
+    }
+
+    private func refreshRunningApplication(for tool: Tool) async {
+        if await dependencies.runnerClient.isToolRunning(tool) {
+            runningToolIDs.insert(tool.id)
+        } else {
+            runningToolIDs.remove(tool.id)
         }
     }
 
@@ -741,6 +797,7 @@ final class ToolLibraryStore {
                     existingTool: tool,
                     settings: settings,
                     languageModelContext: languageModelContext,
+                    imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
                     lifecycle: lifecycle
                 )
             )

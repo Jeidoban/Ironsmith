@@ -2,6 +2,8 @@ import AnyLanguageModel
 import Foundation
 
 struct SingleFileToolGenerationRuntime {
+    static let codexIconGenerationStagger: Duration = .seconds(1)
+
     let context: ToolGenerationRuntimeContext
 
     private struct CreateToolSetup {
@@ -18,6 +20,7 @@ struct SingleFileToolGenerationRuntime {
         for prompt: String,
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
+        imageGenerationProvider: ToolImageGenerationProvider = .disabled,
         lifecycle: ToolGenerationLifecycle = .noop
     ) async throws -> ToolGenerationResult {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -34,6 +37,7 @@ struct SingleFileToolGenerationRuntime {
                     prompt: effectivePrompt,
                     existingTool: existingTool,
                     settings: settings,
+                    imageGenerationProvider: imageGenerationProvider,
                     lifecycle: lifecycle
                 )
             }
@@ -48,6 +52,7 @@ struct SingleFileToolGenerationRuntime {
         return try await createTool(
             prompt: trimmedPrompt,
             settings: settings,
+            imageGenerationProvider: imageGenerationProvider,
             lifecycle: lifecycle
         )
     }
@@ -151,6 +156,7 @@ struct SingleFileToolGenerationRuntime {
         prompt: String,
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
+        imageGenerationProvider: ToolImageGenerationProvider,
         lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let startingPhase = existingTool?.generationPhase ?? .initializing
@@ -169,6 +175,7 @@ struct SingleFileToolGenerationRuntime {
             try Task.checkCancellation()
             let metadata = await context.metadataClient.suggestMetadata(
                 userPrompt: prompt,
+                imageGenerationProvider: imageGenerationProvider,
                 invoker: context.languageModelInvoker
             )
             try Task.checkCancellation()
@@ -194,12 +201,24 @@ struct SingleFileToolGenerationRuntime {
 
         do {
             try Task.checkCancellation()
-            if startingPhase == .initializing || startingPhase == .planning || startingPhase == .generatingIcon {
-                try await generateIconAssets(
+            let staggerIconGeneration = Self.shouldStaggerIconGeneration(
+                imageGenerationProvider: imageGenerationProvider,
+                promptRefinementEnabled: context.promptRefinementEnabled,
+                promptRefinementModel: context.promptRefinement.languageModel
+            )
+            let iconClient = context.iconClient
+            let iconGeneration = await context.iconGenerationCoordinator.generation(
+                for: setup.layout.packageRootURL
+            ) {
+                if staggerIconGeneration {
+                    try await Task.sleep(for: Self.codexIconGenerationStagger)
+                }
+                try await Self.generateIconAssets(
                     displayName: setup.displayName,
                     iconPrompt: setup.iconPrompt,
                     layout: setup.layout,
-                    lifecycle: lifecycle
+                    imageGenerationProvider: imageGenerationProvider,
+                    iconClient: iconClient
                 )
             }
 
@@ -207,6 +226,7 @@ struct SingleFileToolGenerationRuntime {
             if startingPhase == .generatingSource
                 || startingPhase == .generatingRepairDiff
                 || startingPhase == .repairing
+                || startingPhase == .waitingForIcon
                 || startingPhase == .packaging
                 || startingPhase == .completed {
                 contentPrompt = prompt
@@ -219,7 +239,7 @@ struct SingleFileToolGenerationRuntime {
                 )
             }
 
-            if startingPhase == .packaging || startingPhase == .completed {
+            if startingPhase == .waitingForIcon || startingPhase == .packaging || startingPhase == .completed {
                 return try await packageTool(
                     displayName: setup.displayName,
                     executableName: setup.executableName,
@@ -227,6 +247,7 @@ struct SingleFileToolGenerationRuntime {
                     packageRootURL: setup.layout.packageRootURL,
                     settings: setup.settings,
                     iconPrompt: setup.iconPrompt,
+                    iconGeneration: iconGeneration,
                     lifecycle: lifecycle
                 )
             }
@@ -247,6 +268,7 @@ struct SingleFileToolGenerationRuntime {
                     packageRootURL: setup.layout.packageRootURL,
                     settings: setup.settings,
                     iconPrompt: setup.iconPrompt,
+                    iconGeneration: iconGeneration,
                     lifecycle: lifecycle
                 )
             }
@@ -277,14 +299,33 @@ struct SingleFileToolGenerationRuntime {
                 packageRootURL: setup.layout.packageRootURL,
                 settings: setup.settings,
                 iconPrompt: setup.iconPrompt,
+                iconGeneration: iconGeneration,
                 lifecycle: lifecycle
             )
         } catch is CancellationError {
             if !lifecycle.preservesCreatedPackageOnCancellation {
+                await context.iconGenerationCoordinator.cancelGeneration(
+                    for: setup.layout.packageRootURL
+                )
                 try? context.fileClient.removeItemIfExists(setup.layout.packageRootURL)
             }
             throw CancellationError()
+        } catch {
+            await context.iconGenerationCoordinator.cancelGeneration(
+                for: setup.layout.packageRootURL
+            )
+            throw error
         }
+    }
+
+    nonisolated static func shouldStaggerIconGeneration(
+        imageGenerationProvider: ToolImageGenerationProvider,
+        promptRefinementEnabled: Bool,
+        promptRefinementModel: any LanguageModel
+    ) -> Bool {
+        imageGenerationProvider == .openAI
+            && promptRefinementEnabled
+            && ModelGenerationCapabilities.isOpenAICodexLanguageModel(promptRefinementModel)
     }
 
     private func contentGenerationPrompt(
@@ -767,20 +808,21 @@ struct SingleFileToolGenerationRuntime {
         )
     }
 
-    private func generateIconAssets(
+    nonisolated private static func generateIconAssets(
         displayName: String,
         iconPrompt: String?,
         layout: ToolPackageLayout,
-        lifecycle: ToolGenerationLifecycle
+        imageGenerationProvider: ToolImageGenerationProvider,
+        iconClient: ToolIconClient
     ) async throws {
-        try await lifecycle.updatePhase(.generating, .generatingIcon, nil)
         do {
             try Task.checkCancellation()
-            _ = try await context.iconClient.ensureIconAssets(
+            _ = try await iconClient.ensureIconAssets(
                 ToolIconRequest(
                     displayName: displayName,
                     iconPrompt: iconPrompt,
-                    layout: layout
+                    layout: layout,
+                    imageProvider: imageGenerationProvider
                 )
             )
         } catch is CancellationError {
@@ -1102,6 +1144,7 @@ struct SingleFileToolGenerationRuntime {
         packageRootURL: URL,
         settings: ToolGenerationSettings,
         iconPrompt: String?,
+        iconGeneration: ToolIconGenerationHandle? = nil,
         lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
@@ -1110,6 +1153,11 @@ struct SingleFileToolGenerationRuntime {
         let binaryURL = binDirectory.appendingPathComponent(executableName)
         await context.processClient.stripQuarantine(binaryURL)
 
+        try Task.checkCancellation()
+        if let iconGeneration {
+            try await lifecycle.updatePhase(.generating, .waitingForIcon, nil)
+            try await iconGeneration.wait()
+        }
         try Task.checkCancellation()
         try await lifecycle.updatePhase(.generating, .packaging, nil)
         _ = try await context.appBundleClient.buildInternalApp(

@@ -8,6 +8,228 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
+    func codexIconGenerationStaggersOnlyWhenCodexPromptRefinementCanOverlap() {
+        let base = OpenAILanguageModel(
+            baseURL: OpenAICodexBackend.backendBaseURL,
+            apiKey: "token",
+            model: "gpt-5.6-luna",
+            apiVariant: .responses
+        )
+        let codexModel = OpenAICodexLanguageModel(base: base, usesResponsesLite: true)
+        let regularModel = StubAgentLanguageModel { _, _ in "" }
+
+        #expect(
+            SingleFileToolGenerationRuntime.shouldStaggerIconGeneration(
+                imageGenerationProvider: .openAI,
+                promptRefinementEnabled: true,
+                promptRefinementModel: codexModel
+            )
+        )
+        #expect(
+            !SingleFileToolGenerationRuntime.shouldStaggerIconGeneration(
+                imageGenerationProvider: .gemini,
+                promptRefinementEnabled: true,
+                promptRefinementModel: codexModel
+            )
+        )
+        #expect(
+            !SingleFileToolGenerationRuntime.shouldStaggerIconGeneration(
+                imageGenerationProvider: .openAI,
+                promptRefinementEnabled: false,
+                promptRefinementModel: codexModel
+            )
+        )
+        #expect(
+            !SingleFileToolGenerationRuntime.shouldStaggerIconGeneration(
+                imageGenerationProvider: .openAI,
+                promptRefinementEnabled: true,
+                promptRefinementModel: regularModel
+            )
+        )
+        #expect(SingleFileToolGenerationRuntime.codexIconGenerationStagger == .seconds(1))
+    }
+
+    @MainActor
+    @Test
+    func newToolSourceGenerationRunsWhileIconGenerationIsWaiting() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let modelProbe = StreamingResponseProbe()
+        let iconProbe = StreamingResponseProbe()
+        let model = PartialThenSuspendingLanguageModel(
+            partialResponse: "import SwiftUI\nstruct ContentView: View {",
+            probe: modelProbe
+        )
+        let iconClient = ToolIconClient { request in
+            await iconProbe.recordStart(promptDescription: request.displayName)
+            try await Task.sleep(nanoseconds: 10_000_000_000)
+            return request.layout.cachedAppIconICNSURL
+        }
+        let runtime = Self.makeRuntime(
+            languageModel: model,
+            toolsDirectoryURL: toolsDirectory,
+            iconClient: iconClient,
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(displayName: "Parallel Icon", iconPrompt: "An anvil")
+            }
+        )
+
+        let task = Task {
+            try await runtime.generateTool(
+                for: "Build a tool while its icon is chosen",
+                settings: .default,
+                imageGenerationProvider: .imagePlayground
+            )
+        }
+        await Self.eventually {
+            let iconStarted = await iconProbe.didStart
+            let modelStarted = await modelProbe.didStart
+            return iconStarted && modelStarted
+        }
+
+        #expect(await iconProbe.didStart)
+        #expect(await modelProbe.didStart)
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Expected cancellation to stop the in-progress generation.")
+        } catch is CancellationError {
+            // Expected.
+        }
+    }
+
+    @Test
+    func cancellingAnIconWaitDoesNotCancelTheParallelIconGeneration() async throws {
+        let coordinator = ToolIconGenerationCoordinator()
+        let probe = StreamingResponseProbe()
+        let packageRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icon-wait-\(UUID().uuidString)", isDirectory: true)
+        let iconGeneration = await coordinator.generation(for: packageRootURL) {
+            await probe.recordStart(promptDescription: "icon")
+            do {
+                try await Task.sleep(for: .seconds(10))
+                await probe.recordFinish()
+            } catch {
+                await probe.recordCancel()
+                throw error
+            }
+        }
+        await Self.eventually { await probe.didStart }
+
+        let waitingTask = Task {
+            try await iconGeneration.wait()
+        }
+
+        waitingTask.cancel()
+
+        do {
+            try await waitingTask.value
+            Issue.record("Expected cancellation while waiting for the icon task.")
+        } catch is CancellationError {
+            // Expected.
+        }
+        #expect(!(await probe.didCancel))
+
+        await coordinator.cancelGeneration(for: packageRootURL)
+        await Self.eventually { await probe.didCancel }
+        #expect(await probe.didCancel)
+    }
+
+    @Test
+    func repeatedIconRequestReusesGenerationAlreadyRunningForPackage() async throws {
+        let coordinator = ToolIconGenerationCoordinator()
+        let probe = StreamingResponseProbe()
+        let gate = AsyncTestGate()
+        let packageRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icon-reuse-\(UUID().uuidString)", isDirectory: true)
+        let firstGeneration = await coordinator.generation(for: packageRootURL) {
+            await probe.recordStart(promptDescription: "first")
+            await gate.wait()
+            await probe.recordFinish()
+        }
+        await Self.eventually { await probe.didStart }
+
+        let resumedGeneration = await coordinator.generation(for: packageRootURL) {
+            await probe.recordStart(promptDescription: "duplicate")
+        }
+
+        #expect(await probe.prompts == ["first"])
+        await gate.open()
+        try await firstGeneration.wait()
+        try await resumedGeneration.wait()
+        #expect(await probe.prompts == ["first"])
+        #expect(await probe.didFinish)
+    }
+
+    @MainActor
+    @Test(arguments: [
+        ToolImageGenerationProvider.ironsmith,
+        ToolImageGenerationProvider.openAI,
+        ToolImageGenerationProvider.gemini,
+    ])
+    func pausingGenerationAllowsHostedIconGenerationToFinish(
+        provider: ToolImageGenerationProvider
+    ) async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let modelProbe = StreamingResponseProbe()
+        let iconProbe = StreamingResponseProbe()
+        let model = PartialThenSuspendingLanguageModel(
+            partialResponse: "import SwiftUI\nstruct ContentView: View {",
+            probe: modelProbe
+        )
+        let iconClient = ToolIconClient { request in
+            await iconProbe.recordStart(promptDescription: request.imageProvider.rawValue)
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+                await iconProbe.recordFinish()
+                return request.layout.cachedAppIconICNSURL
+            } catch {
+                await iconProbe.recordCancel()
+                throw error
+            }
+        }
+        let runtime = Self.makeRuntime(
+            languageModel: model,
+            toolsDirectoryURL: toolsDirectory,
+            iconClient: iconClient,
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(displayName: "Paused Icon", iconPrompt: "An anvil")
+            }
+        )
+
+        let generationTask = Task {
+            try await runtime.generateTool(
+                for: "Build a tool while its hosted icon is generated",
+                settings: .default,
+                imageGenerationProvider: provider,
+                lifecycle: ToolGenerationLifecycle(preservesCreatedPackageOnCancellation: true)
+            )
+        }
+        await Self.eventually {
+            let modelStarted = await modelProbe.didStart
+            let iconStarted = await iconProbe.didStart
+            return modelStarted && iconStarted
+        }
+
+        generationTask.cancel()
+        do {
+            _ = try await generationTask.value
+            Issue.record("Expected the source generation to stop.")
+        } catch is CancellationError {
+            // Expected.
+        }
+
+        await Self.eventually { await iconProbe.didFinish }
+        #expect(await iconProbe.didFinish)
+        #expect(!(await iconProbe.didCancel))
+        #expect(await iconProbe.prompts == [provider.rawValue])
+    }
+
+    @MainActor
+    @Test
     func cancelledNewToolGenerationRemovesPartialPackage() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
