@@ -136,7 +136,13 @@ extension ContentViewBuildRepairLoop {
             throw error
         }
 
-        let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(patch)
+        let sanitizedPatch: String
+        switch context.sourcePatchFormat {
+        case .searchReplace:
+            sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(patch)
+        case .unifiedDiff:
+            sanitizedPatch = ContentViewRepairSupport.sanitizedDiffSummary(patch)
+        }
         AgentDiagnosticsLog.append(
             """
             Model repair patch proposed.
@@ -148,7 +154,8 @@ extension ContentViewBuildRepairLoop {
         )
         let repairedSource: String
         do {
-            if context.pipelineConfiguration.codingAgent == .ironsmithFlame {
+            switch context.sourcePatchFormat {
+            case .searchReplace:
                 let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
                     sanitizedPatch,
                     to: originalSource,
@@ -164,11 +171,11 @@ extension ContentViewBuildRepairLoop {
                         """
                     )
                 }
-            } else {
-                repairedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            case .unifiedDiff:
+                repairedSource = try ContentViewRepairSupport.applyValidatedDiff(
                     sanitizedPatch,
                     to: originalSource,
-                    maximumPatchBlocks: maximumPatchBlocks
+                    maximumHunks: maximumPatchBlocks
                 )
             }
         } catch {

@@ -286,12 +286,36 @@ extension AgentPipelineTests {
     >>>>>>> REPLACE
     """
 
+    static let renameOldToNewUnifiedDiff = """
+    --- a/ContentView.swift
+    +++ b/ContentView.swift
+    @@ -3,5 +3,5 @@
+     struct ContentView: View {
+         var body: some View {
+    -            Text("old")
+    +            Text("new")
+         }
+     }
+    """
+
     static let breakOldTextPatch = """
     <<<<<<< SEARCH
             Text("old")
     =======
             Text("broken").definitelyNotReal()
     >>>>>>> REPLACE
+    """
+
+    static let breakOldTextUnifiedDiff = """
+    --- a/ContentView.swift
+    +++ b/ContentView.swift
+    @@ -3,5 +3,5 @@
+     struct ContentView: View {
+         var body: some View {
+    -            Text("old")
+    +            Text("broken").definitelyNotReal()
+         }
+     }
     """
 }
 
@@ -546,11 +570,11 @@ actor BudgetExhaustionResponses {
         if prompt.description.contains("Build failed for ContentView.swift.") {
             repairCount += 1
             return """
-            <<<<<<< SEARCH
-                        Text("Broken \(repairCount)").missing\(repairCount)()
-            =======
-                        Text("Fixed \(repairCount)")
-            >>>>>>> REPLACE
+            --- a/ContentView.swift
+            +++ b/ContentView.swift
+            @@ -1,1 +1,1 @@
+            -            Text("Broken \(repairCount)").missing\(repairCount)()
+            +            Text("Fixed \(repairCount)")
             """
         }
 

@@ -222,22 +222,21 @@ extension AgentPipelineTests {
         let layout = ToolPackageLayout(packageRootURL: tool.packageRootURL, executableName: executableName)
         let contentViewURL = layout.sourceDirectoryURL.appendingPathComponent(layout.defaultContentViewFileName)
         let partialPatch = """
-        <<<<<<< SEARCH
-                    Text("old")
-        =======
-                    Text("partial")
-        >>>>>>> REPLACE
-        <<<<<<< SEARCH
-                    Text("later")
-        =======
-                    Text("
+        --- a/ContentView.swift
+        +++ b/ContentView.swift
+        @@ -6,1 +6,1 @@
+        -            Text("old")
+        +            Text("partial")
+        @@ -7,1 +7,1 @@
+        -            Text("later")
+        +            Text("
         """
         let freshPatch = """
-        <<<<<<< SEARCH
-                    Text("later")
-        =======
-                    Text("fresh")
-        >>>>>>> REPLACE
+        --- a/ContentView.swift
+        +++ b/ContentView.swift
+        @@ -7,1 +7,1 @@
+        -            Text("later")
+        +            Text("fresh")
         """
         try FileManager.default.createDirectory(at: layout.packageMetadataDirectoryURL, withIntermediateDirectories: true)
         try partialPatch.write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
@@ -280,7 +279,7 @@ extension AgentPipelineTests {
         #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
         let prompts = await promptCapture.prompts
         #expect(prompts.count == 1)
-        #expect(prompts.first?.contains("Edit ContentView.swift by returning search/replace patch blocks only.") == true)
+        #expect(prompts.first?.contains("Edit ContentView.swift by returning a unified diff only.") == true)
         #expect(prompts.first?.contains(#"Text("partial")"#) == true)
     }
 

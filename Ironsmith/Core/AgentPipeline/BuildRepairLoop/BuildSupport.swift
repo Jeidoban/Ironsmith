@@ -174,7 +174,8 @@ extension ContentViewBuildRepairLoop {
     }
 
     static func isRetryableCandidateFailure(_ error: any Error) -> Bool {
-        if error is ContentViewRepairSupport.SearchReplacePatchValidationError {
+        if error is ContentViewRepairSupport.SearchReplacePatchValidationError
+            || error is ContentViewRepairSupport.UnifiedDiffValidationError {
             return true
         }
         guard let generationError = error as? ToolGenerationError else {
@@ -224,7 +225,8 @@ extension ContentViewBuildRepairLoop {
     }
 
     func skippedRepairReason(for error: any Error) -> SkippedRepairReason? {
-        if error is ContentViewRepairSupport.SearchReplacePatchValidationError {
+        if error is ContentViewRepairSupport.SearchReplacePatchValidationError
+            || error is ContentViewRepairSupport.UnifiedDiffValidationError {
             return .invalidRepairPatch
         }
         guard let generationError = error as? ToolGenerationError else {

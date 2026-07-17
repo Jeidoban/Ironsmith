@@ -252,11 +252,11 @@ extension AgentPipelineTests {
             }
             """,
             """
-            <<<<<<< SEARCH
-                    Text("broken").definitelyNotReal()
-            =======
-                    Text("fixed by model repair")
-            >>>>>>> REPLACE
+            --- a/ContentView.swift
+            +++ b/ContentView.swift
+            @@ -5,1 +5,1 @@
+            -        Text("broken").definitelyNotReal()
+            +        Text("fixed by model repair")
             """
         ])
         let invocationCapture = LanguageModelInvocationCapture()
@@ -326,20 +326,20 @@ extension AgentPipelineTests {
             }
             """,
             """
-            <<<<<<< SEARCH
-                    Text(tokens[newIdx]).definitelyNotReal()
-            =======
-                    if newIdx< tokens.count {
-                        Text(tokens[newIdx])
-                    }
-            >>>>>>> REPLACE
+            --- a/ContentView.swift
+            +++ b/ContentView.swift
+            @@ -8,1 +8,3 @@
+            -        Text(tokens[newIdx]).definitelyNotReal()
+            +        if newIdx< tokens.count {
+            +            Text(tokens[newIdx])
+            +        }
             """,
             """
-            <<<<<<< SEARCH
-                    if newIdx< tokens.count {
-            =======
-                    if newIdx < tokens.count {
-            >>>>>>> REPLACE
+            --- a/ContentView.swift
+            +++ b/ContentView.swift
+            @@ -8,1 +8,1 @@
+            -        if newIdx< tokens.count {
+            +        if newIdx < tokens.count {
             """
         ])
         let promptCapture = PromptCapture()
@@ -372,10 +372,10 @@ extension AgentPipelineTests {
         #expect(await formatCapture.formattedURLs.count == 1)
         #expect(prompts.count == 3)
         #expect(prompts[1].contains("Current authoritative ContentView.swift:"))
-        #expect(prompts[1].contains("Return only search/replace patch blocks."))
-        #expect(prompts[1].contains("Return at most 1 search/replace patch block(s)."))
+        #expect(prompts[1].contains("Return only a unified diff for ContentView.swift."))
+        #expect(prompts[1].contains("Return at most 1 unified diff hunk(s)."))
         #expect(!(prompts[2].contains("Current authoritative ContentView.swift:")))
-        #expect(prompts[2].contains("Return only search/replace patch blocks."))
+        #expect(prompts[2].contains("Return only a unified diff for ContentView.swift."))
     }
 
     @MainActor
@@ -862,10 +862,10 @@ extension AgentPipelineTests {
         )
         let builds = UnsupportedModifierBuilds(executableName: executableName)
         let responses = LanguageModelResponseQueue([
-            Self.breakOldTextPatch,
+            Self.breakOldTextUnifiedDiff,
             "not a patch",
             "still not a patch",
-            Self.renameOldToNewPatch
+            Self.renameOldToNewUnifiedDiff
         ])
         let runtime = Self.makeRuntime(
             languageModel: StubAgentLanguageModel { _, _ in

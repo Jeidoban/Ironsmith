@@ -1,5 +1,10 @@
 import Foundation
 
+enum ToolSourcePatchFormat: Equatable, Sendable {
+    case searchReplace
+    case unifiedDiff
+}
+
 enum ToolGenerationPrompts {
     static let singleFileCodingInstructions = """
         You are Ironsmith's Coding Agent.
@@ -53,6 +58,41 @@ enum ToolGenerationPrompts {
         Keep the edit focused on the user's requested change.
         Prefer the fewest unique search/replace blocks needed.
         """
+
+    static let unifiedDiffRepairInstructions = """
+        You are Ironsmith's Swift compiler repair agent.
+        You repair exactly one file: ContentView.swift.
+        \(unifiedDiffOutputContract)
+        \(validUnifiedDiffShapeExample)
+        Keep each repair turn focused on the listed compiler diagnostics.
+        """
+
+    static let unifiedDiffEditInstructions = """
+        You are Ironsmith's Swift edit agent.
+        You edit exactly one file: ContentView.swift.
+        \(unifiedDiffOutputContract)
+        \(validUnifiedDiffShapeExample)
+        Keep the edit focused on the user's requested change.
+        Prefer the fewest unified diff hunks needed.
+        """
+
+    static func repairInstructions(for format: ToolSourcePatchFormat) -> String {
+        switch format {
+        case .searchReplace:
+            return searchReplaceRepairInstructions
+        case .unifiedDiff:
+            return unifiedDiffRepairInstructions
+        }
+    }
+
+    static func editInstructions(for format: ToolSourcePatchFormat) -> String {
+        switch format {
+        case .searchReplace:
+            return searchReplaceEditInstructions
+        case .unifiedDiff:
+            return unifiedDiffEditInstructions
+        }
+    }
 
     static func singleFileCreatePrompt(
         userPrompt: String,
@@ -123,13 +163,14 @@ enum ToolGenerationPrompts {
         executableName: String,
         existingSource: String,
         maximumPatchBlocks: Int,
-        previousPatchFailure: String? = nil
+        previousPatchFailure: String? = nil,
+        patchFormat: ToolSourcePatchFormat = .searchReplace
     ) -> String {
         """
         User request: \(userPrompt)
         Fixed package and target name: \(executableName).
-        Edit ContentView.swift by returning search/replace patch blocks only.
-        \(patchTurnReminder(maximumPatchBlocks))
+        \(editPatchRequest(for: patchFormat))
+        \(patchTurnReminder(maximumPatchBlocks, format: patchFormat))
         \(previousPatchFailureSection(previousPatchFailure))
         Current authoritative ContentView.swift:
         ```swift
@@ -164,7 +205,8 @@ enum ToolGenerationPrompts {
         editableSnippets: [ContentViewRepairSnippet] = [],
         previousOutcome: String?,
         compactionSummary: String?,
-        maximumPatchBlocks: Int
+        maximumPatchBlocks: Int,
+        patchFormat: ToolSourcePatchFormat = .searchReplace
     ) -> String {
         var sections = [
             "Build failed for ContentView.swift.",
@@ -214,15 +256,15 @@ enum ToolGenerationPrompts {
                 Relevant current excerpts from authoritative ContentView.swift:
                 \(repairExcerptsText(editableSnippets))
                 These excerpts are context hints, not edit boundaries.
-                Your search/replace patch may edit any part of ContentView.swift needed to repair the listed diagnostics.
+                \(repairPatchScopeDescription(for: patchFormat))
                 """
             )
         }
 
         sections.append(
             """
-            Return only search/replace patch blocks.
-            \(patchTurnReminder(maximumPatchBlocks))
+            \(repairPatchRequest(for: patchFormat))
+            \(patchTurnReminder(maximumPatchBlocks, format: patchFormat))
             Do not reuse removed source from previous repair outcomes.
             Make one coherent repair step, then stop.
             """
@@ -249,11 +291,59 @@ enum ToolGenerationPrompts {
         Do not rewrite the entire file unless the whole file is malformed.
         """
 
-    private static func patchTurnReminder(_ maximumPatchBlocks: Int) -> String {
+    private static let unifiedDiffOutputContract = """
+        Return only a unified diff that updates ContentView.swift.
+        Prefer the standard --- a/ContentView.swift and +++ b/ContentView.swift file headers followed by one or more @@ hunks.
+        Prefix unchanged context with one space, removed lines with -, and added lines with +.
+        Hunk range numbers may be approximate, but existing context and removed lines must come from the current ContentView.swift.
+        Include enough unchanged context for each hunk to identify one unique source region.
+        Do not include prose, markdown fences, SEARCH/REPLACE markers, JSON, or changes to another file.
+        Do not rewrite the entire file unless the whole file is malformed.
         """
-        Return at most \(max(1, maximumPatchBlocks)) search/replace patch block(s).
-        Follow the search/replace patch output contract from your instructions.
-        """
+
+    private static func patchTurnReminder(
+        _ maximumPatchBlocks: Int,
+        format: ToolSourcePatchFormat
+    ) -> String {
+        switch format {
+        case .searchReplace:
+            return """
+            Return at most \(max(1, maximumPatchBlocks)) search/replace patch block(s).
+            Follow the search/replace patch output contract from your instructions.
+            """
+        case .unifiedDiff:
+            return """
+            Return at most \(max(1, maximumPatchBlocks)) unified diff hunk(s).
+            Follow the unified diff output contract from your instructions.
+            """
+        }
+    }
+
+    private static func editPatchRequest(for format: ToolSourcePatchFormat) -> String {
+        switch format {
+        case .searchReplace:
+            return "Edit ContentView.swift by returning search/replace patch blocks only."
+        case .unifiedDiff:
+            return "Edit ContentView.swift by returning a unified diff only."
+        }
+    }
+
+    private static func repairPatchRequest(for format: ToolSourcePatchFormat) -> String {
+        switch format {
+        case .searchReplace:
+            return "Return only search/replace patch blocks."
+        case .unifiedDiff:
+            return "Return only a unified diff for ContentView.swift."
+        }
+    }
+
+    private static func repairPatchScopeDescription(for format: ToolSourcePatchFormat) -> String {
+        switch format {
+        case .searchReplace:
+            return "Your search/replace patch may edit any part of ContentView.swift needed to repair the listed diagnostics."
+        case .unifiedDiff:
+            return "Your unified diff may edit any part of ContentView.swift needed to repair the listed diagnostics."
+        }
     }
 
     private static func previousPatchFailureSection(_ failure: String?) -> String {
@@ -276,6 +366,17 @@ enum ToolGenerationPrompts {
         =======
             Text("New")
         >>>>>>> REPLACE
+        """
+
+    private static let validUnifiedDiffShapeExample = """
+        Valid response shape example (format only; do not copy this content):
+        --- a/ContentView.swift
+        +++ b/ContentView.swift
+        @@ -1,3 +1,3 @@
+         struct ContentView: View {
+        -    let title = "Old"
+        +    let title = "New"
+         }
         """
 
     private static func repairExcerptsText(_ snippets: [ContentViewRepairSnippet]) -> String {

@@ -563,6 +563,47 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func unifiedDiffInstructionsAndTurnPromptsUseDiffsForSpark() {
+        let diagnostic = SwiftCompilerDiagnostic(
+            relativePath: "Sources/GeneratedTool/ContentView.swift",
+            line: 4,
+            column: 9,
+            severity: .error,
+            message: "cannot find 'title' in scope",
+            supportingLines: []
+        )
+        let editPrompt = ToolGenerationPrompts.singleFileEditPatchPrompt(
+            userPrompt: "Rename a label",
+            executableName: "GeneratedTool",
+            existingSource: "struct ContentView {}",
+            maximumPatchBlocks: 1,
+            patchFormat: .unifiedDiff
+        )
+        let repairPrompt = ToolGenerationPrompts.conversationalRepairPrompt(
+            diagnostics: [diagnostic],
+            source: nil,
+            previousOutcome: nil,
+            compactionSummary: nil,
+            maximumPatchBlocks: 2,
+            patchFormat: .unifiedDiff
+        )
+
+        for instructions in [
+            ToolGenerationPrompts.unifiedDiffEditInstructions,
+            ToolGenerationPrompts.unifiedDiffRepairInstructions,
+        ] {
+            #expect(instructions.contains("Return only a unified diff that updates ContentView.swift"))
+            #expect(instructions.contains("Hunk range numbers may be approximate"))
+            #expect(instructions.contains("--- a/ContentView.swift"))
+            #expect(instructions.contains("@@ -1,3 +1,3 @@"))
+        }
+        #expect(editPrompt.contains("Edit ContentView.swift by returning a unified diff only."))
+        #expect(editPrompt.contains("Return at most 1 unified diff hunk(s)."))
+        #expect(repairPrompt.contains("Return only a unified diff for ContentView.swift."))
+        #expect(repairPrompt.contains("Return at most 2 unified diff hunk(s)."))
+    }
+
+    @Test
     func conversationalRepairPromptRendersRelevantCurrentExcerpts() {
         let snippet = ContentViewRepairSnippet(
             startLine: 10,

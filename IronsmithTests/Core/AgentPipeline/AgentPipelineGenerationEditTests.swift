@@ -65,7 +65,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func modelPatchEditAppliesSearchReplacePatchAndStoresPreviousVersion() async throws {
+    func sparkPatchEditAppliesUnifiedDiffAndStoresPreviousVersion() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -74,7 +74,7 @@ extension AgentPipelineTests {
             executableName: "Calculator",
             source: Self.originalEditableSource
         )
-        let responses = LanguageModelResponseQueue([Self.renameOldToNewPatch])
+        let responses = LanguageModelResponseQueue([Self.renameOldToNewUnifiedDiff])
         let runtime = Self.makeRuntime(
             languageModel: StubAgentLanguageModel { _, _ in
                 try await responses.next()
@@ -115,7 +115,7 @@ extension AgentPipelineTests {
         )
         let responses = LanguageModelResponseQueue([
             "not a patch",
-            Self.renameOldToNewPatch
+            Self.renameOldToNewUnifiedDiff
         ])
         let promptCapture = PromptCapture()
         let runtime = Self.makeRuntime(
@@ -140,7 +140,7 @@ extension AgentPipelineTests {
         #expect(contentView.contains(#"Text("new")"#))
         let prompts = await promptCapture.prompts
         #expect(prompts.count == 2)
-        #expect(prompts.allSatisfy { $0.contains("Edit ContentView.swift by returning search/replace patch blocks only.") })
+        #expect(prompts.allSatisfy { $0.contains("Edit ContentView.swift by returning a unified diff only.") })
         #expect(!(prompts.contains { $0.contains("Rewrite ContentView.swift only.") }))
         #expect(await responses.count == 2)
     }
@@ -292,10 +292,10 @@ extension AgentPipelineTests {
         let prompts = await promptCapture.prompts
         #expect(contentView.contains(#"Text("whole file fallback")"#))
         #expect(prompts.count == 3)
-        #expect(prompts[0].contains("Edit ContentView.swift by returning search/replace patch blocks only."))
-        #expect(prompts[1].contains("Edit ContentView.swift by returning search/replace patch blocks only."))
+        #expect(prompts[0].contains("Edit ContentView.swift by returning a unified diff only."))
+        #expect(prompts[1].contains("Edit ContentView.swift by returning a unified diff only."))
         #expect(prompts[2].contains("Rewrite ContentView.swift only."))
-        #expect(!(prompts[2].contains("Edit ContentView.swift by returning search/replace patch blocks only.")))
+        #expect(!(prompts[2].contains("Edit ContentView.swift by returning a unified diff only.")))
         #expect(await responses.count == 3)
     }
 
@@ -332,6 +332,7 @@ extension AgentPipelineTests {
         #expect(prompts.count == 1)
         #expect(prompts[0].contains("Generate ContentView.swift only."))
         #expect(!(prompts[0].contains("Edit ContentView.swift by returning search/replace patch blocks only.")))
+        #expect(!(prompts[0].contains("Edit ContentView.swift by returning a unified diff only.")))
         #expect(!(prompts[0].contains("Rewrite ContentView.swift only.")))
         #expect(await responses.count == 1)
     }
@@ -354,7 +355,7 @@ extension AgentPipelineTests {
         )
         let promptCapture = PromptCapture()
         let responses = LanguageModelResponseQueue([
-            Self.renameOldToNewPatch,
+            Self.renameOldToNewUnifiedDiff,
             Self.renameOldToNewPatch
         ])
         let model = StubAgentLanguageModel { prompt, _ in
@@ -391,7 +392,7 @@ extension AgentPipelineTests {
 
         let prompts = await promptCapture.prompts
         #expect(prompts.count == 2)
-        #expect(prompts[0].contains("Return at most 1 search/replace patch block(s)."))
+        #expect(prompts[0].contains("Return at most 1 unified diff hunk(s)."))
         #expect(prompts[1].contains("Return at most \(ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn) search/replace patch block(s)."))
         #expect(await responses.count == 2)
     }

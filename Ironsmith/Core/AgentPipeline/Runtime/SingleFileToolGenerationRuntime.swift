@@ -950,10 +950,11 @@ struct SingleFileToolGenerationRuntime {
         var didUseCurrentSource = false
         var currentExistingSource = existingSource
         var previousPatchFailure: String?
+        let patchFormat = context.sourcePatchFormat
 
         return ContentViewCandidateGenerator(
             modeDescription: "edit",
-            instructions: ToolGenerationPrompts.searchReplaceEditInstructions,
+            instructions: ToolGenerationPrompts.editInstructions(for: patchFormat),
             retriesInvalidCandidates: true,
             invalidCandidateFallback: context.pipelineConfiguration
                 .fallsBackToWholeFileEditAfterInvalidInitialPatch
@@ -1035,6 +1036,7 @@ struct SingleFileToolGenerationRuntime {
                     existingSource: currentExistingSource,
                     maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn,
                     previousPatchFailure: previousPatchFailure,
+                    patchFormat: patchFormat,
                     lifecycle: lifecycle,
                     session: session
                 )
@@ -1229,7 +1231,8 @@ struct SingleFileToolGenerationRuntime {
             packageRootURL: layout.packageRootURL
         )
         guard !draft.isEmpty else { return }
-        if context.pipelineConfiguration.codingAgent == .ironsmithFlame {
+        switch context.sourcePatchFormat {
+        case .searchReplace:
             let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
                 draft,
                 to: originalSource,
@@ -1243,11 +1246,11 @@ struct SingleFileToolGenerationRuntime {
                 \(application.logSummary)
                 """
             )
-        } else {
-            guard let application = try ContentViewRepairSupport.applyCompletedSearchReplacePatchBlocks(
+        case .unifiedDiff:
+            guard let application = try ContentViewRepairSupport.applyCompletedDiffHunks(
                 draft,
                 to: originalSource,
-                maximumPatchBlocks: maximumPatchBlocks
+                maximumHunks: maximumPatchBlocks
             ) else {
                 AgentDiagnosticsLog.append(
                     """
@@ -1262,7 +1265,7 @@ struct SingleFileToolGenerationRuntime {
                 """
                 Applied completed edit patch blocks from interrupted draft.
                 packageRoot: \(layout.packageRootURL.path)
-                appliedBlockCount: \(application.appliedBlockCount)
+                appliedHunkCount: \(application.appliedHunkCount)
                 """
             )
         }
@@ -1377,6 +1380,7 @@ struct SingleFileToolGenerationRuntime {
         existingSource: String,
         maximumPatchBlocks: Int,
         previousPatchFailure: String?,
+        patchFormat: ToolSourcePatchFormat,
         lifecycle: ToolGenerationLifecycle,
         session: LanguageModelSession
     ) async throws {
@@ -1385,7 +1389,8 @@ struct SingleFileToolGenerationRuntime {
             executableName: layout.executableName,
             existingSource: existingSource,
             maximumPatchBlocks: maximumPatchBlocks,
-            previousPatchFailure: previousPatchFailure
+            previousPatchFailure: previousPatchFailure,
+            patchFormat: patchFormat
         )
         let draftPath = ToolPackageLayout.pendingContentViewDraftPath
         let response: String
@@ -1418,7 +1423,13 @@ struct SingleFileToolGenerationRuntime {
             throw error
         }
 
-        let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(response)
+        let sanitizedPatch: String
+        switch patchFormat {
+        case .searchReplace:
+            sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(response)
+        case .unifiedDiff:
+            sanitizedPatch = ContentViewRepairSupport.sanitizedDiffSummary(response)
+        }
         try Task.checkCancellation()
         AgentDiagnosticsLog.append(
             """
@@ -1431,7 +1442,8 @@ struct SingleFileToolGenerationRuntime {
         )
         let editedSource: String
         do {
-            if context.pipelineConfiguration.codingAgent == .ironsmithFlame {
+            switch patchFormat {
+            case .searchReplace:
                 let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
                     sanitizedPatch,
                     to: existingSource,
@@ -1447,11 +1459,11 @@ struct SingleFileToolGenerationRuntime {
                         """
                     )
                 }
-            } else {
-                editedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            case .unifiedDiff:
+                editedSource = try ContentViewRepairSupport.applyValidatedDiff(
                     sanitizedPatch,
                     to: existingSource,
-                    maximumPatchBlocks: maximumPatchBlocks
+                    maximumHunks: maximumPatchBlocks
                 )
             }
         } catch {

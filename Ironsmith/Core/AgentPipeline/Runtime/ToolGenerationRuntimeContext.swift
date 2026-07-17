@@ -247,6 +247,10 @@ struct ToolGenerationRuntimeContext {
         languageModelInvoker.metadata
     }
 
+    var sourcePatchFormat: ToolSourcePatchFormat {
+        pipelineConfiguration.codingAgent == .ironsmithSpark ? .unifiedDiff : .searchReplace
+    }
+
     init(
         languageModelContext: AgentLanguageModelContext,
         dependencies: ToolGenerationRuntimeDependencies

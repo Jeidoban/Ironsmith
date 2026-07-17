@@ -170,6 +170,19 @@ extension ContentViewBuildRepairLoop {
     }
 
     func invalidRepairOutcome(for error: any Error) -> String {
+        if let validationError = error as? ContentViewRepairSupport.UnifiedDiffValidationError {
+            if validationError.isStaleContextFailure {
+                return """
+                The previous diff was invalid because its existing lines did not match the current ContentView.swift. Treat that hunk as stale; it may have already changed.
+                Return a fresh diff against code that exists in the current excerpts below.
+                """
+            }
+            return """
+            The previous diff was invalid and was not applied: \(validationError.reason)
+            Return a fresh diff against code that exists in the current excerpts below.
+            """
+        }
+
         guard let validationError = error as? ContentViewRepairSupport.SearchReplacePatchValidationError else {
             return """
             The previous repair patch was invalid and was not applied.
