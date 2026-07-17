@@ -8,6 +8,45 @@ import Testing
 
 extension InferenceTests {
     @Test
+    func attachmentSupportFollowsCodexProviderAndManagedModelCapability() throws {
+        let ironsmith = try #require(ProviderCatalog.makeProvider(for: .ironsmith))
+        let managedModel = ModelConfig(
+            identifier: "openai/gpt-5.6",
+            displayName: "GPT-5.6",
+            providerIdentifier: ironsmith.identifier,
+            source: .remote,
+            installState: .installed,
+            supportsImageInput: true
+        )
+        let textOnlyModel = ModelConfig(
+            identifier: "deepseek/deepseek-v4-flash",
+            displayName: "DeepSeek V4 Flash",
+            providerIdentifier: ironsmith.identifier,
+            source: .remote,
+            installState: .installed
+        )
+
+        #expect(
+            ToolAttachmentSupport.isSupported(
+                model: managedModel,
+                provider: ironsmith,
+                codingAgent: .codex
+            ))
+        #expect(
+            !ToolAttachmentSupport.isSupported(
+                model: textOnlyModel,
+                provider: ironsmith,
+                codingAgent: .codex
+            ))
+        #expect(
+            !ToolAttachmentSupport.isSupported(
+                model: managedModel,
+                provider: ironsmith,
+                codingAgent: .ironsmithFlame
+            ))
+    }
+
+    @Test
     func providerCatalogUsesConfiguredDisplayOrder() {
         let expectedOrder: [ProviderKind] = [
             .local,
@@ -375,7 +414,7 @@ extension InferenceTests {
         """.data(using: .utf8)!
         let ollamaModels = try RemoteModelClient.decodeModels(ollamaData, for: ollamaProvider)
         let ironsmithProvider = ProviderCatalog.makeProvider(for: .ironsmith)!
-        let ironsmithData = #"{"data":[{"id":"openai.gpt-5","displayName":"GPT-5","estimatedToolCredits":157}]}"#.data(using: .utf8)!
+        let ironsmithData = #"{"data":[{"id":"openai.gpt-5","displayName":"GPT-5","estimatedToolCredits":157,"supportsImageInput":true}]}"#.data(using: .utf8)!
         let ironsmithModels = try RemoteModelClient.decodeModels(ironsmithData, for: ironsmithProvider)
 
         #expect(openAIModels.map(\.identifier) == ["gpt-test"])
@@ -390,6 +429,7 @@ extension InferenceTests {
         #expect(ironsmithModels.map(\.identifier) == ["openai.gpt-5"])
         #expect(ironsmithModels.first?.displayName == "GPT-5")
         #expect(ironsmithModels.first?.estimatedToolCredits == 157)
+        #expect(ironsmithModels.first?.supportsImageInput == true)
     }
 
     @MainActor

@@ -116,6 +116,9 @@ struct ToolLibraryPopoverView: View {
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
                 isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(.codex),
+                showsAttachmentControls: selectedModelUsesCodex,
+                supportsAttachments: selectedModelSupportsAttachments,
+                attachments: toolLibraryStore.attachments,
                 supportedReasoningEfforts: inferenceStore.selectedModelSupportedReasoningEfforts,
                 isPromptFocused: $isPromptFocused,
                 onChooseModel: {
@@ -134,6 +137,12 @@ struct ToolLibraryPopoverView: View {
                 },
                 onCancel: {
                     toolLibraryStore.cancelGeneration()
+                },
+                onAddAttachments: { urls in
+                    toolLibraryStore.addAttachments(from: urls)
+                },
+                onRemoveAttachment: { id in
+                    toolLibraryStore.removeAttachment(id: id)
                 }
             )
             .frame(maxHeight: isPromptExpanded ? .infinity : nil)
@@ -548,6 +557,21 @@ struct ToolLibraryPopoverView: View {
     private var canSubmitPrompt: Bool {
         toolLibraryStore.canSubmitPrompt && inferenceStore.selectedModel != nil
             && !shouldForceNoModels
+            && (toolLibraryStore.attachments.isEmpty || selectedModelSupportsAttachments)
+    }
+
+    private var attachmentResolutionContext: ToolCodingAgentResolutionContext {
+        toolLibraryStore.currentCodingAgentResolutionContext(in: modelContext)
+    }
+
+    private var selectedModelUsesCodex: Bool {
+        inferenceStore.selectedModelUsesCodex(resolutionContext: attachmentResolutionContext)
+    }
+
+    private var selectedModelSupportsAttachments: Bool {
+        inferenceStore.selectedModelSupportsAttachments(
+            resolutionContext: attachmentResolutionContext
+        )
     }
 
     private var composerModelPickerTitle: String {

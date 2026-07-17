@@ -22,6 +22,14 @@ private enum ToolLibraryGenerationError: LocalizedError {
     }
 }
 
+private enum ToolLibraryAttachmentError: LocalizedError {
+    case unsupportedSelection
+
+    var errorDescription: String? {
+        ToolAttachmentSupport.unavailableMessage
+    }
+}
+
 private enum ToolLibraryRenameError: LocalizedError {
     case appBundleAlreadyExists(String)
 
@@ -54,6 +62,7 @@ final class ToolLibraryStore {
     var menuBarSystemImage = ToolMenuBarSymbol.fallback
     var sandboxPermissions = GeneratedAppSandboxPermissions.default
     var resourcePermissions = GeneratedAppResourcePermissions.none
+    private(set) var attachments: [ToolPromptAttachment] = []
     private(set) var launchingToolID: UUID?
     private(set) var runningToolIDs = Set<UUID>()
     var exportingToolID: UUID?
@@ -97,6 +106,18 @@ final class ToolLibraryStore {
 
     var hasSelectedTool: Bool {
         selectedToolID != nil
+    }
+
+    func addAttachments(from urls: [URL]) {
+        do {
+            attachments = try ToolPromptAttachmentLoader.load(urls: urls, existing: attachments)
+        } catch {
+            presentError(error.localizedDescription)
+        }
+    }
+
+    func removeAttachment(id: UUID) {
+        attachments.removeAll { $0.id == id }
     }
 
     func toggleSelection(for tool: Tool, defaultSettings: ToolGenerationSettings = .default) {
@@ -419,6 +440,7 @@ final class ToolLibraryStore {
         let submittedSettings = submittedGenerationSettings(
             defaultSettings: Self.defaultGenerationSettings(from: inferenceStore.generationPreferences)
         )
+        let submittedAttachments = attachments
         var activeTool: Tool?
         isGenerating = true
         generationStopWasRequested = false
@@ -439,6 +461,12 @@ final class ToolLibraryStore {
                 )
             )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
+            guard
+                submittedAttachments.isEmpty
+                    || languageModelContext.codingAgentSupportsImageInput
+            else {
+                throw ToolLibraryAttachmentError.unsupportedSelection
+            }
             if let selectedTool {
                 setActiveCodingAgent(activeCodingAgent, for: selectedTool)
                 markToolGenerating(
@@ -467,6 +495,7 @@ final class ToolLibraryStore {
                     settings: submittedSettings,
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
+                    attachments: submittedAttachments,
                     lifecycle: lifecycle
                 )
             )
@@ -482,6 +511,7 @@ final class ToolLibraryStore {
                 await notifyGenerationFinished(completedTool)
             }
             prompt = Self.defaultPrompt
+            attachments = []
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
@@ -779,6 +809,9 @@ final class ToolLibraryStore {
                 )
             )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
+            guard attachments.isEmpty || languageModelContext.codingAgentSupportsImageInput else {
+                throw ToolLibraryAttachmentError.unsupportedSelection
+            }
             setActiveCodingAgent(activeCodingAgent, for: tool)
             let settings = tool.generationSettings(
                 defaults: Self.defaultGenerationSettings(from: inferenceStore.generationPreferences)
@@ -798,6 +831,7 @@ final class ToolLibraryStore {
                     settings: settings,
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
+                    attachments: attachments,
                     lifecycle: lifecycle
                 )
             )
@@ -806,6 +840,7 @@ final class ToolLibraryStore {
             if shouldNotifyGenerationTerminalEvent {
                 await notifyGenerationFinished(tool)
             }
+            attachments = []
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
@@ -1104,6 +1139,16 @@ final class ToolLibraryStore {
         return ToolCodingAgentResolutionContext(
             generationMode: generationMode,
             existingSourceLineCount: lineCount
+        )
+    }
+
+    func currentCodingAgentResolutionContext(in modelContext: ModelContext)
+        -> ToolCodingAgentResolutionContext
+    {
+        let selectedTool = try? fetchSelectedTool(in: modelContext)
+        return codingAgentResolutionContext(
+            for: selectedTool,
+            generationMode: selectedTool == nil ? .create : .edit
         )
     }
 

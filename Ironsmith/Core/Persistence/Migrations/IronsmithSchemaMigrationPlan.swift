@@ -25,6 +25,7 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
             IronsmithSchemaV2.self,
             IronsmithSchemaV3.self,
             IronsmithSchemaV4.self,
+            IronsmithSchemaV5.self,
         ]
     }
 
@@ -123,6 +124,10 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
                     }
                     try context.save()
                 }
+            ),
+            .lightweight(
+                fromVersion: IronsmithSchemaV4.self,
+                toVersion: IronsmithSchemaV5.self
             ),
         ]
     }

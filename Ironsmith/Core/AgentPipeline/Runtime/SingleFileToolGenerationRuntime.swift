@@ -572,7 +572,9 @@ struct SingleFileToolGenerationRuntime {
             userPrompt: userPrompt,
             modelIdentifier: context.codingAgentModelIdentifier,
             reasoningEffort: context.reasoningEffort,
-            authentication: authentication
+            authentication: authentication,
+            attachments: context.attachments,
+            supportsImageInput: context.codingAgentSupportsImageInput
         ) { event in
             await Self.handleCodexAgentEvent(event, lifecycle: lifecycle)
         }

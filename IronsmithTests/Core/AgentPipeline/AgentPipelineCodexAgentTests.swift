@@ -158,6 +158,76 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func codexAgentClientStagesAttachmentsAndPassesImagesToExec() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory, withIntermediateDirectories: true)
+
+        let imageData = Data("image bytes".utf8)
+        let fileData = Data("reference notes".utf8)
+        let capture = CodexAgentCLICapture()
+        let cliClient = CodexCLIClient(
+            run: { _ in CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1) },
+            runStreaming: { arguments, environment, onStdoutLine, _ in
+                await capture.record(arguments: arguments, environment: environment)
+                let imageFlag = try #require(arguments.firstIndex(of: "--image"))
+                let imageURL = URL(fileURLWithPath: arguments[imageFlag + 1])
+                #expect(try Data(contentsOf: imageURL) == imageData)
+                let prompt = try #require(arguments.last)
+                #expect(prompt.contains("reference.txt"))
+                #expect(prompt.contains("Treat these files as read-only context"))
+                await onStdoutLine(#"{"type":"thread.started","thread_id":"thread-images"}"#)
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured,
+            temporaryDirectory: temporaryDirectory
+        )
+
+        let result = try await client.run(
+            CodexAgentRequest(
+                packageRootURL: packageRoot,
+                executableName: "Demo",
+                displayName: "Demo",
+                appKind: .window,
+                sandboxEnabled: true,
+                userPrompt: "Build from references",
+                modelIdentifier: "gpt-5.5",
+                authentication: .apiKey("sk-test"),
+                attachments: [
+                    ToolPromptAttachment(
+                        fileName: "reference.png",
+                        kind: .image,
+                        mediaType: "image/png",
+                        data: imageData
+                    ),
+                    ToolPromptAttachment(
+                        fileName: "reference.txt",
+                        kind: .file,
+                        mediaType: "text/plain",
+                        data: fileData
+                    ),
+                ]
+            )
+        )
+
+        let arguments = try #require(await capture.arguments)
+        #expect(arguments.contains("--add-dir"))
+        #expect(arguments.filter { $0 == "--image" }.count == 1)
+        let imageFlag = try #require(arguments.firstIndex(of: "--image"))
+        #expect(arguments[imageFlag + 2] == "--")
+        #expect(arguments.last?.contains("Build from references") == true)
+        #expect(try CodexAgentTranscriptReader.metadata(for: result.transcriptURL).containsImageContext)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: temporaryDirectory.path).isEmpty)
+    }
+
+    @Test
     func codexAgentClientConfiguresCustomResponsesProvider() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -627,6 +697,64 @@ extension AgentPipelineTests {
 
         #expect(snapshot == .empty)
         #expect(!CodexAgentTranscriptReader.hasTranscript(for: packageRoot))
+    }
+
+    @Test
+    func codexAgentClientDoesNotResumeImageSessionWithUnsupportedModel() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        let transcriptDirectory = CodexAgentTranscriptReader.transcriptDirectoryURL(for: packageRoot)
+        try FileManager.default.createDirectory(
+            at: transcriptDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory, withIntermediateDirectories: true)
+        let imageTranscript = transcriptDirectory.appendingPathComponent("agent-image.jsonl")
+        try #"{"type":"thread.started","thread_id":"image-thread"}"#
+            .write(to: imageTranscript, atomically: true, encoding: .utf8)
+        try CodexAgentTranscriptReader.writeMetadata(
+            CodexAgentSessionMetadata(
+                providerIdentifier: "openai-api",
+                toolCompatibility: .openAINative,
+                transcriptFileName: imageTranscript.lastPathComponent,
+                containsImageContext: true
+            ),
+            for: imageTranscript
+        )
+
+        let capture = CodexAgentCLICapture()
+        let cliClient = CodexCLIClient(
+            run: { _ in CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1) },
+            runStreaming: { arguments, environment, onStdoutLine, _ in
+                await capture.record(arguments: arguments, environment: environment)
+                await onStdoutLine(#"{"type":"thread.started","thread_id":"text-thread"}"#)
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured,
+            temporaryDirectory: temporaryDirectory
+        )
+        let request = CodexAgentRequest(
+            packageRootURL: packageRoot,
+            executableName: "Demo",
+            displayName: "Demo",
+            appKind: .window,
+            sandboxEnabled: true,
+            userPrompt: "Continue",
+            modelIdentifier: "gpt-5.5",
+            authentication: .apiKey("sk-test"),
+            supportsImageInput: false
+        )
+
+        let result = try await client.run(request)
+        let arguments = try #require(await capture.arguments)
+        let metadata = try CodexAgentTranscriptReader.metadata(for: result.transcriptURL)
+        #expect(!arguments.contains("resume"))
+        #expect(!arguments.contains("image-thread"))
+        #expect(!metadata.containsImageContext)
     }
 
     @Test

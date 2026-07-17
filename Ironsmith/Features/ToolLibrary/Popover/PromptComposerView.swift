@@ -5,6 +5,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PromptComposerView: View {
     @Binding var prompt: String
@@ -22,12 +23,18 @@ struct PromptComposerView: View {
     let isSubmitEnabled: Bool
     let isSubmitting: Bool
     let isCodexAgentSupported: Bool
+    let showsAttachmentControls: Bool
+    let supportsAttachments: Bool
+    let attachments: [ToolPromptAttachment]
     let supportedReasoningEfforts: Set<ToolReasoningEffort>
     let isPromptFocused: FocusState<Bool>.Binding
     let onChooseModel: () -> Void
     let onSubmit: () -> Void
     let onCancel: () -> Void
+    let onAddAttachments: ([URL]) -> Void
+    let onRemoveAttachment: (UUID) -> Void
     @State private var pendingPermission: GeneratedAppResourcePermission?
+    @State private var isShowingFileImporter = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -69,6 +76,14 @@ struct PromptComposerView: View {
             }
         } message: {
             Text(pendingPermission?.enablementWarningMessage ?? "")
+        }
+        .fileImporter(
+            isPresented: $isShowingFileImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            guard case .success(let urls) = result else { return }
+            onAddAttachments(urls)
         }
     }
 
@@ -114,12 +129,84 @@ struct PromptComposerView: View {
 
     private var promptAccessoryBar: some View {
         HStack(spacing: 8) {
-            Spacer()
+            Spacer(minLength: 0)
+            if showsAttachmentControls || !attachments.isEmpty {
+                attachmentButton
+                ForEach(attachments) { attachment in
+                    attachmentPreview(attachment)
+                }
+                if !attachments.isEmpty, !supportsAttachments {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .help(ToolAttachmentSupport.unavailableMessage)
+                        .accessibilityLabel(ToolAttachmentSupport.unavailableMessage)
+                }
+            }
             expansionButton
         }
         .padding(.horizontal, 8)
         .padding(.bottom, PromptEditorLayout.accessoryBarBottomPadding)
         .frame(height: PromptEditorLayout.accessoryBarHeight, alignment: .top)
+    }
+
+    private var attachmentButton: some View {
+        Button {
+            isShowingFileImporter = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .disabled(
+            !supportsAttachments || attachments.count >= ToolPromptAttachmentLoader.maximumAttachmentCount
+        )
+        .help(attachmentButtonHelp)
+        .accessibilityLabel("Add attachments")
+        .accessibilityIdentifier("prompt-attachment-button")
+    }
+
+    private var attachmentButtonHelp: String {
+        if !supportsAttachments { return ToolAttachmentSupport.unavailableMessage }
+        if attachments.count >= ToolPromptAttachmentLoader.maximumAttachmentCount {
+            return "You can attach up to three files."
+        }
+        return "Add files"
+    }
+
+    @ViewBuilder
+    private func attachmentPreview(_ attachment: ToolPromptAttachment) -> some View {
+        Button {
+            onRemoveAttachment(attachment.id)
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if attachment.isImage, let image = NSImage(data: attachment.data) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Image(systemName: "doc.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 24, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 9))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, .secondary)
+                    .offset(x: 4, y: -4)
+            }
+            .frame(width: 28, height: 24)
+        }
+        .buttonStyle(.plain)
+        .help("Remove \(attachment.fileName)")
+        .accessibilityLabel("Remove \(attachment.fileName)")
     }
 
     private var expansionButton: some View {
@@ -454,11 +541,16 @@ private struct PromptComposerPreview: View {
             isSubmitEnabled: isEditing,
             isSubmitting: false,
             isCodexAgentSupported: true,
+            showsAttachmentControls: true,
+            supportsAttachments: true,
+            attachments: [],
             supportedReasoningEfforts: [.low, .medium, .high],
             isPromptFocused: $isPromptFocused,
             onChooseModel: {},
             onSubmit: {},
-            onCancel: {}
+            onCancel: {},
+            onAddAttachments: { _ in },
+            onRemoveAttachment: { _ in }
         )
         .padding()
         .frame(width: 360, height: 440)

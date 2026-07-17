@@ -11,6 +11,46 @@ nonisolated struct CodexAgentSessionMetadata: Codable, Equatable, Sendable {
     let providerIdentifier: String
     let toolCompatibility: CodexAgentToolCompatibility
     let transcriptFileName: String
+    let containsImageContext: Bool
+
+    init(
+        providerIdentifier: String,
+        toolCompatibility: CodexAgentToolCompatibility,
+        transcriptFileName: String,
+        containsImageContext: Bool = false
+    ) {
+        self.providerIdentifier = providerIdentifier
+        self.toolCompatibility = toolCompatibility
+        self.transcriptFileName = transcriptFileName
+        self.containsImageContext = containsImageContext
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case providerIdentifier
+        case toolCompatibility
+        case transcriptFileName
+        case containsImageContext
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        providerIdentifier = try container.decode(String.self, forKey: .providerIdentifier)
+        toolCompatibility = try container.decode(
+            CodexAgentToolCompatibility.self,
+            forKey: .toolCompatibility
+        )
+        transcriptFileName = try container.decode(String.self, forKey: .transcriptFileName)
+        containsImageContext =
+            try container.decodeIfPresent(
+                Bool.self,
+                forKey: .containsImageContext
+            ) ?? false
+    }
+}
+
+nonisolated struct CodexAgentSession: Equatable, Sendable {
+    let threadID: String
+    let containsImageContext: Bool
 }
 
 nonisolated struct CodexAgentTranscriptEntry: Equatable, Identifiable, Sendable {
@@ -102,6 +142,20 @@ enum CodexAgentTranscriptReader {
         toolCompatibility: CodexAgentToolCompatibility,
         fileManager: FileManager = .default
     ) -> String? {
+        latestSession(
+            for: packageRootURL,
+            providerIdentifier: providerIdentifier,
+            toolCompatibility: toolCompatibility,
+            fileManager: fileManager
+        )?.threadID
+    }
+
+    nonisolated static func latestSession(
+        for packageRootURL: URL,
+        providerIdentifier: String,
+        toolCompatibility: CodexAgentToolCompatibility,
+        fileManager: FileManager = .default
+    ) -> CodexAgentSession? {
         for transcriptURL in transcriptURLsByNewest(
             for: packageRootURL,
             fileManager: fileManager
@@ -115,7 +169,10 @@ enum CodexAgentTranscriptReader {
             }
 
             if let resolvedThreadID = try? threadID(from: transcriptURL) {
-                return resolvedThreadID
+                return CodexAgentSession(
+                    threadID: resolvedThreadID,
+                    containsImageContext: metadata.containsImageContext
+                )
             }
         }
         return nil

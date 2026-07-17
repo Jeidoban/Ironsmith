@@ -68,6 +68,7 @@ nonisolated struct ToolGenerationRequest {
     let settings: ToolGenerationSettings
     let languageModelContext: AgentLanguageModelContext
     let imageGenerationProvider: ToolImageGenerationProvider
+    let attachments: [ToolPromptAttachment]
     let lifecycle: ToolGenerationLifecycle
 
     init(
@@ -76,6 +77,7 @@ nonisolated struct ToolGenerationRequest {
         settings: ToolGenerationSettings,
         languageModelContext: AgentLanguageModelContext,
         imageGenerationProvider: ToolImageGenerationProvider = .disabled,
+        attachments: [ToolPromptAttachment] = [],
         lifecycle: ToolGenerationLifecycle = .noop
     ) {
         self.prompt = prompt
@@ -83,6 +85,7 @@ nonisolated struct ToolGenerationRequest {
         self.settings = settings
         self.languageModelContext = languageModelContext
         self.imageGenerationProvider = imageGenerationProvider
+        self.attachments = attachments
         self.lifecycle = lifecycle
     }
 }
@@ -116,7 +119,8 @@ struct ToolGenerationClient {
             { request in
                 let context = ToolGenerationRuntimeContext(
                     languageModelContext: request.languageModelContext,
-                    dependencies: dependencies
+                    dependencies: dependencies,
+                    attachments: request.attachments
                 )
                 let runtime = SingleFileToolGenerationRuntime(context: context)
                 return try await runtime.generateTool(

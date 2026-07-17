@@ -230,6 +230,8 @@ struct ToolGenerationRuntimeContext {
     let codingAgentModelIdentifier: String
     let codexAgentAuthentication: CodexAgentAuthentication?
     let reasoningEffort: ToolReasoningEffort
+    let attachments: [ToolPromptAttachment]
+    let codingAgentSupportsImageInput: Bool
 
     var languageModel: any LanguageModel {
         languageModelInvoker.languageModel
@@ -253,7 +255,8 @@ struct ToolGenerationRuntimeContext {
 
     init(
         languageModelContext: AgentLanguageModelContext,
-        dependencies: ToolGenerationRuntimeDependencies
+        dependencies: ToolGenerationRuntimeDependencies,
+        attachments: [ToolPromptAttachment] = []
     ) {
         self.languageModelInvoker = languageModelContext.languageModelInvoker
         self.pipelineConfiguration = languageModelContext.pipelineConfiguration
@@ -273,6 +276,8 @@ struct ToolGenerationRuntimeContext {
         self.codingAgentModelIdentifier = languageModelContext.codingAgentModelIdentifier
         self.codexAgentAuthentication = languageModelContext.codexAgentAuthentication
         self.reasoningEffort = languageModelContext.reasoningEffort
+        self.attachments = attachments
+        self.codingAgentSupportsImageInput = languageModelContext.codingAgentSupportsImageInput
     }
 
     func configuration(for stage: ToolGenerationStage) -> ToolGenerationStageConfiguration {
