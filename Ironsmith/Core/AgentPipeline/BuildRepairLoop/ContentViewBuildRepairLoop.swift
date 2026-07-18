@@ -101,7 +101,7 @@ struct ContentViewBuildRepairLoop {
 
     enum CandidateRepairResult {
         case finished
-        case regenerate(ModelRepairRegenerationReason)
+        case regenerate(ModelRepairRegenerationReason, BuildState)
         case failed(BuildState)
     }
 
@@ -278,7 +278,9 @@ struct ContentViewBuildRepairLoop {
                     ) {
                     case .finished:
                         return
-                    case .regenerate(let reason):
+                    case .regenerate(let reason, let stalledState):
+                        repairState = stalledState
+                        lastFailedState = stalledState
                         guard !attemptedDiagnosticWholeFileRewrite,
                               reason.allowsDiagnosticWholeFileRewrite,
                               let diagnosticRewrite
@@ -290,7 +292,7 @@ struct ContentViewBuildRepairLoop {
                         attemptedDiagnosticWholeFileRewrite = true
                         switch try await runDiagnosticWholeFileRewrite(
                             diagnosticRewrite,
-                            startingFrom: repairState,
+                            startingFrom: stalledState,
                             trigger: reason
                         ) {
                         case .finished:

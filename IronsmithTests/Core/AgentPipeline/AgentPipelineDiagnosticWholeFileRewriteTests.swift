@@ -112,6 +112,68 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func sparkDiagnosticRewriteReceivesLatestRepairedCandidate() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let executableName = "ProgressiveDiagnosticRewriteTool"
+        let brokenSource = Self.sourceWithMissingMembers(["missing1", "missing2"])
+        let partiallyRepairedSourceLine = "            Text(\"Fixed first error\")"
+        let firstRepair = """
+        @@
+        -            Text("Broken 1").missing1()
+        +\(partiallyRepairedSourceLine)
+        """
+        let fixedSource = Self.simpleContentViewSource(text: "Fixed from latest candidate")
+        let responses = LanguageModelResponseQueue([
+            brokenSource,
+            firstRepair,
+            "not a patch",
+            "still not a patch",
+            fixedSource,
+        ])
+        let prompts = PromptCapture()
+        let builds = DistinctUnsupportedModifierBuilds(executableName: executableName)
+        let formats = FormatCapture()
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await prompts.record(prompt)
+                return try await responses.next()
+            },
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: true
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(
+                    displayName: "Progressive Diagnostic Rewrite Tool",
+                    iconPrompt: ""
+                )
+            }
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Build a progressive diagnostic rewrite tool",
+            settings: .default
+        )
+
+        let source = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        let rewritePrompt = try #require(await prompts.prompts.first {
+            $0.contains("Narrow compiler repair stalled on this app.")
+        })
+        #expect(source.contains("Fixed from latest candidate"))
+        #expect(rewritePrompt.contains(partiallyRepairedSourceLine))
+        #expect(rewritePrompt.contains("no member 'missing2'"))
+        #expect(!rewritePrompt.contains("no member 'missing1'"))
+        #expect(await responses.count == 5)
+        #expect(await builds.count == 3)
+        #expect(await formats.formattedURLs.count == 2)
+    }
+
+    @MainActor
+    @Test
     func regressedDiagnosticRewriteGetsFreshDiffRepairConversation() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }

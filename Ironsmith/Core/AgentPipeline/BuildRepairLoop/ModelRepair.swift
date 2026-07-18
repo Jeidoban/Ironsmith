@@ -65,7 +65,7 @@ extension ContentViewBuildRepairLoop {
                     \(AgentDiagnosticsLog.renderError(error, limit: 1_500))
                     """
                 )
-                return .regenerate(.contextWindowExceeded)
+                return .regenerate(.contextWindowExceeded, state)
             } catch {
                 guard let skippedRepairReason = skippedRepairReason(for: error) else {
                     throw error
@@ -84,7 +84,7 @@ extension ContentViewBuildRepairLoop {
 
                 if context.pipelineConfiguration.regeneratesAfterModelRepairStall,
                    invalidAttempts >= ToolGenerationRepairPolicy.invalidPatchAttemptsBeforeStall {
-                    return .regenerate(.repeatedSkippedRepair(skippedRepairReason))
+                    return .regenerate(.repeatedSkippedRepair(skippedRepairReason), state)
                 }
                 continue
             }
@@ -131,7 +131,7 @@ extension ContentViewBuildRepairLoop {
                     let noProgressAttempts = increment(&acceptedNoProgressAttemptsBySignature, for: noProgressSignature)
                     if context.pipelineConfiguration.regeneratesAfterModelRepairStall,
                        noProgressAttempts >= 3 {
-                        return .regenerate(.repeatedNoProgressPatches)
+                        return .regenerate(.repeatedNoProgressPatches, state)
                     }
                 } else {
                     acceptedNoProgressAttemptsBySignature.removeAll()
@@ -145,7 +145,7 @@ extension ContentViewBuildRepairLoop {
                 let rolledBackAttempts = increment(&failedCandidateAttemptsBySignature, for: failedCandidateSignature)
                 if context.pipelineConfiguration.regeneratesAfterModelRepairStall,
                    rolledBackAttempts >= ToolGenerationRepairPolicy.invalidPatchAttemptsBeforeStall {
-                    return .regenerate(.repeatedRolledBackPatches)
+                    return .regenerate(.repeatedRolledBackPatches, state)
                 }
             }
         }
@@ -162,7 +162,7 @@ extension ContentViewBuildRepairLoop {
             """
         )
         if context.pipelineConfiguration.regeneratesAfterModelRepairStall {
-            return .regenerate(.budgetExhausted(repairBudget))
+            return .regenerate(.budgetExhausted(repairBudget), state)
         }
         throw ToolGenerationError.stoppedToSaveTokens(
             "Stopped after \(repairBudget) repair attempts preserve tokens. Continue to keep repairing from current source."

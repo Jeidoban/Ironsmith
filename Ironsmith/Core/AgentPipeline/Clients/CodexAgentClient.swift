@@ -657,9 +657,9 @@ extension CodexAgentClient {
             User-provided attachments:
             \(attachments.map { "- \($0.fileName): \($0.url.path)" }.joined(separator: "\n"))
 
-            Treat these files strictly as read-only context and not app assets. 
+            Treat these files strictly as read-only context and not app assets.
             Inspect the relevant files when needed. Do not copy attachment binaries or any image data into the generated app.
-            These are temporary files that will be cleaned up after this session, so do not reference them in the generated app. 
+            These are temporary files that will be cleaned up after this session, so do not reference them in the generated app.
             """
         return """
             You are Codex running inside Ironsmith.

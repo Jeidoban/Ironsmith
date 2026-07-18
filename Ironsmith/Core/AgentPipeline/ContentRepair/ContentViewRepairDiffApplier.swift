@@ -108,6 +108,37 @@ extension ContentViewRepairSupport {
         }
     }
 
+    private enum UnifiedDiffLine: Equatable {
+        case context(String)
+        case removal(String)
+        case addition(String)
+
+        var existingLine: ExistingDiffLine? {
+            switch self {
+            case .context(let content):
+                return ExistingDiffLine(content: content, isRemoval: false)
+            case .removal(let content):
+                return ExistingDiffLine(content: content, isRemoval: true)
+            case .addition:
+                return nil
+            }
+        }
+
+        var proposedLine: String? {
+            switch self {
+            case .context(let content), .addition(let content):
+                return content
+            case .removal:
+                return nil
+            }
+        }
+    }
+
+    private struct ExistingDiffLine: Equatable {
+        let content: String
+        let isRemoval: Bool
+    }
+
     private static func parseUnifiedDiff(_ diff: String) throws -> [UnifiedDiffHunk] {
         let lines = diff.components(separatedBy: .newlines)
         try validateDiffFileMetadata(in: lines)
@@ -169,34 +200,9 @@ extension ContentViewRepairSupport {
     }
 
     private static func apply(_ hunk: UnifiedDiffHunk, to source: String) throws -> String {
-        var oldLines: [String] = []
-        var newLines: [String] = []
-
-        for line in hunk.lines {
-            if line == #"\ No newline at end of file"# {
-                continue
-            }
-            guard let marker = line.first else {
-                oldLines.append("")
-                newLines.append("")
-                continue
-            }
-
-            let content = String(line.dropFirst())
-            switch marker {
-            case " ":
-                oldLines.append(content)
-                newLines.append(content)
-            case "-":
-                oldLines.append(content)
-            case "+":
-                newLines.append(content)
-            default:
-                // Small models sometimes omit the leading context-space marker.
-                oldLines.append(line)
-                newLines.append(line)
-            }
-        }
+        let diffLines = hunk.lines.compactMap(parsedDiffLine)
+        let oldLines = diffLines.compactMap(\.existingLine)
+        let proposedNewLines = diffLines.compactMap(\.proposedLine)
 
         guard !oldLines.isEmpty else {
             throw invalidDiff(
@@ -204,7 +210,7 @@ extension ContentViewRepairSupport {
                 reason: "diff hunk needs at least one existing context or removed line"
             )
         }
-        guard oldLines != newLines else {
+        guard oldLines.map(\.content) != proposedNewLines else {
             throw invalidDiff(kind: .noChanges, reason: "diff hunk does not change source")
         }
 
@@ -217,19 +223,36 @@ extension ContentViewRepairSupport {
             )
         }
 
+        var replacementLines: [String] = []
+        var sourceIndex = range.lowerBound
+        for line in diffLines {
+            switch line {
+            case .context:
+                // Matching may tolerate imperfect context from a small model. Keep
+                // the authoritative source line instead of writing that stale context.
+                replacementLines.append(sourceLines[sourceIndex])
+                sourceIndex += 1
+            case .removal:
+                sourceIndex += 1
+            case .addition(let content):
+                replacementLines.append(content)
+            }
+        }
+
         var updatedLines = sourceLines
-        updatedLines.replaceSubrange(range, with: newLines)
+        updatedLines.replaceSubrange(range, with: replacementLines)
         return updatedLines.joined(separator: "\n")
     }
 
     private static func matchingDiffRanges(
-        for oldLines: [String],
+        for oldLines: [ExistingDiffLine],
         in sourceLines: [String]
     ) -> [ClosedRange<Int>] {
-        let exact = diffLineBlockMatches(oldLines, in: sourceLines) { $0 == $1 }
+        let oldContents = oldLines.map(\.content)
+        let exact = diffLineBlockMatches(oldContents, in: sourceLines) { $0 == $1 }
         if !exact.isEmpty { return exact }
 
-        let normalizedOldLines = oldLines.map(normalizedDiffLine)
+        let normalizedOldLines = oldContents.map(normalizedDiffLine)
         let normalized = diffLineBlockMatches(normalizedOldLines, in: sourceLines) {
             normalizedDiffLine($0) == $1
         }
@@ -237,17 +260,17 @@ extension ContentViewRepairSupport {
 
         guard oldLines.count >= 4 else { return [] }
         let maximumMismatches = max(1, min(2, oldLines.count / 4))
-        let minimumMatches = oldLines.count - maximumMismatches
-        return diffLineBlockMatches(normalizedOldLines, in: sourceLines) { candidate, target in
-            normalizedDiffLine(candidate) == target
-        } threshold: { $0 >= minimumMatches }
+        return fuzzyDiffLineBlockMatches(
+            oldLines,
+            in: sourceLines,
+            maximumContextMismatches: maximumMismatches
+        )
     }
 
     private static func diffLineBlockMatches(
         _ targetLines: [String],
         in sourceLines: [String],
-        matchesLine: (String, String) -> Bool,
-        threshold: ((Int) -> Bool)? = nil
+        matchesLine: (String, String) -> Bool
     ) -> [ClosedRange<Int>] {
         guard !targetLines.isEmpty, targetLines.count <= sourceLines.count else { return [] }
         let lastStart = sourceLines.count - targetLines.count
@@ -255,8 +278,53 @@ extension ContentViewRepairSupport {
             let end = start + targetLines.count - 1
             let candidate = sourceLines[start...end]
             let matchCount = zip(candidate, targetLines).filter(matchesLine).count
-            let isMatch = threshold?(matchCount) ?? (matchCount == targetLines.count)
-            return isMatch ? start...end : nil
+            return matchCount == targetLines.count ? start...end : nil
+        }
+    }
+
+    private static func fuzzyDiffLineBlockMatches(
+        _ targetLines: [ExistingDiffLine],
+        in sourceLines: [String],
+        maximumContextMismatches: Int
+    ) -> [ClosedRange<Int>] {
+        guard !targetLines.isEmpty, targetLines.count <= sourceLines.count else { return [] }
+        let lastStart = sourceLines.count - targetLines.count
+        return (0...lastStart).compactMap { start in
+            let end = start + targetLines.count - 1
+            let candidate = sourceLines[start...end]
+            var contextMismatchCount = 0
+
+            for (candidateLine, targetLine) in zip(candidate, targetLines) {
+                if normalizedDiffLine(candidateLine) == normalizedDiffLine(targetLine.content) {
+                    continue
+                }
+                guard !targetLine.isRemoval else { return nil }
+                contextMismatchCount += 1
+                guard contextMismatchCount <= maximumContextMismatches else { return nil }
+            }
+            return start...end
+        }
+    }
+
+    private static func parsedDiffLine(_ line: String) -> UnifiedDiffLine? {
+        if line == #"\ No newline at end of file"# {
+            return nil
+        }
+        guard let marker = line.first else {
+            return .context("")
+        }
+
+        let content = String(line.dropFirst())
+        switch marker {
+        case " ":
+            return .context(content)
+        case "-":
+            return .removal(content)
+        case "+":
+            return .addition(content)
+        default:
+            // Small models sometimes omit the leading context-space marker.
+            return .context(line)
         }
     }
 

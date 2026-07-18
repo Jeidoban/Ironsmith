@@ -200,7 +200,7 @@ extension AgentPipelineTests {
                 #expect(try Data(contentsOf: imageURL) == imageData)
                 let prompt = try #require(arguments.last)
                 #expect(prompt.contains("reference.txt"))
-                #expect(prompt.contains("Treat these files as read-only context"))
+                #expect(prompt.contains("strictly as read-only context"))
                 await onStdoutLine(#"{"type":"thread.started","thread_id":"thread-images"}"#)
                 return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
             }
