@@ -6,6 +6,7 @@ struct AgentFileClient: Sendable {
     var readString: @Sendable (URL) throws -> String
     var writeString: @Sendable (String, URL) throws -> Void
     var removeItemIfExists: @Sendable (URL) throws -> Void
+    var moveItem: @Sendable (_ source: URL, _ destination: URL) throws -> Void
 
     nonisolated static let live = AgentFileClient(
         fileExists: { url in
@@ -27,6 +28,9 @@ struct AgentFileClient: Sendable {
         removeItemIfExists: { url in
             guard FileManager.default.fileExists(atPath: url.path) else { return }
             try FileManager.default.removeItem(at: url)
+        },
+        moveItem: { source, destination in
+            try FileManager.default.moveItem(at: source, to: destination)
         }
     )
 }

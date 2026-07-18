@@ -153,6 +153,7 @@ struct ToolGenerationRuntimeDependencies {
     let promptRefinementClient: ToolPromptRefinementClient
     let versionBackupClient: ToolVersionBackupClient
     let packageMaterializer: ToolPackageMaterializer
+    let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
 
     init(
@@ -166,6 +167,7 @@ struct ToolGenerationRuntimeDependencies {
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         versionBackupClient: ToolVersionBackupClient,
         packageMaterializer: ToolPackageMaterializer? = nil,
+        attachmentStorage: ToolPromptAttachmentStorage = .live,
         codexAgentClient: CodexAgentClient = .unconfigured
     ) {
         self.toolsDirectoryURL = toolsDirectoryURL
@@ -178,6 +180,7 @@ struct ToolGenerationRuntimeDependencies {
         self.promptRefinementClient = promptRefinementClient
         self.versionBackupClient = versionBackupClient
         self.packageMaterializer = packageMaterializer ?? ToolPackageMaterializer(fileClient: fileClient)
+        self.attachmentStorage = attachmentStorage
         self.codexAgentClient = codexAgentClient
     }
 
@@ -193,6 +196,7 @@ struct ToolGenerationRuntimeDependencies {
         promptRefinementClient: ToolPromptRefinementClient? = nil,
         versionBackupClient: ToolVersionBackupClient = .live,
         packageMaterializer: ToolPackageMaterializer? = nil,
+        attachmentStorage: ToolPromptAttachmentStorage = .live,
         codexAgentClient: CodexAgentClient = .live()
     ) -> Self {
         Self(
@@ -206,6 +210,7 @@ struct ToolGenerationRuntimeDependencies {
             promptRefinementClient: promptRefinementClient ?? .live(),
             versionBackupClient: versionBackupClient,
             packageMaterializer: packageMaterializer,
+            attachmentStorage: attachmentStorage,
             codexAgentClient: codexAgentClient
         )
     }
@@ -226,11 +231,11 @@ struct ToolGenerationRuntimeContext {
     let promptRefinementEnabled: Bool
     let versionBackupClient: ToolVersionBackupClient
     let packageMaterializer: ToolPackageMaterializer
+    let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
     let codingAgentModelIdentifier: String
     let codexAgentAuthentication: CodexAgentAuthentication?
     let reasoningEffort: ToolReasoningEffort
-    let attachments: [ToolPromptAttachment]
     let codingAgentSupportsImageInput: Bool
 
     var languageModel: any LanguageModel {
@@ -255,8 +260,7 @@ struct ToolGenerationRuntimeContext {
 
     init(
         languageModelContext: AgentLanguageModelContext,
-        dependencies: ToolGenerationRuntimeDependencies,
-        attachments: [ToolPromptAttachment] = []
+        dependencies: ToolGenerationRuntimeDependencies
     ) {
         self.languageModelInvoker = languageModelContext.languageModelInvoker
         self.pipelineConfiguration = languageModelContext.pipelineConfiguration
@@ -272,11 +276,11 @@ struct ToolGenerationRuntimeContext {
         self.promptRefinementEnabled = languageModelContext.promptRefinementEnabled
         self.versionBackupClient = dependencies.versionBackupClient
         self.packageMaterializer = dependencies.packageMaterializer
+        self.attachmentStorage = dependencies.attachmentStorage
         self.codexAgentClient = dependencies.codexAgentClient
         self.codingAgentModelIdentifier = languageModelContext.codingAgentModelIdentifier
         self.codexAgentAuthentication = languageModelContext.codexAgentAuthentication
         self.reasoningEffort = languageModelContext.reasoningEffort
-        self.attachments = attachments
         self.codingAgentSupportsImageInput = languageModelContext.codingAgentSupportsImageInput
     }
 

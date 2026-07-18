@@ -28,6 +28,7 @@ struct ToolGenerationLifecycle {
         _ preparedTool: ToolGenerationPreparedTool,
         _ prompt: String
     ) async throws -> Void
+    nonisolated(unsafe) let didPersistAttachments: (_ attachmentIDs: [UUID]) async throws -> Void
     nonisolated(unsafe) let updatePendingPrompt: (_ prompt: String) async throws -> Void
     nonisolated(unsafe) let updateRepairErrorCount: (_ count: Int?) async throws -> Void
     nonisolated(unsafe) let updatePhase: (
@@ -42,6 +43,7 @@ struct ToolGenerationLifecycle {
             _ preparedTool: ToolGenerationPreparedTool,
             _ prompt: String
         ) async throws -> Void = { _, _ in },
+        didPersistAttachments: @escaping (_ attachmentIDs: [UUID]) async throws -> Void = { _ in },
         updatePendingPrompt: @escaping (_ prompt: String) async throws -> Void = { _ in },
         updateRepairErrorCount: @escaping (_ count: Int?) async throws -> Void = { _ in },
         updatePhase: @escaping (
@@ -52,6 +54,7 @@ struct ToolGenerationLifecycle {
     ) {
         self.preservesCreatedPackageOnCancellation = preservesCreatedPackageOnCancellation
         self.prepareCreatedTool = prepareCreatedTool
+        self.didPersistAttachments = didPersistAttachments
         self.updatePendingPrompt = updatePendingPrompt
         self.updateRepairErrorCount = updateRepairErrorCount
         self.updatePhase = updatePhase
@@ -119,8 +122,7 @@ struct ToolGenerationClient {
             { request in
                 let context = ToolGenerationRuntimeContext(
                     languageModelContext: request.languageModelContext,
-                    dependencies: dependencies,
-                    attachments: request.attachments
+                    dependencies: dependencies
                 )
                 let runtime = SingleFileToolGenerationRuntime(context: context)
                 return try await runtime.generateTool(
@@ -128,6 +130,7 @@ struct ToolGenerationClient {
                     existingTool: request.existingTool,
                     settings: request.settings,
                     imageGenerationProvider: request.imageGenerationProvider,
+                    attachments: request.attachments,
                     lifecycle: request.lifecycle
                 )
             },

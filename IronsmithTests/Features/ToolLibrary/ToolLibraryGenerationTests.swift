@@ -112,6 +112,10 @@ extension ToolLibraryTests {
         store.startPromptSubmission(modelContext: context, inferenceStore: inferenceStore)
 
         await gate.waitForStart()
+        let lateAttachmentURL = root.appendingPathComponent("late.txt")
+        try Data("late".utf8).write(to: lateAttachmentURL)
+        store.addAttachments(from: [lateAttachmentURL])
+        #expect(store.attachments.isEmpty)
         store.cancelGeneration()
         await gate.release()
         await Self.waitForIdle(store)
@@ -179,6 +183,77 @@ extension ToolLibraryTests {
         #expect(tool.generationMode == nil)
         #expect(tool.pendingPrompt == nil)
         #expect(store.presentedErrorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func toolLibraryResumeKeepsNewAttachmentsQueuedForNextRun() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let attachmentURL = root.appendingPathComponent("next-run.txt")
+        try Data("next run".utf8).write(to: attachmentURL)
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        let packageRoot = root.appendingPathComponent("Paused", isDirectory: true)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "Paused")
+        _ = try ToolPromptAttachmentStorage.live.replaceCurrentRun(
+            [
+                ToolPromptAttachment(
+                    fileName: "current-run.txt",
+                    kind: .file,
+                    data: Data("current".utf8)
+                )
+            ],
+            layout
+        )
+        let tool = StoredTool(
+            name: "Paused",
+            executableName: "Paused",
+            packageRootPath: packageRoot.path,
+            generationState: .stopped,
+            generationPhase: .generatingSource,
+            generationMode: .create,
+            pendingPrompt: "Continue the current run"
+        )
+        context.insert(tool)
+        try context.save()
+
+        let capture = ResumeAttachmentCapture()
+        let gate = LateGenerationCompletionGate()
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { request in
+                    await capture.record(request.attachments)
+                    await gate.startAndWaitForRelease()
+                    return ToolGenerationResult(
+                        toolName: tool.name,
+                        executableName: tool.executableName,
+                        settings: request.settings,
+                        packageRootURL: packageRoot
+                    )
+                },
+                runnerClient: ToolRunnerClient { _ in }
+            )
+        )
+        store.addAttachments(from: [attachmentURL])
+
+        store.continueGeneration(tool, modelContext: context, inferenceStore: inferenceStore)
+        await gate.waitForStart()
+        #expect(await capture.attachmentCount == 0)
+        await gate.release()
+        await Self.waitForIdle(store)
+
+        #expect(store.attachments.count == 1)
+        #expect(store.attachments.first?.fileName == "next-run.txt")
+        #expect(tool.generationState == .ready)
+        #expect(!FileManager.default.fileExists(atPath: layout.currentRunAttachmentsDirectoryURL.path))
     }
 
     @MainActor
@@ -665,6 +740,14 @@ private actor ToolGenerationNotificationCapture {
 
     func recorded() -> [ToolGenerationNotification] {
         notifications
+    }
+}
+
+private actor ResumeAttachmentCapture {
+    private(set) var attachmentCount = -1
+
+    func record(_ attachments: [ToolPromptAttachment]) {
+        attachmentCount = attachments.count
     }
 }
 

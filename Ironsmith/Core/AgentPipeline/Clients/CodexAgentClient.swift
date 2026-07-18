@@ -47,7 +47,6 @@ nonisolated struct CodexAgentRequest: Sendable {
     let modelIdentifier: String
     let reasoningEffort: ToolReasoningEffort
     let authentication: CodexAgentAuthentication
-    let attachments: [ToolPromptAttachment]
     let supportsImageInput: Bool
     let onEvent: @Sendable (CodexAgentEvent) async -> Void
 
@@ -79,7 +78,6 @@ nonisolated struct CodexAgentRequest: Sendable {
         modelIdentifier: String,
         reasoningEffort: ToolReasoningEffort = .default,
         authentication: CodexAgentAuthentication,
-        attachments: [ToolPromptAttachment] = [],
         supportsImageInput: Bool = true,
         onEvent: @escaping @Sendable (CodexAgentEvent) async -> Void = { _ in }
     ) {
@@ -92,7 +90,6 @@ nonisolated struct CodexAgentRequest: Sendable {
         self.modelIdentifier = modelIdentifier
         self.reasoningEffort = reasoningEffort
         self.authentication = authentication
-        self.attachments = attachments
         self.supportsImageInput = supportsImageInput
         self.onEvent = onEvent
     }
@@ -128,10 +125,6 @@ nonisolated struct CodexAgentSwiftBuildWorkspace: Equatable, Sendable {
         rootURL.appendingPathComponent("tmp", isDirectory: true)
     }
 
-    var attachmentsURL: URL {
-        rootURL.appendingPathComponent("attachments", isDirectory: true)
-    }
-
     var directories: [URL] {
         [
             rootURL,
@@ -140,7 +133,6 @@ nonisolated struct CodexAgentSwiftBuildWorkspace: Equatable, Sendable {
             clangModuleCacheURL,
             swiftModuleCacheURL,
             temporaryDirectoryURL,
-            attachmentsURL,
         ]
     }
 
@@ -176,35 +168,6 @@ nonisolated struct CodexAgentSwiftBuildWorkspace: Equatable, Sendable {
         }
     }
 
-    func stage(
-        _ attachments: [ToolPromptAttachment],
-        fileManager: FileManager = .default
-    ) throws -> [CodexAgentStagedAttachment] {
-        try attachments.enumerated().map { index, attachment in
-            let safeName = attachment.fileName
-                .unicodeScalars
-                .map { scalar in
-                    CharacterSet.alphanumerics.contains(scalar)
-                        || ".-_".unicodeScalars.contains(scalar) ? String(scalar) : "_"
-                }
-                .joined()
-            let fileName = "\(index + 1)-\(safeName.isEmpty ? "attachment" : safeName)"
-            let url = attachmentsURL.appendingPathComponent(fileName, isDirectory: false)
-            try attachment.data.write(to: url, options: .atomic)
-            return CodexAgentStagedAttachment(
-                fileName: fileName,
-                url: url,
-                isImage: attachment.isImage
-            )
-        }
-    }
-
-}
-
-nonisolated struct CodexAgentStagedAttachment: Equatable, Sendable {
-    let fileName: String
-    let url: URL
-    let isImage: Bool
 }
 
 nonisolated enum CodexAgentEvent: Equatable, Sendable {
@@ -494,6 +457,18 @@ nonisolated struct CodexAgentClient: Sendable {
     var run: @Sendable (CodexAgentRequest) async throws -> CodexAgentResult
 }
 
+nonisolated private enum CodexAgentAttachmentAccess {
+    case readOnly
+    case denied
+
+    var filesystemAccess: String {
+        switch self {
+        case .readOnly: "read"
+        case .denied: "deny"
+        }
+    }
+}
+
 extension CodexAgentClient {
     nonisolated private static let portableToolArguments = [
         "-c", #"web_search="disabled""#,
@@ -511,6 +486,7 @@ extension CodexAgentClient {
     nonisolated static func live(
         cliClient: CodexCLIClient = .live(),
         openAICodexAuthClient: OpenAICodexAuthClient = .live(),
+        attachmentStorage: ToolPromptAttachmentStorage = .live,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
     ) -> Self {
         Self { request in
@@ -529,12 +505,20 @@ extension CodexAgentClient {
                 providerIdentifier: request.sessionProviderIdentifier,
                 toolCompatibility: request.toolCompatibility
             )
+            let layout = ToolPackageLayout(
+                packageRootURL: request.packageRootURL,
+                executableName: request.executableName
+            )
+            let storedAttachments = try attachmentStorage.currentRun(layout)
+            let exposedAttachments = request.supportsImageInput ? storedAttachments : []
+            let storedRunContainsImages = storedAttachments.contains(where: \.isImage)
             let resumeSession = latestSession.flatMap { session in
-                session.containsImageContext && !request.supportsImageInput ? nil : session
+                !request.supportsImageInput
+                    && (session.containsImageContext || storedRunContainsImages) ? nil : session
             }
             let containsImageContext =
                 (resumeSession?.containsImageContext ?? false)
-                || request.attachments.contains(where: \.isImage)
+                || exposedAttachments.contains(where: \.isImage)
             let transcriptFile = try CodexAgentTranscriptFile(
                 packageRootURL: request.packageRootURL,
                 providerIdentifier: request.sessionProviderIdentifier,
@@ -547,7 +531,8 @@ extension CodexAgentClient {
             defer {
                 try? swiftBuildWorkspace.remove()
             }
-            let stagedAttachments = try swiftBuildWorkspace.stage(request.attachments)
+            let attachmentAccess: CodexAgentAttachmentAccess =
+                exposedAttachments.isEmpty ? .denied : .readOnly
             var environment = swiftBuildWorkspace.environment
             switch request.authentication {
             case .apiKey(let apiKey):
@@ -564,24 +549,17 @@ extension CodexAgentClient {
             }
 
             var arguments = ["exec"]
+            arguments.append(contentsOf: attachmentPermissionArguments(attachmentAccess))
             arguments.append(contentsOf: customProviderArguments)
             if request.toolCompatibility == .portable {
                 arguments.append(contentsOf: portableToolArguments)
             }
             arguments.append(contentsOf: [
                 "--json",
-                "--sandbox",
-                "workspace-write",
                 "--cd",
                 request.packageRootURL.path,
                 "--skip-git-repo-check",
             ])
-            if !stagedAttachments.isEmpty {
-                arguments.append(contentsOf: [
-                    "--add-dir",
-                    swiftBuildWorkspace.attachmentsURL.path,
-                ])
-            }
             if let model = modelArgument(from: request.modelIdentifier) {
                 arguments.append(contentsOf: ["--model", model])
             }
@@ -592,15 +570,15 @@ extension CodexAgentClient {
             }
             if let resumeSession {
                 arguments.append("resume")
-                for attachment in stagedAttachments where attachment.isImage {
+                for attachment in exposedAttachments where attachment.isImage {
                     arguments.append(contentsOf: ["--image", attachment.url.path])
                 }
                 arguments.append(resumeSession.threadID)
             } else {
-                for attachment in stagedAttachments where attachment.isImage {
+                for attachment in exposedAttachments where attachment.isImage {
                     arguments.append(contentsOf: ["--image", attachment.url.path])
                 }
-                if stagedAttachments.contains(where: \.isImage) {
+                if exposedAttachments.contains(where: \.isImage) {
                     arguments.append("--")
                 }
             }
@@ -609,7 +587,7 @@ extension CodexAgentClient {
                     for: request,
                     temporaryWorkspaceURL: swiftBuildWorkspace.rootURL,
                     toolCompatibility: request.toolCompatibility,
-                    stagedAttachments: stagedAttachments
+                    attachments: exposedAttachments
                 )
             )
 
@@ -656,7 +634,7 @@ extension CodexAgentClient {
         for request: CodexAgentRequest,
         temporaryWorkspaceURL: URL,
         toolCompatibility: CodexAgentToolCompatibility? = nil,
-        stagedAttachments: [CodexAgentStagedAttachment] = []
+        attachments: [ToolPersistedPromptAttachment] = []
     ) -> String {
         let resolvedToolCompatibility = toolCompatibility ?? request.toolCompatibility
         let finalRules = [
@@ -668,12 +646,12 @@ extension CodexAgentClient {
         .compactMap { $0 }
         .joined(separator: "\n")
         let attachmentContext =
-            stagedAttachments.isEmpty
+            attachments.isEmpty
             ? ""
             : """
 
             User-provided attachments:
-            \(stagedAttachments.map { "- \($0.fileName): \($0.url.path)" }.joined(separator: "\n"))
+            \(attachments.map { "- \($0.fileName): \($0.url.path)" }.joined(separator: "\n"))
 
             Treat these files as read-only context. Inspect the relevant files when needed. Do not copy attachment binaries into the generated app.
             """
@@ -736,6 +714,17 @@ extension CodexAgentClient {
             ])
         }
         return arguments
+    }
+
+    nonisolated private static func attachmentPermissionArguments(
+        _ access: CodexAgentAttachmentAccess
+    ) -> [String] {
+        [
+            "-c",
+            #"default_permissions="ironsmith-workspace""#,
+            "-c",
+            #"permissions.ironsmith-workspace={ extends = ":workspace", filesystem = { ":workspace_roots" = { ".ironsmith/attachments/current-run" = "\#(access.filesystemAccess)" } } }"#,
+        ]
     }
 
     nonisolated private static func tomlString(_ value: String) -> String {

@@ -82,6 +82,7 @@ struct PromptComposerView: View {
             allowedContentTypes: [.item],
             allowsMultipleSelection: true
         ) { result in
+            guard !isSubmitting else { return }
             guard case .success(let urls) = result else { return }
             onAddAttachments(urls)
         }
@@ -161,7 +162,9 @@ struct PromptComposerView: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .disabled(
-            !supportsAttachments || attachments.count >= ToolPromptAttachmentLoader.maximumAttachmentCount
+            isSubmitting
+                || !supportsAttachments
+                || attachments.count >= ToolPromptAttachmentLoader.maximumAttachmentCount
         )
         .help(attachmentButtonHelp)
         .accessibilityLabel("Add attachments")
@@ -205,6 +208,7 @@ struct PromptComposerView: View {
             .frame(width: 28, height: 24)
         }
         .buttonStyle(.plain)
+        .disabled(isSubmitting)
         .help("Remove \(attachment.fileName)")
         .accessibilityLabel("Remove \(attachment.fileName)")
     }

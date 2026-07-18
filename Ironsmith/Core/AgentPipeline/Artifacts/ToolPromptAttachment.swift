@@ -31,6 +31,96 @@ nonisolated struct ToolPromptAttachment: Identifiable, Equatable, Sendable {
     var isImage: Bool { kind == .image }
 }
 
+nonisolated struct ToolPersistedPromptAttachment: Equatable, Sendable {
+    let fileName: String
+    let url: URL
+    let isImage: Bool
+}
+
+nonisolated struct ToolPromptAttachmentStorage: Sendable {
+    var replaceCurrentRun: @Sendable (
+        _ attachments: [ToolPromptAttachment],
+        _ layout: ToolPackageLayout
+    ) throws -> [UUID]
+    var currentRun: @Sendable (_ layout: ToolPackageLayout) throws -> [ToolPersistedPromptAttachment]
+    var removeCurrentRun: @Sendable (_ layout: ToolPackageLayout) throws -> Void
+
+    nonisolated static let live = Self(
+        replaceCurrentRun: { attachments, layout in
+            let fileManager = FileManager.default
+            let directoryURL = layout.currentRunAttachmentsDirectoryURL
+            if fileManager.fileExists(atPath: directoryURL.path) {
+                try fileManager.removeItem(at: directoryURL)
+            }
+            guard !attachments.isEmpty else { return [] }
+
+            do {
+                try fileManager.createDirectory(
+                    at: directoryURL,
+                    withIntermediateDirectories: true
+                )
+                for (index, attachment) in attachments.enumerated() {
+                    let fileName = persistedFileName(
+                        for: attachment.fileName,
+                        index: index
+                    )
+                    try attachment.data.write(
+                        to: directoryURL.appendingPathComponent(fileName, isDirectory: false),
+                        options: .atomic
+                    )
+                }
+                return attachments.map(\.id)
+            } catch {
+                try? fileManager.removeItem(at: directoryURL)
+                throw error
+            }
+        },
+        currentRun: { layout in
+            let fileManager = FileManager.default
+            let directoryURL = layout.currentRunAttachmentsDirectoryURL
+            guard fileManager.fileExists(atPath: directoryURL.path) else { return [] }
+
+            return try fileManager.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: [.contentTypeKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+            .compactMap { url in
+                let values = try? url.resourceValues(forKeys: [
+                    .contentTypeKey,
+                    .isRegularFileKey,
+                ])
+                guard values?.isRegularFile != false else { return nil }
+                let contentType = values?.contentType ?? UTType(filenameExtension: url.pathExtension)
+                return ToolPersistedPromptAttachment(
+                    fileName: url.lastPathComponent,
+                    url: url,
+                    isImage: contentType?.conforms(to: .image) == true
+                )
+            }
+            .sorted { $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending }
+        },
+        removeCurrentRun: { layout in
+            let directoryURL = layout.currentRunAttachmentsDirectoryURL
+            guard FileManager.default.fileExists(atPath: directoryURL.path) else { return }
+            try FileManager.default.removeItem(at: directoryURL)
+        }
+    )
+
+    private nonisolated static func persistedFileName(
+        for proposedName: String,
+        index: Int
+    ) -> String {
+        let safeName = proposedName.unicodeScalars
+            .map { scalar in
+                CharacterSet.alphanumerics.contains(scalar)
+                    || ".-_".unicodeScalars.contains(scalar) ? String(scalar) : "_"
+            }
+            .joined()
+        return "\(index + 1)-\(safeName.isEmpty ? "attachment" : safeName)"
+    }
+}
+
 enum ToolPromptAttachmentError: LocalizedError, Equatable {
     case tooManyFiles
     case directoryNotSupported(String)

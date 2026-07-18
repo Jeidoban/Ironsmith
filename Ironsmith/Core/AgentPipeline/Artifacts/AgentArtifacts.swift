@@ -307,6 +307,8 @@ enum ToolNameSanitizer {
 
 nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let packageMetadataDirectoryName = ".ironsmith"
+    nonisolated static let attachmentsDirectoryName = "attachments"
+    nonisolated static let currentRunAttachmentsDirectoryName = "current-run"
     nonisolated static let versionsDirectoryName = "versions"
     nonisolated static let pendingContentViewDraftFilename = "pending-ContentView.swift"
     nonisolated static let pendingContentViewDraftPath =
@@ -329,6 +331,16 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var versionsDirectoryURL: URL {
         Self.versionsDirectoryURL(for: packageRootURL)
+    }
+
+    nonisolated var attachmentsDirectoryURL: URL {
+        packageMetadataDirectoryURL
+            .appendingPathComponent(Self.attachmentsDirectoryName, isDirectory: true)
+    }
+
+    nonisolated var currentRunAttachmentsDirectoryURL: URL {
+        attachmentsDirectoryURL
+            .appendingPathComponent(Self.currentRunAttachmentsDirectoryName, isDirectory: true)
     }
 
     nonisolated var pendingContentViewDraftURL: URL {

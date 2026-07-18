@@ -109,6 +109,7 @@ final class ToolLibraryStore {
     }
 
     func addAttachments(from urls: [URL]) {
+        guard !isGenerating else { return }
         do {
             attachments = try ToolPromptAttachmentLoader.load(urls: urls, existing: attachments)
         } catch {
@@ -117,6 +118,7 @@ final class ToolLibraryStore {
     }
 
     func removeAttachment(id: UUID) {
+        guard !isGenerating else { return }
         attachments.removeAll { $0.id == id }
     }
 
@@ -350,6 +352,7 @@ final class ToolLibraryStore {
                 }
                 clearPendingGeneration(on: tool)
                 try modelContext.save()
+                removeCurrentRunAttachments(for: tool)
             }
         } catch {
             modelContext.rollback()
@@ -507,6 +510,7 @@ final class ToolLibraryStore {
                 prompt: trimmedPrompt
             )
             try modelContext.save()
+            removeCurrentRunAttachments(for: completedTool)
             if shouldNotifyGenerationTerminalEvent {
                 await notifyGenerationFinished(completedTool)
             }
@@ -809,9 +813,6 @@ final class ToolLibraryStore {
                 )
             )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
-            guard attachments.isEmpty || languageModelContext.codingAgentSupportsImageInput else {
-                throw ToolLibraryAttachmentError.unsupportedSelection
-            }
             setActiveCodingAgent(activeCodingAgent, for: tool)
             let settings = tool.generationSettings(
                 defaults: Self.defaultGenerationSettings(from: inferenceStore.generationPreferences)
@@ -831,16 +832,15 @@ final class ToolLibraryStore {
                     settings: settings,
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
-                    attachments: attachments,
                     lifecycle: lifecycle
                 )
             )
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
             try modelContext.save()
+            removeCurrentRunAttachments(for: tool)
             if shouldNotifyGenerationTerminalEvent {
                 await notifyGenerationFinished(tool)
             }
-            attachments = []
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
@@ -933,6 +933,12 @@ final class ToolLibraryStore {
                         self.setActiveCodingAgent(activeCodingAgent, for: tool)
                     }
                     onPrepared(tool)
+                }
+            },
+            didPersistAttachments: { persistedIDs in
+                await MainActor.run {
+                    let persistedIDSet = Set(persistedIDs)
+                    self.attachments.removeAll { persistedIDSet.contains($0.id) }
                 }
             },
             updatePendingPrompt: { prompt in
@@ -1056,6 +1062,16 @@ final class ToolLibraryStore {
         tool.updatedAt = .now
     }
 
+    private func removeCurrentRunAttachments(for tool: Tool) {
+        do {
+            try dependencies.attachmentStorage.removeCurrentRun(tool.packageLayout)
+        } catch {
+            AgentDiagnosticsLog.append(
+                "Current-run attachment cleanup failed: \(error.localizedDescription)"
+            )
+        }
+    }
+
     private func requirePreparedTool(_ tool: Tool?) throws -> Tool {
         guard let tool else {
             throw ToolLibraryGenerationError.missingPreparedTool
@@ -1169,6 +1185,7 @@ struct ToolLibraryDependencies {
     var versionBackupClient: ToolVersionBackupClient = .live
     var buildClient: ToolBuildClient = .live()
     var packageMaterializer: ToolPackageMaterializer = .live
+    var attachmentStorage: ToolPromptAttachmentStorage = .live
     var notificationClient: ToolGenerationNotificationClient = .disabled
 
     static let live = ToolLibraryDependencies(
@@ -1179,6 +1196,7 @@ struct ToolLibraryDependencies {
         versionBackupClient: .live,
         buildClient: .live(),
         packageMaterializer: .live,
+        attachmentStorage: .live,
         notificationClient: .live
     )
 }

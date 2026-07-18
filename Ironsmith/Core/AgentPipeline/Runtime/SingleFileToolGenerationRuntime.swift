@@ -21,6 +21,7 @@ struct SingleFileToolGenerationRuntime {
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
         imageGenerationProvider: ToolImageGenerationProvider = .disabled,
+        attachments: [ToolPromptAttachment] = [],
         lifecycle: ToolGenerationLifecycle = .noop
     ) async throws -> ToolGenerationResult {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -38,6 +39,7 @@ struct SingleFileToolGenerationRuntime {
                     existingTool: existingTool,
                     settings: settings,
                     imageGenerationProvider: imageGenerationProvider,
+                    attachments: [],
                     lifecycle: lifecycle
                 )
             }
@@ -45,6 +47,7 @@ struct SingleFileToolGenerationRuntime {
                 prompt: effectivePrompt,
                 existingTool: existingTool,
                 settings: settings,
+                attachments: existingTool.isGenerationReady ? attachments : [],
                 lifecycle: lifecycle
             )
         }
@@ -53,6 +56,7 @@ struct SingleFileToolGenerationRuntime {
             prompt: trimmedPrompt,
             settings: settings,
             imageGenerationProvider: imageGenerationProvider,
+            attachments: attachments,
             lifecycle: lifecycle
         )
     }
@@ -93,6 +97,7 @@ struct SingleFileToolGenerationRuntime {
 
     private func prepareNewCreateSetup(
         metadata: ToolMetadataSuggestion,
+        placeholderRootURL: URL,
         prompt: String,
         settings: ToolGenerationSettings,
         lifecycle: ToolGenerationLifecycle
@@ -105,21 +110,30 @@ struct SingleFileToolGenerationRuntime {
         let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
         let contentViewPath = layout.contentViewSourcePath
 
-        try context.packageMaterializer.materializePackage(
+        try context.packageMaterializer.finalizePlaceholderPackage(
+            from: placeholderRootURL,
             layout: layout,
             displayName: displayName,
             settings: resolvedSettings
         )
-        try await lifecycle.prepareCreatedTool(
-            ToolGenerationPreparedTool(
-                name: displayName,
-                executableName: executableName,
-                bundleIdentifier: bundleIdentifier,
-                settings: resolvedSettings,
-                packageRootURL: packageRootURL
-            ),
-            prompt
-        )
+        do {
+            try await lifecycle.prepareCreatedTool(
+                ToolGenerationPreparedTool(
+                    name: displayName,
+                    executableName: executableName,
+                    bundleIdentifier: bundleIdentifier,
+                    settings: resolvedSettings,
+                    packageRootURL: packageRootURL
+                ),
+                prompt
+            )
+        } catch {
+            try? context.packageMaterializer.restorePlaceholderPackage(
+                from: layout,
+                to: placeholderRootURL
+            )
+            throw error
+        }
 
         return CreateToolSetup(
             displayName: displayName,
@@ -135,11 +149,13 @@ struct SingleFileToolGenerationRuntime {
     private func preparePlaceholderCreateTool(
         prompt: String,
         settings: ToolGenerationSettings,
+        attachments: [ToolPromptAttachment],
         lifecycle: ToolGenerationLifecycle
-    ) async throws {
+    ) async throws -> URL {
         let displayName = "New App"
         let executableName = ToolNameSanitizer.executableName(from: displayName)
         let packageRootURL = try context.makeUniquePackageRoot(displayName: displayName)
+        try context.packageMaterializer.createPlaceholderPackageDirectory(at: packageRootURL)
         try await lifecycle.prepareCreatedTool(
             ToolGenerationPreparedTool(
                 name: displayName,
@@ -150,6 +166,15 @@ struct SingleFileToolGenerationRuntime {
             ),
             prompt
         )
+        try await persistSubmittedAttachments(
+            attachments,
+            layout: ToolPackageLayout(
+                packageRootURL: packageRootURL,
+                executableName: executableName
+            ),
+            lifecycle: lifecycle
+        )
+        return packageRootURL
     }
 
     private func createTool(
@@ -157,6 +182,7 @@ struct SingleFileToolGenerationRuntime {
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
         imageGenerationProvider: ToolImageGenerationProvider,
+        attachments: [ToolPromptAttachment],
         lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let startingPhase = existingTool?.generationPhase ?? .initializing
@@ -164,10 +190,17 @@ struct SingleFileToolGenerationRuntime {
         if let existingTool, let resumedSetup = loadCreateSetup(for: existingTool, settings: settings) {
             setup = resumedSetup
         } else {
-            if existingTool == nil {
-                try await preparePlaceholderCreateTool(
+            let placeholderRootURL: URL
+            if let existingTool {
+                placeholderRootURL = existingTool.packageRootURL
+                try context.packageMaterializer.createPlaceholderPackageDirectory(
+                    at: placeholderRootURL
+                )
+            } else {
+                placeholderRootURL = try await preparePlaceholderCreateTool(
                     prompt: prompt,
                     settings: settings,
+                    attachments: attachments,
                     lifecycle: lifecycle
                 )
             }
@@ -181,6 +214,7 @@ struct SingleFileToolGenerationRuntime {
             try Task.checkCancellation()
             setup = try await prepareNewCreateSetup(
                 metadata: metadata,
+                placeholderRootURL: placeholderRootURL,
                 prompt: prompt,
                 settings: settings,
                 lifecycle: lifecycle
@@ -355,10 +389,24 @@ struct SingleFileToolGenerationRuntime {
         return refinedPrompt
     }
 
+    private func persistSubmittedAttachments(
+        _ attachments: [ToolPromptAttachment],
+        layout: ToolPackageLayout,
+        lifecycle: ToolGenerationLifecycle
+    ) async throws {
+        let persistedIDs = try context.attachmentStorage.replaceCurrentRun(
+            attachments,
+            layout
+        )
+        guard !persistedIDs.isEmpty else { return }
+        try await lifecycle.didPersistAttachments(persistedIDs)
+    }
+
     private func editTool(
         prompt: String,
         existingTool: Tool,
         settings: ToolGenerationSettings,
+        attachments: [ToolPromptAttachment],
         lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let layout = ToolPackageLayout(
@@ -369,6 +417,13 @@ struct SingleFileToolGenerationRuntime {
         let startingPhase = existingTool.isGenerationReady
             ? ToolGenerationPhase.planning
             : (existingTool.generationPhase ?? .generatingEditDiff)
+        if existingTool.isGenerationReady {
+            try await persistSubmittedAttachments(
+                attachments,
+                layout: layout,
+                lifecycle: lifecycle
+            )
+        }
         if !existingTool.isGenerationReady,
            startingPhase == .packaging || startingPhase == .completed {
             return try await packageTool(
@@ -573,7 +628,6 @@ struct SingleFileToolGenerationRuntime {
             modelIdentifier: context.codingAgentModelIdentifier,
             reasoningEffort: context.reasoningEffort,
             authentication: authentication,
-            attachments: context.attachments,
             supportsImageInput: context.codingAgentSupportsImageInput
         ) { event in
             await Self.handleCodexAgentEvent(event, lifecycle: lifecycle)

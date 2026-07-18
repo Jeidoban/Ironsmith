@@ -86,4 +86,43 @@ extension AgentPipelineTests {
         #expect(attachment.fileName == "reference.pdf")
         #expect(attachment.data == pdfData)
     }
+
+    @Test
+    func promptAttachmentStorageUsesPackageCurrentRunAndClassifiesFiles() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = ToolPackageLayout(packageRootURL: root, executableName: "Demo")
+        let imageID = UUID()
+        let fileID = UUID()
+
+        let persistedIDs = try ToolPromptAttachmentStorage.live.replaceCurrentRun(
+            [
+                ToolPromptAttachment(
+                    id: imageID,
+                    fileName: "reference image.png",
+                    kind: .image,
+                    data: Data("image".utf8)
+                ),
+                ToolPromptAttachment(
+                    id: fileID,
+                    fileName: "reference.pdf",
+                    kind: .file,
+                    data: Data("%PDF".utf8)
+                ),
+            ],
+            layout
+        )
+
+        #expect(persistedIDs == [imageID, fileID])
+        #expect(
+            layout.currentRunAttachmentsDirectoryURL.path
+                == root.appendingPathComponent(".ironsmith/attachments/current-run").path
+        )
+        let stored = try ToolPromptAttachmentStorage.live.currentRun(layout)
+        #expect(stored.map(\.fileName) == ["1-reference_image.png", "2-reference.pdf"])
+        #expect(stored.map(\.isImage) == [true, false])
+
+        _ = try ToolPromptAttachmentStorage.live.replaceCurrentRun([], layout)
+        #expect(!FileManager.default.fileExists(atPath: layout.currentRunAttachmentsDirectoryURL.path))
+    }
 }

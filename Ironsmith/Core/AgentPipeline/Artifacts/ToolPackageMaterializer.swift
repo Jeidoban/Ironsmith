@@ -39,6 +39,55 @@ struct ToolPackageMaterializer: Sendable {
         }
     }
 
+    nonisolated func createPlaceholderPackageDirectory(at packageRootURL: URL) throws {
+        try fileClient.createDirectory(packageRootURL)
+        try fileClient.createDirectory(
+            ToolPackageLayout.packageMetadataDirectoryURL(for: packageRootURL)
+        )
+    }
+
+    nonisolated func finalizePlaceholderPackage(
+        from placeholderRootURL: URL,
+        layout: ToolPackageLayout,
+        displayName: String,
+        settings: ToolGenerationSettings
+    ) throws {
+        let didMove = placeholderRootURL.standardizedFileURL != layout.packageRootURL.standardizedFileURL
+        if didMove {
+            try fileClient.moveItem(placeholderRootURL, layout.packageRootURL)
+        }
+
+        do {
+            try materializePackage(
+                layout: layout,
+                displayName: displayName,
+                settings: settings
+            )
+        } catch {
+            if didMove {
+                try? restorePlaceholderPackage(
+                    from: layout,
+                    to: placeholderRootURL
+                )
+            }
+            throw error
+        }
+    }
+
+    nonisolated func restorePlaceholderPackage(
+        from layout: ToolPackageLayout,
+        to placeholderRootURL: URL
+    ) throws {
+        try? fileClient.removeItemIfExists(layout.packageManifestURL)
+        try? fileClient.removeItemIfExists(
+            layout.packageRootURL.appendingPathComponent("Sources", isDirectory: true)
+        )
+        guard layout.packageRootURL.standardizedFileURL != placeholderRootURL.standardizedFileURL else {
+            return
+        }
+        try fileClient.moveItem(layout.packageRootURL, placeholderRootURL)
+    }
+
     nonisolated func preparePackageDirectories(_ layout: ToolPackageLayout) throws {
         try fileClient.createDirectory(layout.sourceDirectoryURL)
         try fileClient.createDirectory(layout.packageMetadataDirectoryURL)
