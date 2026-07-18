@@ -8,6 +8,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct PromptComposerView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var prompt: String
     @Binding var isExpanded: Bool
     @Binding var sandboxEnabled: Bool
@@ -163,7 +164,11 @@ struct PromptComposerView: View {
             Image(systemName: "plus")
                 .font(.system(size: 12, weight: .semibold))
                 .frame(width: 24, height: 24)
-                .background(.regularMaterial, in: Circle())
+                .background(accessoryButtonFill, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(accessoryButtonBorder, lineWidth: 0.75)
+                }
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
@@ -198,13 +203,25 @@ struct PromptComposerView: View {
             )
             .font(.system(size: 11, weight: .semibold))
             .frame(width: 24, height: 24)
-            .background(.regularMaterial, in: Circle())
+            .background(accessoryButtonFill, in: Circle())
+            .overlay {
+                Circle()
+                    .stroke(accessoryButtonBorder, lineWidth: 0.75)
+            }
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .help(isExpanded ? "Collapse prompt" : "Expand prompt")
         .accessibilityLabel(isExpanded ? "Collapse prompt" : "Expand prompt")
         .accessibilityIdentifier("prompt-expansion-button")
+    }
+
+    private var accessoryButtonFill: Color {
+        Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.07)
+    }
+
+    private var accessoryButtonBorder: Color {
+        Color.primary.opacity(colorScheme == .dark ? 0.20 : 0.10)
     }
 
     private var generationSettingsMenu: some View {
