@@ -132,13 +132,13 @@ enum ToolPromptAttachmentError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .tooManyFiles:
-            return "You can attach up to three files."
+            return "You can attach up to six files."
         case .directoryNotSupported(let name):
             return "\(name) is a folder. Choose individual files instead."
         case .fileTooLarge(let name):
-            return "\(name) is larger than the 5 MB attachment limit."
+            return "\(name) is larger than the 50 MB attachment limit."
         case .totalFilesTooLarge:
-            return "Non-image attachments can total up to 10 MB."
+            return "Attachments can total up to 50 MB."
         case .unreadableFile(let name):
             return "Ironsmith could not read \(name)."
         case .imageCouldNotBeNormalized(let name):
@@ -149,11 +149,11 @@ enum ToolPromptAttachmentError: LocalizedError, Equatable {
 
 @MainActor
 enum ToolPromptAttachmentLoader {
-    static let maximumAttachmentCount = 3
+    static let maximumAttachmentCount = 6
     static let maximumImageBytes = 512 * 1_024
     static let maximumImageDimension = 2_048
-    static let maximumFileBytes = 5 * 1_024 * 1_024
-    static let maximumCombinedFileBytes = 10 * 1_024 * 1_024
+    static let maximumCombinedAttachmentBytes = 50 * 1_024 * 1_024
+    static let maximumFileBytes = maximumCombinedAttachmentBytes
 
     static func load(
         urls: [URL],
@@ -163,17 +163,20 @@ enum ToolPromptAttachmentLoader {
             throw ToolPromptAttachmentError.tooManyFiles
         }
 
-        var loaded = existing
-        for url in urls {
-            loaded.append(try load(url: url))
+        var combinedAttachmentBytes = existing.reduce(0) { $0 + $1.data.count }
+        guard combinedAttachmentBytes <= maximumCombinedAttachmentBytes else {
+            throw ToolPromptAttachmentError.totalFilesTooLarge
         }
 
-        let combinedFileBytes =
-            loaded
-            .filter { !$0.isImage }
-            .reduce(0) { $0 + $1.data.count }
-        guard combinedFileBytes <= maximumCombinedFileBytes else {
-            throw ToolPromptAttachmentError.totalFilesTooLarge
+        var loaded = existing
+        for url in urls {
+            let attachment = try load(url: url)
+            guard attachment.data.count <= maximumCombinedAttachmentBytes - combinedAttachmentBytes
+            else {
+                throw ToolPromptAttachmentError.totalFilesTooLarge
+            }
+            combinedAttachmentBytes += attachment.data.count
+            loaded.append(attachment)
         }
         return loaded
     }

@@ -129,13 +129,9 @@ struct PromptComposerView: View {
     }
 
     private var promptAccessoryBar: some View {
-        HStack(spacing: 8) {
-            Spacer(minLength: 0)
+        HStack(spacing: 6) {
             if showsAttachmentControls || !attachments.isEmpty {
                 attachmentButton
-                ForEach(attachments) { attachment in
-                    attachmentPreview(attachment)
-                }
                 if !attachments.isEmpty, !supportsAttachments {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
@@ -143,10 +139,19 @@ struct PromptComposerView: View {
                         .help(ToolAttachmentSupport.unavailableMessage)
                         .accessibilityLabel(ToolAttachmentSupport.unavailableMessage)
                 }
+                ForEach(attachments) { attachment in
+                    PromptAttachmentPreview(
+                        attachment: attachment,
+                        isRemovalEnabled: !isSubmitting,
+                        onRemove: { onRemoveAttachment(attachment.id) }
+                    )
+                }
             }
+            Spacer(minLength: 0)
             expansionButton
         }
         .padding(.horizontal, 8)
+        .padding(.top, PromptEditorLayout.accessoryBarTopPadding)
         .padding(.bottom, PromptEditorLayout.accessoryBarBottomPadding)
         .frame(height: PromptEditorLayout.accessoryBarHeight, alignment: .top)
     }
@@ -158,6 +163,7 @@ struct PromptComposerView: View {
             Image(systemName: "plus")
                 .font(.system(size: 12, weight: .semibold))
                 .frame(width: 24, height: 24)
+                .background(.regularMaterial, in: Circle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
@@ -174,43 +180,9 @@ struct PromptComposerView: View {
     private var attachmentButtonHelp: String {
         if !supportsAttachments { return ToolAttachmentSupport.unavailableMessage }
         if attachments.count >= ToolPromptAttachmentLoader.maximumAttachmentCount {
-            return "You can attach up to three files."
+            return "You can attach up to six files."
         }
         return "Add files"
-    }
-
-    @ViewBuilder
-    private func attachmentPreview(_ attachment: ToolPromptAttachment) -> some View {
-        Button {
-            onRemoveAttachment(attachment.id)
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                Group {
-                    if attachment.isImage, let image = NSImage(data: attachment.data) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Image(systemName: "doc.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(width: 24, height: 24)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 9))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, .secondary)
-                    .offset(x: 4, y: -4)
-            }
-            .frame(width: 28, height: 24)
-        }
-        .buttonStyle(.plain)
-        .disabled(isSubmitting)
-        .help("Remove \(attachment.fileName)")
-        .accessibilityLabel("Remove \(attachment.fileName)")
     }
 
     private var expansionButton: some View {
@@ -503,12 +475,64 @@ private enum CodingAgentMenuHelp {
 
 private enum PromptEditorLayout {
     static let compactTextEditorHeight: CGFloat = 46
-    static let accessoryBarHeight: CGFloat = 28
+    static let accessoryBarHeight: CGFloat = 30
+    static let accessoryBarTopPadding: CGFloat = 2
     static let accessoryBarBottomPadding: CGFloat = 4
     static let textEditorHorizontalPadding: CGFloat = 8
     static let textEditorTopPadding: CGFloat = 12
     static let placeholderLeadingPadding: CGFloat = 13
     static let placeholderTopPadding: CGFloat = 12
+}
+
+private struct PromptAttachmentPreview: View {
+    let attachment: ToolPromptAttachment
+    let isRemovalEnabled: Bool
+    let onRemove: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onRemove) {
+            ZStack {
+                thumbnail
+
+                if isHovering, isRemovalEnabled {
+                    Color.black.opacity(0.32)
+
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: 24, height: 24)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isRemovalEnabled)
+        .onHover { isHovering = $0 }
+        .help("Remove \(attachment.fileName)")
+        .accessibilityLabel("Remove \(attachment.fileName)")
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        if attachment.isImage, let image = NSImage(data: attachment.data) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 24, height: 24)
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(.quaternary.opacity(0.5))
+
+                Image(systemName: "doc.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 24, height: 24)
+        }
+    }
 }
 
 #Preview("Create Prompt") {

@@ -21,5 +21,5 @@ nonisolated enum ToolAttachmentSupport {
     }
 
     static let unavailableMessage =
-        "Attachments require Codex with OpenAI, an image-capable Ironsmith model, or a custom Responses provider."
+        "This provider or coding agent doesn't currently support attachments."
 }

@@ -47,7 +47,7 @@ extension AgentPipelineTests {
     func promptAttachmentLoaderEnforcesCountAndFileSizeLimits() throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let urls = try (0..<4).map { index in
+        let urls = try (0..<7).map { index in
             let url = root.appendingPathComponent("\(index).txt")
             try Data("file".utf8).write(to: url)
             return url
@@ -55,18 +55,40 @@ extension AgentPipelineTests {
 
         do {
             _ = try ToolPromptAttachmentLoader.load(urls: urls, existing: [])
-            Issue.record("Expected the attachment count limit to reject four files.")
+            Issue.record("Expected the attachment count limit to reject seven files.")
         } catch let error as ToolPromptAttachmentError {
             #expect(error == .tooManyFiles)
         }
 
         let largeURL = root.appendingPathComponent("large.bin")
-        try Data(count: ToolPromptAttachmentLoader.maximumFileBytes + 1).write(to: largeURL)
+        #expect(FileManager.default.createFile(atPath: largeURL.path, contents: nil))
+        let fileHandle = try FileHandle(forWritingTo: largeURL)
+        try fileHandle.truncate(
+            atOffset: UInt64(ToolPromptAttachmentLoader.maximumFileBytes + 1)
+        )
+        try fileHandle.close()
         do {
             _ = try ToolPromptAttachmentLoader.load(urls: [largeURL], existing: [])
             Issue.record("Expected the per-file size limit to reject the file.")
         } catch let error as ToolPromptAttachmentError {
             #expect(error == .fileTooLarge("large.bin"))
+        }
+
+        let finalByteURL = root.appendingPathComponent("final-byte.txt")
+        try Data([0]).write(to: finalByteURL)
+        let fullExistingAttachment = ToolPromptAttachment(
+            fileName: "full.bin",
+            kind: .file,
+            data: Data(count: ToolPromptAttachmentLoader.maximumCombinedAttachmentBytes)
+        )
+        do {
+            _ = try ToolPromptAttachmentLoader.load(
+                urls: [finalByteURL],
+                existing: [fullExistingAttachment]
+            )
+            Issue.record("Expected the combined attachment limit to reject the final byte.")
+        } catch let error as ToolPromptAttachmentError {
+            #expect(error == .totalFilesTooLarge)
         }
     }
 
