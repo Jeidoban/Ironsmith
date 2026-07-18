@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 
 @testable import Ironsmith
 
@@ -110,6 +111,47 @@ extension AgentPipelineTests {
         #expect(!attachment.isImage)
         #expect(attachment.fileName == "reference.pdf")
         #expect(attachment.data == pdfData)
+    }
+
+    @MainActor
+    @Test
+    func promptAttachmentDropReceiverMaterializesPromisedImageData() async throws {
+        let imageData = Data("promised screenshot".utf8)
+        let provider = NSItemProvider()
+        provider.suggestedName = "Screenshot"
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.png.identifier,
+            visibility: .all
+        ) { completion in
+            completion(imageData, nil)
+            return nil
+        }
+
+        let files = await PromptAttachmentDropReceiver.receive(providers: [provider])
+        let file = try #require(files.first)
+        defer { PromptAttachmentDropReceiver.cleanUp(files) }
+
+        #expect(file.requiresCleanup)
+        #expect(file.url.pathExtension == "png")
+        #expect(FileManager.default.fileExists(atPath: file.url.path))
+        #expect(try Data(contentsOf: file.url) == imageData)
+    }
+
+    @MainActor
+    @Test
+    func promptAttachmentDropReceiverPreservesExistingFileURL() async throws {
+        let directoryURL = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let fileURL = directoryURL.appendingPathComponent("notes.txt")
+        try Data("notes".utf8).write(to: fileURL)
+        let provider = try #require(NSItemProvider(contentsOf: fileURL))
+
+        let files = await PromptAttachmentDropReceiver.receive(providers: [provider])
+        let file = try #require(files.first)
+
+        #expect(file.url == fileURL)
+        #expect(!file.requiresCleanup)
+        #expect(FileManager.default.fileExists(atPath: file.url.path))
     }
 
     @Test

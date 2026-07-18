@@ -101,11 +101,14 @@ struct PromptComposerView: View {
                     .stroke(Color.accentColor.opacity(0.85), lineWidth: 2)
             }
         }
-        .dropDestination(for: URL.self) { urls, _ in
-            acceptDroppedFiles(urls)
-        } isTargeted: { isTargeted in
-            isAttachmentDropTargeted = isTargeted && acceptsAttachmentDrops
-        }
+        .onDrop(
+            of: PromptAttachmentDropReceiver.supportedTypeIdentifiers,
+            isTargeted: Binding(
+                get: { isAttachmentDropTargeted },
+                set: { isAttachmentDropTargeted = $0 && acceptsAttachmentDrops }
+            ),
+            perform: acceptDroppedItems
+        )
         .animation(.easeInOut(duration: 0.12), value: isAttachmentDropTargeted)
     }
 
@@ -202,9 +205,14 @@ struct PromptComposerView: View {
             && attachments.count < ToolPromptAttachmentLoader.maximumAttachmentCount
     }
 
-    private func acceptDroppedFiles(_ urls: [URL]) -> Bool {
-        guard acceptsAttachmentDrops, !urls.isEmpty else { return false }
-        onAddAttachments(urls)
+    private func acceptDroppedItems(_ providers: [NSItemProvider]) -> Bool {
+        guard acceptsAttachmentDrops, !providers.isEmpty else { return false }
+        Task { @MainActor in
+            let receivedFiles = await PromptAttachmentDropReceiver.receive(providers: providers)
+            guard !receivedFiles.isEmpty else { return }
+            onAddAttachments(receivedFiles.map(\.url))
+            PromptAttachmentDropReceiver.cleanUp(receivedFiles)
+        }
         return true
     }
 
