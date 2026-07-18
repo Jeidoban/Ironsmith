@@ -39,7 +39,10 @@ extension AgentPipelineTests {
 
         #expect(attachment.isImage)
         #expect(attachment.data.count <= ToolPromptAttachmentLoader.maximumImageBytes)
-        #expect(max(normalized.pixelsWide, normalized.pixelsHigh) <= 2_048)
+        #expect(
+            max(normalized.pixelsWide, normalized.pixelsHigh)
+                <= ToolPromptAttachmentLoader.maximumImageDimension
+        )
     }
 
     @MainActor

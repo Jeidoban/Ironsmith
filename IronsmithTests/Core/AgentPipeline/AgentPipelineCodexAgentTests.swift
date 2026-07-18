@@ -1008,6 +1008,72 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func codexRuntimeEditPersistsAttachmentsAfterToolIsMarkedGenerating() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: "CodexEdit",
+            source: Self.originalEditableSource
+        )
+        tool.generationState = .generating
+        tool.generationPhase = .planning
+        tool.generationMode = .edit
+        tool.pendingPrompt = "Use the reference file"
+
+        let attachmentID = UUID()
+        let persistedAttachmentCapture = PersistedAttachmentCapture()
+        let codexAgentClient = CodexAgentClient { request in
+            let layout = ToolPackageLayout(
+                packageRootURL: request.packageRootURL,
+                executableName: request.executableName
+            )
+            #expect(FileManager.default.fileExists(
+                atPath: layout.currentRunAttachmentsDirectoryURL
+                    .appendingPathComponent("1-reference.txt").path
+            ))
+            return CodexAgentResult(
+                stdout: "",
+                stderr: "",
+                terminationStatus: 0,
+                transcriptURL: request.packageRootURL.appendingPathComponent(".codex/agent-test.jsonl")
+            )
+        }
+        let runtime = Self.makeRuntime(
+            languageModel: EmptyLanguageModel(),
+            pipelineConfiguration: .codex(),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            codexAgentClient: codexAgentClient,
+            codingAgentModelIdentifier: "gpt-5.5",
+            codexAgentAuthentication: .apiKey("sk-test")
+        )
+
+        _ = try await runtime.generateTool(
+            for: "Use the reference file",
+            existingTool: tool,
+            settings: .default,
+            attachments: [
+                ToolPromptAttachment(
+                    id: attachmentID,
+                    fileName: "reference.txt",
+                    kind: .file,
+                    data: Data("reference".utf8)
+                )
+            ],
+            lifecycle: ToolGenerationLifecycle(
+                didPersistAttachments: { ids in
+                    await persistedAttachmentCapture.record(ids)
+                }
+            )
+        )
+
+        #expect(await persistedAttachmentCapture.ids == [attachmentID])
+    }
+
+    @MainActor
+    @Test
     func codexRuntimeRejectsProtectedPackageFileChanges() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }

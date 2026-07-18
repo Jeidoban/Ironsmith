@@ -47,7 +47,7 @@ struct SingleFileToolGenerationRuntime {
                 prompt: effectivePrompt,
                 existingTool: existingTool,
                 settings: settings,
-                attachments: existingTool.isGenerationReady ? attachments : [],
+                attachments: attachments,
                 lifecycle: lifecycle
             )
         }
@@ -417,7 +417,7 @@ struct SingleFileToolGenerationRuntime {
         let startingPhase = existingTool.isGenerationReady
             ? ToolGenerationPhase.planning
             : (existingTool.generationPhase ?? .generatingEditDiff)
-        if existingTool.isGenerationReady {
+        if !attachments.isEmpty {
             try await persistSubmittedAttachments(
                 attachments,
                 layout: layout,

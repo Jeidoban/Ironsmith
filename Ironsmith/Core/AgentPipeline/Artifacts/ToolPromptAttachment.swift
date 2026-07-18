@@ -38,11 +38,13 @@ nonisolated struct ToolPersistedPromptAttachment: Equatable, Sendable {
 }
 
 nonisolated struct ToolPromptAttachmentStorage: Sendable {
-    var replaceCurrentRun: @Sendable (
-        _ attachments: [ToolPromptAttachment],
-        _ layout: ToolPackageLayout
-    ) throws -> [UUID]
-    var currentRun: @Sendable (_ layout: ToolPackageLayout) throws -> [ToolPersistedPromptAttachment]
+    var replaceCurrentRun:
+        @Sendable (
+            _ attachments: [ToolPromptAttachment],
+            _ layout: ToolPackageLayout
+        ) throws -> [UUID]
+    var currentRun:
+        @Sendable (_ layout: ToolPackageLayout) throws -> [ToolPersistedPromptAttachment]
     var removeCurrentRun: @Sendable (_ layout: ToolPackageLayout) throws -> Void
 
     nonisolated static let live = Self(
@@ -91,7 +93,8 @@ nonisolated struct ToolPromptAttachmentStorage: Sendable {
                     .isRegularFileKey,
                 ])
                 guard values?.isRegularFile != false else { return nil }
-                let contentType = values?.contentType ?? UTType(filenameExtension: url.pathExtension)
+                let contentType =
+                    values?.contentType ?? UTType(filenameExtension: url.pathExtension)
                 return ToolPersistedPromptAttachment(
                     fileName: url.lastPathComponent,
                     url: url,
@@ -151,7 +154,7 @@ enum ToolPromptAttachmentError: LocalizedError, Equatable {
 enum ToolPromptAttachmentLoader {
     static let maximumAttachmentCount = 6
     static let maximumImageBytes = 512 * 1_024
-    static let maximumImageDimension = 2_048
+    static let maximumImageDimension = 1_536
     static let maximumCombinedAttachmentBytes = 50 * 1_024 * 1_024
     static let maximumFileBytes = maximumCombinedAttachmentBytes
 
