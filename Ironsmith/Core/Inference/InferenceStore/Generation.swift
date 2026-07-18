@@ -85,6 +85,14 @@ extension InferenceStore {
         )
     }
 
+    func selectedModelCanUseCodexAttachments() -> Bool {
+        guard let selectedModel else { return false }
+        return ToolAttachmentSupport.canUseCodexAttachments(
+            model: selectedModel,
+            provider: provider(for: selectedModel)
+        )
+    }
+
     func selectedModelUsesCodex(
         resolutionContext: ToolCodingAgentResolutionContext = .create
     ) -> Bool {

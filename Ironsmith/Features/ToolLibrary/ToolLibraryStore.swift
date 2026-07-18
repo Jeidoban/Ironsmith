@@ -108,12 +108,15 @@ final class ToolLibraryStore {
         selectedToolID != nil
     }
 
-    func addAttachments(from urls: [URL]) {
-        guard !isGenerating else { return }
+    @discardableResult
+    func addAttachments(from urls: [URL]) -> Bool {
+        guard !isGenerating else { return false }
         do {
             attachments = try ToolPromptAttachmentLoader.load(urls: urls, existing: attachments)
+            return true
         } catch {
             presentError(error.localizedDescription)
+            return false
         }
     }
 
@@ -460,7 +463,8 @@ final class ToolLibraryStore {
             let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
                 resolutionContext: codingAgentResolutionContext(
                     for: selectedTool,
-                    generationMode: selectedTool == nil ? .create : .edit
+                    generationMode: selectedTool == nil ? .create : .edit,
+                    requiresAttachmentSupport: !submittedAttachments.isEmpty
                 )
             )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
@@ -806,10 +810,14 @@ final class ToolLibraryStore {
 
         do {
             try await inferenceStore.prepareSelectedModelForGeneration()
+            let requiresAttachmentSupport = try !dependencies.attachmentStorage.currentRun(
+                tool.packageLayout
+            ).isEmpty
             let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
                 resolutionContext: codingAgentResolutionContext(
                     for: tool,
-                    generationMode: tool.generationMode ?? .create
+                    generationMode: tool.generationMode ?? .create,
+                    requiresAttachmentSupport: requiresAttachmentSupport
                 )
             )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
@@ -1131,7 +1139,8 @@ final class ToolLibraryStore {
 
     func codingAgentResolutionContext(
         for tool: Tool?,
-        generationMode: ToolGenerationMode
+        generationMode: ToolGenerationMode,
+        requiresAttachmentSupport: Bool = false
     ) -> ToolCodingAgentResolutionContext {
         guard generationMode == .edit,
               let tool,
@@ -1140,7 +1149,8 @@ final class ToolLibraryStore {
         else {
             return ToolCodingAgentResolutionContext(
                 generationMode: generationMode,
-                existingSourceLineCount: nil
+                existingSourceLineCount: nil,
+                requiresAttachmentSupport: requiresAttachmentSupport
             )
         }
 
@@ -1154,7 +1164,8 @@ final class ToolLibraryStore {
 
         return ToolCodingAgentResolutionContext(
             generationMode: generationMode,
-            existingSourceLineCount: lineCount
+            existingSourceLineCount: lineCount,
+            requiresAttachmentSupport: requiresAttachmentSupport
         )
     }
 
@@ -1164,7 +1175,8 @@ final class ToolLibraryStore {
         let selectedTool = try? fetchSelectedTool(in: modelContext)
         return codingAgentResolutionContext(
             for: selectedTool,
-            generationMode: selectedTool == nil ? .create : .edit
+            generationMode: selectedTool == nil ? .create : .edit,
+            requiresAttachmentSupport: !attachments.isEmpty
         )
     }
 

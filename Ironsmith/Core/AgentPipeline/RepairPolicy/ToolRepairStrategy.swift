@@ -108,8 +108,23 @@ nonisolated enum ToolModelFamily: Equatable, Sendable {
 nonisolated struct ToolCodingAgentResolutionContext: Equatable, Sendable {
     let generationMode: ToolGenerationMode
     let existingSourceLineCount: Int?
+    let requiresAttachmentSupport: Bool
 
-    static let create = Self(generationMode: .create, existingSourceLineCount: nil)
+    init(
+        generationMode: ToolGenerationMode,
+        existingSourceLineCount: Int?,
+        requiresAttachmentSupport: Bool = false
+    ) {
+        self.generationMode = generationMode
+        self.existingSourceLineCount = existingSourceLineCount
+        self.requiresAttachmentSupport = requiresAttachmentSupport
+    }
+
+    static let create = Self(
+        generationMode: .create,
+        existingSourceLineCount: nil,
+        requiresAttachmentSupport: false
+    )
 
     var isLargeEdit: Bool {
         generationMode == .edit && (existingSourceLineCount ?? 0) > 600
@@ -176,6 +191,11 @@ nonisolated enum ToolCodingAgentResolver {
         case .codex:
             return .codex
         case .automatic:
+            if context.requiresAttachmentSupport,
+               ToolAttachmentSupport.canUseCodexAttachments(model: model, provider: provider)
+            {
+                return .codex
+            }
             let defaultAgent = automaticDefault(model: model, provider: provider)
             if defaultAgent == .ironsmithFlame,
                context.isLargeEdit,

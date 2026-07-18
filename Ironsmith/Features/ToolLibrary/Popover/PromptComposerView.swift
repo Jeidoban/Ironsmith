@@ -35,6 +35,7 @@ struct PromptComposerView: View {
     let onAddAttachments: ([URL]) -> Void
     let onRemoveAttachment: (UUID) -> Void
     @State private var pendingPermission: GeneratedAppResourcePermission?
+    @State private var isAttachmentDropTargeted = false
     @State private var isShowingFileImporter = false
 
     var body: some View {
@@ -104,6 +105,18 @@ struct PromptComposerView: View {
         )
         .frame(maxHeight: isExpanded ? .infinity : nil)
         .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            if isAttachmentDropTargeted {
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.accentColor.opacity(0.85), lineWidth: 2)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            acceptDroppedFiles(urls)
+        } isTargeted: { isTargeted in
+            isAttachmentDropTargeted = isTargeted && acceptsAttachmentDrops
+        }
+        .animation(.easeInOut(duration: 0.12), value: isAttachmentDropTargeted)
     }
 
     private var promptTextEditor: some View {
@@ -174,7 +187,7 @@ struct PromptComposerView: View {
         .foregroundStyle(.secondary)
         .disabled(
             isSubmitting
-                || !supportsAttachments
+                || !showsAttachmentControls
                 || attachments.count >= ToolPromptAttachmentLoader.maximumAttachmentCount
         )
         .help(attachmentButtonHelp)
@@ -183,11 +196,23 @@ struct PromptComposerView: View {
     }
 
     private var attachmentButtonHelp: String {
-        if !supportsAttachments { return ToolAttachmentSupport.unavailableMessage }
+        if !showsAttachmentControls { return ToolAttachmentSupport.unavailableMessage }
         if attachments.count >= ToolPromptAttachmentLoader.maximumAttachmentCount {
             return "You can attach up to six files."
         }
         return "Add files"
+    }
+
+    private var acceptsAttachmentDrops: Bool {
+        showsAttachmentControls
+            && !isSubmitting
+            && attachments.count < ToolPromptAttachmentLoader.maximumAttachmentCount
+    }
+
+    private func acceptDroppedFiles(_ urls: [URL]) -> Bool {
+        guard acceptsAttachmentDrops, !urls.isEmpty else { return false }
+        onAddAttachments(urls)
+        return true
     }
 
     private var expansionButton: some View {

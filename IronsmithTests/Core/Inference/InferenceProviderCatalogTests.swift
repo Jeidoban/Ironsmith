@@ -44,6 +44,25 @@ extension InferenceTests {
                 provider: ironsmith,
                 codingAgent: .ironsmithFlame
             ))
+        #expect(
+            ToolAttachmentSupport.canUseCodexAttachments(
+                model: managedModel,
+                provider: ironsmith
+            ))
+        #expect(
+            !ToolAttachmentSupport.canUseCodexAttachments(
+                model: textOnlyModel,
+                provider: ironsmith
+            ))
+        #expect(
+            ToolAttachmentSupport.preferenceAfterAddingAttachments(.automatic) == .automatic
+        )
+        #expect(
+            ToolAttachmentSupport.preferenceAfterAddingAttachments(.ironsmithSpark) == .codex
+        )
+        #expect(
+            ToolAttachmentSupport.preferenceAfterAddingAttachments(.ironsmithFlame) == .codex
+        )
     }
 
     @Test

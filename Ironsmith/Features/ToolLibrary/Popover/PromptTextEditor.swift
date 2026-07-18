@@ -51,6 +51,7 @@ struct PromptTextEditor: NSViewRepresentable {
         )
         textView.string = text
         textView.onUnmodifiedReturn = context.coordinator.handleUnmodifiedReturn
+        textView.unregisterDraggedTypes()
 
         scrollView.documentView = textView
         return scrollView
@@ -68,6 +69,7 @@ struct PromptTextEditor: NSViewRepresentable {
 
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
+        textView.unregisterDraggedTypes()
 
         if textView.string != text {
             let selectedRange = textView.selectedRange()

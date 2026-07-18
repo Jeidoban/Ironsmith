@@ -116,7 +116,7 @@ struct ToolLibraryPopoverView: View {
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
                 isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(.codex),
-                showsAttachmentControls: selectedModelUsesCodex,
+                showsAttachmentControls: selectedModelCanUseCodexAttachments,
                 supportsAttachments: selectedModelSupportsAttachments,
                 attachments: toolLibraryStore.attachments,
                 supportedReasoningEfforts: inferenceStore.selectedModelSupportedReasoningEfforts,
@@ -139,7 +139,11 @@ struct ToolLibraryPopoverView: View {
                     toolLibraryStore.cancelGeneration()
                 },
                 onAddAttachments: { urls in
-                    toolLibraryStore.addAttachments(from: urls)
+                    guard toolLibraryStore.addAttachments(from: urls) else { return }
+                    inferenceStore.generationPreferences.codingAgentPreference =
+                        ToolAttachmentSupport.preferenceAfterAddingAttachments(
+                            inferenceStore.generationPreferences.codingAgentPreference
+                        )
                 },
                 onRemoveAttachment: { id in
                     toolLibraryStore.removeAttachment(id: id)
@@ -564,14 +568,14 @@ struct ToolLibraryPopoverView: View {
         toolLibraryStore.currentCodingAgentResolutionContext(in: modelContext)
     }
 
-    private var selectedModelUsesCodex: Bool {
-        inferenceStore.selectedModelUsesCodex(resolutionContext: attachmentResolutionContext)
-    }
-
     private var selectedModelSupportsAttachments: Bool {
         inferenceStore.selectedModelSupportsAttachments(
             resolutionContext: attachmentResolutionContext
         )
+    }
+
+    private var selectedModelCanUseCodexAttachments: Bool {
+        inferenceStore.selectedModelCanUseCodexAttachments()
     }
 
     private var composerModelPickerTitle: String {

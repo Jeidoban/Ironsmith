@@ -6,7 +6,14 @@ nonisolated enum ToolAttachmentSupport {
         provider: ProviderConfig?,
         codingAgent: ToolCodingAgent
     ) -> Bool {
-        guard codingAgent == .codex, let model, let provider else { return false }
+        codingAgent == .codex && canUseCodexAttachments(model: model, provider: provider)
+    }
+
+    static func canUseCodexAttachments(
+        model: ModelConfig?,
+        provider: ProviderConfig?
+    ) -> Bool {
+        guard let model, let provider else { return false }
 
         switch provider.kind {
         case .openAI:
@@ -22,4 +29,10 @@ nonisolated enum ToolAttachmentSupport {
 
     static let unavailableMessage =
         "This provider or coding agent doesn't currently support attachments."
+
+    static func preferenceAfterAddingAttachments(
+        _ preference: ToolCodingAgentPreference
+    ) -> ToolCodingAgentPreference {
+        preference == .automatic ? .automatic : .codex
+    }
 }
