@@ -26,15 +26,18 @@ extension OpenAICodexPKCEAuthClient {
             try await Self.exchangeAuthorizationCode(code: code, verifier: verifier)
         }
     ) -> Self {
-        Self(
+        let signInCoordinator = OpenAICodexPKCESignInCoordinator()
+        return Self(
             signIn: {
-                let pkce = try generatePKCE()
-                let state = stateGenerator()
-                let authorizationURL = try authorizationURL(pkce: pkce, state: state)
-                let code = try await callbackServer.authorizationCode(state) {
-                    try await launchAuthorizationURL(authorizationURL)
+                try await signInCoordinator.replaceActiveSignIn {
+                    let pkce = try generatePKCE()
+                    let state = stateGenerator()
+                    let authorizationURL = try authorizationURL(pkce: pkce, state: state)
+                    let code = try await callbackServer.authorizationCode(state) {
+                        try await launchAuthorizationURL(authorizationURL)
+                    }
+                    return try await exchangeAuthorizationCode(code, pkce.verifier)
                 }
-                return try await exchangeAuthorizationCode(code, pkce.verifier)
             }
         )
     }
@@ -77,6 +80,52 @@ extension OpenAICodexPKCEAuthClient {
             ]
         )
         return OpenAICodexAuthClient.credential(from: response)
+    }
+}
+
+private actor OpenAICodexPKCESignInCoordinator {
+    private struct ActiveSignIn {
+        let id: UUID
+        let task: Task<OpenAICodexCredential, Error>
+    }
+
+    private var activeSignIn: ActiveSignIn?
+
+    func replaceActiveSignIn(
+        operation: @escaping @Sendable () async throws -> OpenAICodexCredential
+    ) async throws -> OpenAICodexCredential {
+        while let previousSignIn = activeSignIn {
+            previousSignIn.task.cancel()
+            _ = await previousSignIn.task.result
+            if activeSignIn?.id == previousSignIn.id {
+                activeSignIn = nil
+            }
+        }
+
+        try Task.checkCancellation()
+        let id = UUID()
+        let task = Task {
+            try await operation()
+        }
+        activeSignIn = ActiveSignIn(id: id, task: task)
+
+        do {
+            let credential = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            clearActiveSignIn(id: id)
+            return credential
+        } catch {
+            clearActiveSignIn(id: id)
+            throw error
+        }
+    }
+
+    private func clearActiveSignIn(id: UUID) {
+        guard activeSignIn?.id == id else { return }
+        activeSignIn = nil
     }
 }
 
@@ -173,7 +222,10 @@ nonisolated private final class OpenAICodexLoopbackOAuthServer: @unchecked Senda
                 return code
             }
         } onCancel: {
-            self.resume(throwing: CancellationError())
+            // Let Network.framework deliver `.cancelled` before resuming the
+            // sign-in task. The replacement coordinator waits for that task,
+            // so this guarantees port 1455 is released before it starts again.
+            self.stop()
         }
     }
 

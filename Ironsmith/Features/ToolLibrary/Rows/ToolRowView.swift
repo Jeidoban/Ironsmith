@@ -216,7 +216,7 @@ enum ToolRowGenerationStatusResolver {
         activeCodingAgent: ToolCodingAgent?
     ) -> String {
         if activeCodingAgent == .codex && isCodexOwnedPhase(phase) {
-            return "Codex is working"
+            return "Agent is working"
         }
 
         switch phase {

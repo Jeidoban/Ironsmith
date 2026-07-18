@@ -36,7 +36,6 @@ struct PromptComposerView: View {
     let onRemoveAttachment: (UUID) -> Void
     @State private var pendingPermission: GeneratedAppResourcePermission?
     @State private var isAttachmentDropTargeted = false
-    @State private var isShowingFileImporter = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -78,15 +77,6 @@ struct PromptComposerView: View {
             }
         } message: {
             Text(pendingPermission?.enablementWarningMessage ?? "")
-        }
-        .fileImporter(
-            isPresented: $isShowingFileImporter,
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: true
-        ) { result in
-            guard !isSubmitting else { return }
-            guard case .success(let urls) = result else { return }
-            onAddAttachments(urls)
         }
     }
 
@@ -172,7 +162,10 @@ struct PromptComposerView: View {
 
     private var attachmentButton: some View {
         Button {
-            isShowingFileImporter = true
+            PromptAttachmentOpenPanel.present { urls in
+                guard !isSubmitting else { return }
+                onAddAttachments(urls)
+            }
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 12, weight: .semibold))
@@ -490,6 +483,30 @@ struct PromptComposerView: View {
             updated.enabled.remove(permission)
         }
         sandboxPermissions = updated
+    }
+}
+
+@MainActor
+private enum PromptAttachmentOpenPanel {
+    static func present(onSelection: @escaping ([URL]) -> Void) {
+        let panel = NSOpenPanel()
+        panel.identifier = NSUserInterfaceItemIdentifier(
+            "com.jeidoban.ironsmith.prompt-attachments"
+        )
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.canCreateDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.resolvesAliases = true
+        panel.allowedContentTypes = [.item]
+        panel.isMovable = true
+
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK else { return }
+            onSelection(panel.urls)
+        }
+        panel.begin(completionHandler: completion)
+        panel.makeKeyAndOrderFront(nil)
     }
 }
 

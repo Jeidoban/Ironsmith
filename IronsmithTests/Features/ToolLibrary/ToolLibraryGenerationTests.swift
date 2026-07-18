@@ -361,28 +361,28 @@ extension ToolLibraryTests {
                 phase: .generatingSource,
                 repairErrorCount: nil,
                 activeCodingAgent: .codex
-            ) == "Codex is working"
+            ) == "Agent is working"
         )
         #expect(
             ToolRowGenerationStatusResolver.statusText(
                 phase: .generatingEditDiff,
                 repairErrorCount: nil,
                 activeCodingAgent: .codex
-            ) == "Codex is working"
+            ) == "Agent is working"
         )
         #expect(
             ToolRowGenerationStatusResolver.statusText(
                 phase: .generatingRepairDiff,
                 repairErrorCount: 2,
                 activeCodingAgent: .codex
-            ) == "Codex is working"
+            ) == "Agent is working"
         )
         #expect(
             ToolRowGenerationStatusResolver.statusText(
                 phase: .repairing,
                 repairErrorCount: 2,
                 activeCodingAgent: .codex
-            ) == "Codex is working"
+            ) == "Agent is working"
         )
         #expect(
             ToolRowGenerationStatusResolver.statusText(

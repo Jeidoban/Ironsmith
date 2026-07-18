@@ -67,7 +67,14 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
+        if let popoverWindow = popover.contentViewController?.view.window {
+            // NSPopover uses a menu-style window level by default, which can cover
+            // the app's Settings, About, Store, Agent Output, and open panels.
+            // Ironsmith keeps this popover open while those windows are presented,
+            // so use the normal app-window level and let key-window ordering win.
+            popoverWindow.level = .normal
+            popoverWindow.makeKey()
+        }
         NSRunningApplication.current.activate(options: [.activateAllWindows])
         button.state = .on
         presentationStore?.didShow()

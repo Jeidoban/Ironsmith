@@ -47,7 +47,7 @@ struct AgentOutputWindowView: View {
                     .font(.headline)
                     .lineLimit(1)
 
-                Text(isWorking ? "Codex is working" : "Codex output")
+                Text(isWorking ? "Agent is working" : "Agent output")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -57,7 +57,7 @@ struct AgentOutputWindowView: View {
             if isWorking {
                 ProgressView()
                     .controlSize(.small)
-                    .accessibilityLabel("Codex is working")
+                    .accessibilityLabel("Agent is working")
             }
         }
         .padding(16)
@@ -69,7 +69,7 @@ struct AgentOutputWindowView: View {
             emptyState(loadError)
         } else if snapshot.entries.isEmpty {
             VStack(spacing: 12) {
-                emptyState(isWorking ? "Waiting for Codex output" : "No Codex output")
+                emptyState(isWorking ? "Waiting for agent output" : "No agent output")
                 if isWorking {
                     workingRow
                         .padding(.horizontal, 18)
@@ -565,7 +565,7 @@ private struct AgentOutputWorkingRow: View {
     @State private var isBright = false
 
     var body: some View {
-        Text("Codex is working...")
+        Text("Agent is working...")
             .font(.callout)
             .foregroundStyle(.secondary)
             .opacity(isBright ? 1 : 0.45)
