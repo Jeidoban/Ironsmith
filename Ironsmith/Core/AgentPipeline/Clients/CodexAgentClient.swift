@@ -205,7 +205,8 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             return "\(summary): \(AgentDiagnosticsLog.compact(command, limit: 500))"
         case .fileChange(_, let changes, let status):
             guard status != "in_progress" else { return nil }
-            let changeSummary = changes
+            let changeSummary =
+                changes
                 .map { $0.diagnosticSummary }
                 .joined(separator: ", ")
             guard !changeSummary.isEmpty else { return nil }
@@ -220,7 +221,8 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             if let status = CodexAgentStatusFormatter.displayText(status) {
                 summary += " \(status)"
             }
-            return "\(summary): \(AgentDiagnosticsLog.compact(search.diagnosticSummary, limit: 500))"
+            return
+                "\(summary): \(AgentDiagnosticsLog.compact(search.diagnosticSummary, limit: 500))"
         case .todoList(_, let items, let status):
             guard status != "in_progress" else { return nil }
             let completedCount = items.count(where: \.completed)
@@ -258,7 +260,7 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             return itemEvent(object)
         case "item.updated":
             guard let item = object["item"] as? [String: Any],
-                  stringValue(in: item, keys: ["type"]) == "todo_list"
+                stringValue(in: item, keys: ["type"]) == "todo_list"
             else {
                 return nil
             }
@@ -396,7 +398,8 @@ nonisolated struct CodexAgentFileChange: Equatable, Sendable {
 
     var diagnosticSummary: String {
         if let kind, !kind.isEmpty {
-            return "\(CodexAgentStatusFormatter.displayText(kind) ?? kind) \(CodexAgentPathDisplay.compact(path))"
+            return
+                "\(CodexAgentStatusFormatter.displayText(kind) ?? kind) \(CodexAgentPathDisplay.compact(path))"
         }
         return CodexAgentPathDisplay.compact(path)
     }
@@ -433,7 +436,8 @@ nonisolated enum CodexAgentStatusFormatter {
         case "in_progress":
             return "In progress"
         default:
-            return status
+            return
+                status
                 .replacingOccurrences(of: "_", with: " ")
                 .split(separator: " ")
                 .map { word in
@@ -541,8 +545,8 @@ extension CodexAgentClient {
                 break
             case .customResponsesProvider(let provider):
                 if let environmentVariable = provider.authenticationEnvironmentVariable,
-                   let token = provider.authenticationToken,
-                   !token.isEmpty
+                    let token = provider.authenticationToken,
+                    !token.isEmpty
                 {
                     environment[environmentVariable] = token
                 }
@@ -653,42 +657,44 @@ extension CodexAgentClient {
             User-provided attachments:
             \(attachments.map { "- \($0.fileName): \($0.url.path)" }.joined(separator: "\n"))
 
-            Treat these files as read-only context. Inspect the relevant files when needed. Do not copy attachment binaries into the generated app.
+            Treat these files strictly as read-only context and not app assets. 
+            Inspect the relevant files when needed. Do not copy attachment binaries or any image data into the generated app.
+            These are temporary files that will be cleaned up after this session, so do not reference them in the generated app. 
             """
         return """
-        You are Codex running inside Ironsmith.
-        Build the requested macOS SwiftUI app by editing this generated Swift package.
+            You are Codex running inside Ironsmith.
+            Build the requested macOS SwiftUI app by editing this generated Swift package.
 
-        User request:
-        \(request.userPrompt)
-        \(attachmentContext)
+            User request:
+            \(request.userPrompt)
+            \(attachmentContext)
 
-        App name: \(request.displayName)
-        Fixed target and executable name: \(request.executableName)
-        \(ToolGenerationPrompts.appPresentationContext(appKind: request.appKind))
-        \(ToolGenerationPrompts.sandboxContext(sandboxEnabled: request.sandboxEnabled))
+            App name: \(request.displayName)
+            Fixed target and executable name: \(request.executableName)
+            \(ToolGenerationPrompts.appPresentationContext(appKind: request.appKind))
+            \(ToolGenerationPrompts.sandboxContext(sandboxEnabled: request.sandboxEnabled))
 
-        Rules:
-        - Create or edit only Sources/\(request.executableName)/ContentView.swift.
-        - Do not modify Package.swift.
-        - Do not modify Sources/\(request.executableName)/\(request.executableName).swift.
-        - Do not add other source files.
-        - Do not add package dependencies.
-        - Do not add previews or @main declarations.
-        - Run `swift build --disable-sandbox` when you need to check compilation.
-        - Use \(temporaryWorkspaceURL.path) for any temporary scratch files you deliberately create.
-        - Do not write deliberate scratch files directly in the top-level system temp directory.
-        - Ironsmith will clean up the temporary workspace after Codex exits.
-        - Keep working until ContentView.swift exists, is complete, and `swift build --disable-sandbox` succeeds.
-        - Define ContentView as the root View, but you may create helper types in the same file. Helper types must not conform to App.
-        - An entry point already exists and already calls ContentView, so do not add another @main or App type.
-        - This is a macOS SwiftUI app. Do not use iOS-only modifiers.
-        - This is a local only app. Do not add or imply a separate backend service, custom server component, account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync.
-        - Make the app feel native to macOS.
-        - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and local-only state.
-        - Apple frameworks and APIs are allowed and encouraged over custom solutions, but do not add any third-party dependencies.
-        \(finalRules)
-        """
+            Rules:
+            - Create or edit only Sources/\(request.executableName)/ContentView.swift.
+            - Do not modify Package.swift.
+            - Do not modify Sources/\(request.executableName)/\(request.executableName).swift.
+            - Do not add other source files.
+            - Do not add package dependencies.
+            - Do not add previews or @main declarations.
+            - Run `swift build --disable-sandbox` when you need to check compilation.
+            - Use \(temporaryWorkspaceURL.path) for any temporary scratch files you deliberately create.
+            - Do not write deliberate scratch files directly in the top-level system temp directory.
+            - Ironsmith will clean up the temporary workspace after Codex exits.
+            - Keep working until ContentView.swift exists, is complete, and `swift build --disable-sandbox` succeeds.
+            - Define ContentView as the root View, but you may create helper types in the same file. Helper types must not conform to App.
+            - An entry point already exists and already calls ContentView, so do not add another @main or App type.
+            - This is a macOS SwiftUI app. Do not use iOS-only modifiers.
+            - This is a local only app. Do not add or imply a separate backend service, custom server component, account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync.
+            - Make the app feel native to macOS.
+            - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and local-only state.
+            - Apple frameworks and APIs are allowed and encouraged over custom solutions, but do not add any third-party dependencies.
+            \(finalRules)
+            """
     }
 
     nonisolated private static func modelArgument(from identifier: String) -> String? {
@@ -728,7 +734,8 @@ extension CodexAgentClient {
     }
 
     nonisolated private static func tomlString(_ value: String) -> String {
-        let escaped = value
+        let escaped =
+            value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
