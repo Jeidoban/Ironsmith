@@ -468,16 +468,25 @@ stage_codex_resources() {
 codesign_file() {
   local file_url="$1"
   if [[ "$SIGN_IDENTITY" == "-" ]]; then
-    /usr/bin/codesign --force --sign "$SIGN_IDENTITY" "$file_url" >/dev/null
+    /usr/bin/codesign \
+      --force \
+      --sign "$SIGN_IDENTITY" \
+      --preserve-metadata=entitlements \
+      "$file_url" >/dev/null
   elif [[ "$RELEASE_BUILD" == true ]]; then
     /usr/bin/codesign \
       --force \
       --sign "$SIGN_IDENTITY" \
       --options runtime \
       --timestamp \
+      --preserve-metadata=entitlements \
       "$file_url" >/dev/null
   else
-    /usr/bin/codesign --force --sign "$SIGN_IDENTITY" "$file_url" >/dev/null
+    /usr/bin/codesign \
+      --force \
+      --sign "$SIGN_IDENTITY" \
+      --preserve-metadata=entitlements \
+      "$file_url" >/dev/null
   fi
 }
 
@@ -491,6 +500,31 @@ sign_codex_vendor_executables() {
     echo "Signing Codex executable $executable_url"
     codesign_file "$executable_url"
   done < <(find "$CODEX_VENDOR_RESOURCE_URL" -type f -perm -u+x)
+}
+
+verify_codex_jit_entitlements() {
+  local executable_name
+  local executable_url
+  local entitlements
+  local entitlement
+
+  for executable_name in codex codex-code-mode-host; do
+    executable_url="$(find "$CODEX_VENDOR_RESOURCE_URL" -type f -name "$executable_name" -perm -u+x -print -quit)"
+    if [[ -z "$executable_url" ]]; then
+      echo "Bundled Codex is missing required executable $executable_name." >&2
+      exit 1
+    fi
+
+    entitlements="$(/usr/bin/codesign -d --entitlements - "$executable_url" 2>/dev/null)"
+    for entitlement in \
+      com.apple.security.cs.allow-jit \
+      com.apple.security.cs.allow-unsigned-executable-memory; do
+      if [[ "$entitlements" != *"$entitlement"* ]]; then
+        echo "Bundled $executable_name is missing required entitlement $entitlement." >&2
+        exit 1
+      fi
+    done
+  done
 }
 
 build_native_executable() {
@@ -585,6 +619,7 @@ find "$RESOURCE_BUNDLE_BIN_DIR" \
 
 stage_codex_resources
 sign_codex_vendor_executables
+verify_codex_jit_entitlements
 
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   /usr/bin/codesign --force --sign "$SIGN_IDENTITY" "$APP_URL" >/dev/null
