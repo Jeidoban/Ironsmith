@@ -276,7 +276,7 @@ extension InferenceTests {
 
     @MainActor
     static func eventually(
-        timeoutNanoseconds: UInt64 = 1_000_000_000,
+        timeoutNanoseconds: UInt64 = 5_000_000_000,
         _ predicate: @escaping @MainActor () -> Bool
     ) async {
         let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds

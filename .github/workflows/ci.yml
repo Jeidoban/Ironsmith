@@ -7,8 +7,42 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect Swift changes
+    runs-on: ubuntu-latest
+    outputs:
+      swift: ${{ steps.filter.outputs.swift }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect Swift changes
+        id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          swift_changed=false
+          while IFS= read -r path; do
+            case "$path" in
+              Ironsmith/*.swift|IronsmithTests/*.swift|Package.swift|Package.resolved|script/test.sh)
+                swift_changed=true
+                break
+                ;;
+            esac
+          done < <(git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA")
+
+          echo "swift=$swift_changed" >> "$GITHUB_OUTPUT"
+
   test:
     name: Tests
+    needs: changes
+    if: needs.changes.outputs.swift == 'true'
     runs-on: macos-26
 
     steps:
@@ -17,4 +51,3 @@ jobs:
 
       - name: Run tests
         run: script/test.sh
-

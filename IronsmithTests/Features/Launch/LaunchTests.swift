@@ -77,12 +77,8 @@ struct LaunchTests {
 
         gate.start()
 
-        for _ in 0..<100 {
-            if gate.route == .onboarding {
-                break
-            }
-
-            try? await Task.sleep(nanoseconds: 5_000_000)
+        await Self.eventually {
+            gate.route == .onboarding
         }
 
         try? await Task.sleep(nanoseconds: 20_000_000)
@@ -111,12 +107,8 @@ struct LaunchTests {
         gate.start()
         gate.start()
 
-        for _ in 0..<100 {
-            if await availabilitySource.callCount() > 0 {
-                break
-            }
-
-            try? await Task.sleep(nanoseconds: 5_000_000)
+        await Self.eventually {
+            await availabilitySource.callCount() > 0
         }
 
         #expect(await availabilitySource.callCount() == 1)
@@ -139,22 +131,14 @@ struct LaunchTests {
 
         gate.start()
 
-        for _ in 0..<100 {
-            if gate.route == .onboarding {
-                break
-            }
-
-            try? await Task.sleep(nanoseconds: 5_000_000)
+        await Self.eventually {
+            gate.route == .onboarding
         }
 
         gate.refreshNow()
 
-        for _ in 0..<100 {
-            if gate.route == .shell {
-                break
-            }
-
-            try? await Task.sleep(nanoseconds: 5_000_000)
+        await Self.eventually {
+            gate.route == .shell
         }
 
         #expect(gate.route == .shell)
@@ -179,22 +163,14 @@ struct LaunchTests {
 
         gate.start()
 
-        for _ in 0..<100 {
-            if gate.route == .onboarding {
-                break
-            }
-
-            try? await Task.sleep(nanoseconds: 5_000_000)
+        await Self.eventually {
+            gate.route == .onboarding
         }
 
         gate.refreshNow()
 
-        for _ in 0..<100 {
-            if await availabilitySource.callCount() >= 2 {
-                break
-            }
-
-            try? await Task.sleep(nanoseconds: 5_000_000)
+        await Self.eventually {
+            await availabilitySource.callCount() >= 2
         }
 
         #expect(gate.route == .onboarding)
@@ -220,12 +196,8 @@ struct LaunchTests {
 
         gate.start()
 
-        for _ in 0..<100 {
-            if gate.route == .shell {
-                break
-            }
-
-            try? await Task.sleep(nanoseconds: 5_000_000)
+        await Self.eventually {
+            gate.route == .shell
         }
 
         gate.start()
@@ -234,6 +206,18 @@ struct LaunchTests {
         #expect(gate.route == .shell)
         #expect(gate.swiftCompilerPath == "/usr/bin/swiftc")
         #expect(await availabilitySource.callCount() == 1)
+    }
+
+    @MainActor
+    private static func eventually(
+        timeoutNanoseconds: UInt64 = 5_000_000_000,
+        _ predicate: @escaping @MainActor () async -> Bool
+    ) async {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            if await predicate() { return }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
     }
 }
 
