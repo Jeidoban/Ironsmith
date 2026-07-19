@@ -14,12 +14,10 @@
 
 ## What It Does
 
-- **Builds real Mac apps.** Generated apps are Swift and SwiftUI apps, no Electron to be found.
-- **Lives in your menu bar.** Makes it very convenient to create a new app, run saved apps, edit an existing app, restore a previous version, view the code, or export a finished app bundle.
-- **Works with local AI.** Ironsmith was designed with local AI support in mind, and has Ollama support out of the box. You can also connect any OpenAI compatible API, so LM Studio and Llama.cpp work great too. You can even build very simple apps with Apple's built in Foundation Model.
-- **Supports hosted models too.** Bring your own API keys for OpenAI, Anthropic, and Gemini, log in or skip the API key and sign into Ironsmith to access them immediately.
-- **Reuses your existing ChatGPT subscription.** Log in with your ChatGPT account and pull from your Codex usage instead of paying API pricing.
-- **Supports multiple coding Agents** Choose from Ironsmith's in-house agents made specifically for creating tiny macOS apps, or use OpenAI's premier agent Codex for complex projects.
+- **Builds real Mac apps.** Generated apps are native Swift and SwiftUI apps that you can create, run, edit, and export from the menu bar.
+- **Works with local AI.** Ironsmith was designed with local AI support in mind, and has Ollama support out of the box. You can also connect any OpenAI compatible API, so LM Studio and Llama.cpp work great too.
+- **Supports hosted models too.** Bring your own API keys for OpenAI, Anthropic, and Gemini, log in or skip the API key and sign into Ironsmith to access them immediately. Using your existing ChatGPT login is also supported.
+- **Offers specialized coding agents.** Choose Ironsmith's in-house agents for tiny macOS apps or OpenAI's Codex for more complex projects.
 - **Doesn't require Xcode.** Every generated app is a Swift package and is built entirely with the lightweight Xcode command line tools rather than full Xcode. In fact Ironsmith itself doesn't even use Xcode!
 - **Sandboxes every app by default.** Generated apps are built as signed app bundles with sandboxing and hardened runtime enabled, greatly reducing the impact of bugs, mistakes, or malicious behavior. Sensitive permissions such as camera and microphone access must also be explicitly enabled. However, you can disable these protections, and if you do, it’s highly recommended that you review the code before running it.
 

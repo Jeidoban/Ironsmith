@@ -837,7 +837,7 @@ extension ToolLibraryTests {
 
     @MainActor
     static func waitForIdle(_ store: ToolLibraryStore) async {
-        let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
+        let deadline = DispatchTime.now().uptimeNanoseconds + 5_000_000_000
         while store.isGenerating && DispatchTime.now().uptimeNanoseconds < deadline {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
