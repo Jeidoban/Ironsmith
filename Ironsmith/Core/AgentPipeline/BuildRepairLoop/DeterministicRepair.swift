@@ -48,7 +48,8 @@ extension ContentViewBuildRepairLoop {
                     originalSource: currentState.source,
                     previousContentViewErrorCount: currentState.contentViewErrors.count,
                     phase: "\(phasePrefix) \(pass)",
-                    rollbackSubject: "Deterministic repair"
+                    rollbackSubject: "Deterministic repair",
+                    origin: .deterministicRepair
                 )
             ) {
             case .finished:

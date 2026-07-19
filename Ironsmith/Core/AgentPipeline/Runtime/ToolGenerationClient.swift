@@ -28,6 +28,7 @@ struct ToolGenerationLifecycle {
         _ preparedTool: ToolGenerationPreparedTool,
         _ prompt: String
     ) async throws -> Void
+    nonisolated(unsafe) let didPersistAttachments: (_ attachmentIDs: [UUID]) async throws -> Void
     nonisolated(unsafe) let updatePendingPrompt: (_ prompt: String) async throws -> Void
     nonisolated(unsafe) let updateRepairErrorCount: (_ count: Int?) async throws -> Void
     nonisolated(unsafe) let updatePhase: (
@@ -42,6 +43,7 @@ struct ToolGenerationLifecycle {
             _ preparedTool: ToolGenerationPreparedTool,
             _ prompt: String
         ) async throws -> Void = { _, _ in },
+        didPersistAttachments: @escaping (_ attachmentIDs: [UUID]) async throws -> Void = { _ in },
         updatePendingPrompt: @escaping (_ prompt: String) async throws -> Void = { _ in },
         updateRepairErrorCount: @escaping (_ count: Int?) async throws -> Void = { _ in },
         updatePhase: @escaping (
@@ -52,6 +54,7 @@ struct ToolGenerationLifecycle {
     ) {
         self.preservesCreatedPackageOnCancellation = preservesCreatedPackageOnCancellation
         self.prepareCreatedTool = prepareCreatedTool
+        self.didPersistAttachments = didPersistAttachments
         self.updatePendingPrompt = updatePendingPrompt
         self.updateRepairErrorCount = updateRepairErrorCount
         self.updatePhase = updatePhase
@@ -68,6 +71,7 @@ nonisolated struct ToolGenerationRequest {
     let settings: ToolGenerationSettings
     let languageModelContext: AgentLanguageModelContext
     let imageGenerationProvider: ToolImageGenerationProvider
+    let attachments: [ToolPromptAttachment]
     let lifecycle: ToolGenerationLifecycle
 
     init(
@@ -76,6 +80,7 @@ nonisolated struct ToolGenerationRequest {
         settings: ToolGenerationSettings,
         languageModelContext: AgentLanguageModelContext,
         imageGenerationProvider: ToolImageGenerationProvider = .disabled,
+        attachments: [ToolPromptAttachment] = [],
         lifecycle: ToolGenerationLifecycle = .noop
     ) {
         self.prompt = prompt
@@ -83,6 +88,7 @@ nonisolated struct ToolGenerationRequest {
         self.settings = settings
         self.languageModelContext = languageModelContext
         self.imageGenerationProvider = imageGenerationProvider
+        self.attachments = attachments
         self.lifecycle = lifecycle
     }
 }
@@ -124,6 +130,7 @@ struct ToolGenerationClient {
                     existingTool: request.existingTool,
                     settings: request.settings,
                     imageGenerationProvider: request.imageGenerationProvider,
+                    attachments: request.attachments,
                     lifecycle: request.lifecycle
                 )
             },

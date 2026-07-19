@@ -849,6 +849,13 @@ extension ToolLibraryTests {
         try #"Text("failed edit progress")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
         try #"Text("last ready")"#.write(to: layout.pendingContentViewVersionURL, atomically: true, encoding: .utf8)
         try "partial patch".write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: layout.currentRunAttachmentsDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try Data("attachment".utf8).write(
+            to: layout.currentRunAttachmentsDirectoryURL.appendingPathComponent("1-notes.txt")
+        )
 
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
@@ -865,7 +872,18 @@ extension ToolLibraryTests {
         context.insert(tool)
         try context.save()
 
-        let store = ToolLibraryStore()
+        let cleanupCapture = ToolAttachmentCleanupCapture()
+        let liveAttachmentStorage = ToolPromptAttachmentStorage.live
+        var dependencies = ToolLibraryDependencies.live
+        dependencies.attachmentStorage = ToolPromptAttachmentStorage(
+            replaceCurrentRun: liveAttachmentStorage.replaceCurrentRun,
+            currentRun: liveAttachmentStorage.currentRun,
+            removeCurrentRun: { layout in
+                cleanupCapture.record(layout)
+                try liveAttachmentStorage.removeCurrentRun(layout)
+            }
+        )
+        let store = ToolLibraryStore(dependencies: dependencies)
         store.discardGeneration(tool, in: context)
 
         #expect(tool.generationState == .ready)
@@ -876,7 +894,24 @@ extension ToolLibraryTests {
         #expect(FileManager.default.fileExists(atPath: packageRoot.path))
         #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
         #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewVersionURL.path)))
+        #expect(!(FileManager.default.fileExists(atPath: layout.currentRunAttachmentsDirectoryURL.path)))
+        #expect(cleanupCapture.removedLayout == layout)
         #expect(try String(contentsOf: contentViewURL, encoding: .utf8) == #"Text("last ready")"#)
         #expect(store.presentedErrorMessage == nil)
+    }
+}
+
+nonisolated private final class ToolAttachmentCleanupCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedLayout: ToolPackageLayout?
+
+    var removedLayout: ToolPackageLayout? {
+        lock.withLock { recordedLayout }
+    }
+
+    func record(_ layout: ToolPackageLayout) {
+        lock.withLock {
+            recordedLayout = layout
+        }
     }
 }

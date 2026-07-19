@@ -286,12 +286,36 @@ extension AgentPipelineTests {
     >>>>>>> REPLACE
     """
 
+    static let renameOldToNewUnifiedDiff = """
+    --- a/ContentView.swift
+    +++ b/ContentView.swift
+    @@ -3,5 +3,5 @@
+     struct ContentView: View {
+         var body: some View {
+    -            Text("old")
+    +            Text("new")
+         }
+     }
+    """
+
     static let breakOldTextPatch = """
     <<<<<<< SEARCH
             Text("old")
     =======
             Text("broken").definitelyNotReal()
     >>>>>>> REPLACE
+    """
+
+    static let breakOldTextUnifiedDiff = """
+    --- a/ContentView.swift
+    +++ b/ContentView.swift
+    @@ -3,5 +3,5 @@
+     struct ContentView: View {
+         var body: some View {
+    -            Text("old")
+    +            Text("broken").definitelyNotReal()
+         }
+     }
     """
 }
 
@@ -536,6 +560,7 @@ actor BudgetExhaustionResponses {
     private let regeneratedSource: String
     private(set) var generationCount = 0
     private(set) var repairCount = 0
+    private(set) var diagnosticRewriteCount = 0
 
     init(brokenSource: String, regeneratedSource: String) {
         self.brokenSource = brokenSource
@@ -543,14 +568,18 @@ actor BudgetExhaustionResponses {
     }
 
     func next(_ prompt: Prompt) throws -> String {
+        if prompt.description.contains("Narrow compiler repair stalled on this app.") {
+            diagnosticRewriteCount += 1
+            return regeneratedSource
+        }
         if prompt.description.contains("Build failed for ContentView.swift.") {
             repairCount += 1
             return """
-            <<<<<<< SEARCH
-                        Text("Broken \(repairCount)").missing\(repairCount)()
-            =======
-                        Text("Fixed \(repairCount)")
-            >>>>>>> REPLACE
+            --- a/ContentView.swift
+            +++ b/ContentView.swift
+            @@ -1,1 +1,1 @@
+            -            Text("Broken \(repairCount)").missing\(repairCount)()
+            +            Text("Fixed \(repairCount)")
             """
         }
 
@@ -669,6 +698,38 @@ actor UnsupportedModifierBuilds {
         \(contentViewURL.path):\(line):24: error: value of type 'Text' has no member 'definitelyNotReal'
         """
         return SwiftPackageBuildResult(succeeded: false, stdout: output, stderr: "", terminationStatus: 1)
+    }
+}
+
+actor ModelConversationBuilds {
+    private let executableName: String
+    private(set) var count = 0
+
+    init(executableName: String) {
+        self.executableName = executableName
+    }
+
+    func next(packageRoot: URL) -> SwiftPackageBuildResult {
+        count += 1
+        let contentViewURL = packageRoot.appendingPathComponent("Sources/\(executableName)/ContentView.swift")
+        let source = (try? String(contentsOf: contentViewURL, encoding: .utf8)) ?? ""
+        let lines = source.components(separatedBy: .newlines)
+        if let index = lines.firstIndex(where: { $0.contains("definitelyNotReal") }) {
+            let line = index + 1
+            let output = """
+            \(contentViewURL.path):\(line):45: error: value of type 'Text' has no member 'definitelyNotReal'
+            """
+            return SwiftPackageBuildResult(succeeded: false, stdout: output, stderr: "", terminationStatus: 1)
+        }
+        if let index = lines.firstIndex(where: { $0.contains("newIdx< tokens.count") }) {
+            let line = index + 1
+            let output = """
+            \(contentViewURL.path):\(line):30: error: expected '{' after 'if' condition
+            \(line) |                 if newIdx< tokens.count {
+            """
+            return SwiftPackageBuildResult(succeeded: false, stdout: output, stderr: "", terminationStatus: 1)
+        }
+        return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
     }
 }
 

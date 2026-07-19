@@ -54,12 +54,55 @@ extension InferenceStore {
                 provider: provider,
                 codingAgent: codingAgent
             ),
+            codingAgentSupportsImageInput: ToolAttachmentSupport.isSupported(
+                model: selectedModel,
+                provider: provider,
+                codingAgent: codingAgent
+            ),
             reasoningEffort: reasoningEffort,
             afterLanguageModelInvocation: { [weak self] in
                 guard shouldRefreshIronsmithCredits else { return }
                 await self?.refreshIronsmithAccountSummary()
             }
         )
+    }
+
+    func selectedModelSupportsAttachments(
+        resolutionContext: ToolCodingAgentResolutionContext = .create
+    ) -> Bool {
+        guard let selectedModel else { return false }
+        let provider = provider(for: selectedModel)
+        let codingAgent = ToolCodingAgentResolver.resolve(
+            requested: generationPreferences.codingAgentPreference,
+            model: selectedModel,
+            provider: provider,
+            context: resolutionContext
+        )
+        return ToolAttachmentSupport.isSupported(
+            model: selectedModel,
+            provider: provider,
+            codingAgent: codingAgent
+        )
+    }
+
+    func selectedModelCanUseCodexAttachments() -> Bool {
+        guard let selectedModel else { return false }
+        return ToolAttachmentSupport.canUseCodexAttachments(
+            model: selectedModel,
+            provider: provider(for: selectedModel)
+        )
+    }
+
+    func selectedModelUsesCodex(
+        resolutionContext: ToolCodingAgentResolutionContext = .create
+    ) -> Bool {
+        guard let selectedModel else { return false }
+        return ToolCodingAgentResolver.resolve(
+            requested: generationPreferences.codingAgentPreference,
+            model: selectedModel,
+            provider: provider(for: selectedModel),
+            context: resolutionContext
+        ) == .codex
     }
 
     func prepareSelectedModelForGeneration() async throws {

@@ -29,7 +29,7 @@ struct ContentViewBuildRepairLoop {
         let source: String
     }
 
-    enum SkippedRepairReason {
+    enum SkippedRepairReason: Equatable {
         case invalidRepairPatch
         case noDeterministicRepair
 
@@ -64,10 +64,51 @@ struct ContentViewBuildRepairLoop {
         case rolledBack
     }
 
+    enum ModelRepairRegenerationReason: Equatable {
+        case contextWindowExceeded
+        case repeatedSkippedRepair(SkippedRepairReason)
+        case repeatedNoProgressPatches
+        case repeatedRolledBackPatches
+        case budgetExhausted(Int)
+
+        var description: String {
+            switch self {
+            case .contextWindowExceeded:
+                return "model repair exceeded the context window after compaction"
+            case .repeatedSkippedRepair(let reason):
+                return "model produced repeated \(reason.regenerationTitle)"
+            case .repeatedNoProgressPatches:
+                return "model accepted repeated no-progress patches"
+            case .repeatedRolledBackPatches:
+                return "model patches repeatedly rolled back"
+            case .budgetExhausted(let repairBudget):
+                return "model repair budget exhausted after \(repairBudget) attempts"
+            }
+        }
+
+        var allowsDiagnosticWholeFileRewrite: Bool {
+            switch self {
+            case .contextWindowExceeded:
+                return false
+            case .repeatedSkippedRepair,
+                 .repeatedNoProgressPatches,
+                 .repeatedRolledBackPatches,
+                 .budgetExhausted:
+                return true
+            }
+        }
+    }
+
     enum CandidateRepairResult {
         case finished
-        case regenerate(String)
+        case regenerate(ModelRepairRegenerationReason, BuildState)
         case failed(BuildState)
+    }
+
+    enum DiagnosticWholeFileRewriteResult {
+        case finished
+        case candidate(BuildState)
+        case unavailable(String)
     }
 
     enum FailureRecovery {
@@ -87,6 +128,10 @@ struct ContentViewBuildRepairLoop {
         var lastFailureMessage: String?
         var pendingRegenerationReason: String?
         var consecutiveRetryableCandidateFailures = 0
+        var attemptedDiagnosticWholeFileRewrite = false
+        let diagnosticRewrite = context.pipelineConfiguration.diagnosticWholeFileRewriteEnabled
+            ? generator.diagnosticRewrite
+            : nil
 
         do {
             candidateLoop: for generationAttempt in 1...maximumGenerationAttempts {
@@ -107,7 +152,7 @@ struct ContentViewBuildRepairLoop {
                 do {
                     try await activeGenerator.writeFreshCandidate(makeGenerationSession(instructions: activeGenerator.instructions))
                     try Task.checkCancellation()
-                    try await Self.cleanContentViewSource(contentViewPath, layout: layout, context: context)
+                    try await Self.prepareContentViewSource(contentViewPath, layout: layout, context: context)
                     consecutiveRetryableCandidateFailures = 0
                 } catch where ToolGenerationError.isContextWindowExceeded(error) {
                     AgentDiagnosticsLog.append(
@@ -225,19 +270,63 @@ struct ContentViewBuildRepairLoop {
                     continue
                 }
 
-                switch try await runModelRepairForCurrentCandidate(
-                    startingFrom: state,
-                    bestCandidate: &bestCandidate
-                ) {
-                case .finished:
-                    return
-                case .regenerate(let reason):
-                    pendingRegenerationReason = reason
-                    continue
-                case .failed(let failedState):
-                    lastFailedState = failedState
-                    lastFailureMessage = "ContentView.swift still has \(failedState.contentViewErrors.count) compiler errors after repair attempts."
-                    break candidateLoop
+                var repairState = state
+                repairCycle: while true {
+                    switch try await runModelRepairForCurrentCandidate(
+                        startingFrom: repairState,
+                        bestCandidate: &bestCandidate
+                    ) {
+                    case .finished:
+                        return
+                    case .regenerate(let reason, let stalledState):
+                        repairState = stalledState
+                        lastFailedState = stalledState
+                        guard !attemptedDiagnosticWholeFileRewrite,
+                              reason.allowsDiagnosticWholeFileRewrite,
+                              let diagnosticRewrite
+                        else {
+                            pendingRegenerationReason = reason.description
+                            continue candidateLoop
+                        }
+
+                        attemptedDiagnosticWholeFileRewrite = true
+                        switch try await runDiagnosticWholeFileRewrite(
+                            diagnosticRewrite,
+                            startingFrom: stalledState,
+                            trigger: reason
+                        ) {
+                        case .finished:
+                            return
+                        case .candidate(let rewrittenState):
+                            repairState = rewrittenState
+                            lastFailedState = rewrittenState
+                            try await lifecycle.updateRepairErrorCount(
+                                rewrittenState.contentViewErrors.isEmpty
+                                    ? nil
+                                    : rewrittenState.contentViewErrors.count
+                            )
+                            recordBestCandidate(
+                                from: rewrittenState,
+                                phase: "diagnostic whole-file rewrite",
+                                bestCandidate: &bestCandidate
+                            )
+                            AgentDiagnosticsLog.append(
+                                """
+                                Starting fresh model repair after diagnostic whole-file rewrite.
+                                packageRoot: \(layout.packageRootURL.path)
+                                contentViewErrorCount: \(rewrittenState.contentViewErrors.count)
+                                """
+                            )
+                            continue repairCycle
+                        case .unavailable(let rewriteFailure):
+                            pendingRegenerationReason = "\(reason.description); \(rewriteFailure)"
+                            continue candidateLoop
+                        }
+                    case .failed(let failedState):
+                        lastFailedState = failedState
+                        lastFailureMessage = "ContentView.swift still has \(failedState.contentViewErrors.count) compiler errors after repair attempts."
+                        break candidateLoop
+                    }
                 }
             }
         } catch where IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {

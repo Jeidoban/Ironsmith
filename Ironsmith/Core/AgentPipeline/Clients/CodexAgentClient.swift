@@ -47,6 +47,7 @@ nonisolated struct CodexAgentRequest: Sendable {
     let modelIdentifier: String
     let reasoningEffort: ToolReasoningEffort
     let authentication: CodexAgentAuthentication
+    let supportsImageInput: Bool
     let onEvent: @Sendable (CodexAgentEvent) async -> Void
 
     var toolCompatibility: CodexAgentToolCompatibility {
@@ -77,6 +78,7 @@ nonisolated struct CodexAgentRequest: Sendable {
         modelIdentifier: String,
         reasoningEffort: ToolReasoningEffort = .default,
         authentication: CodexAgentAuthentication,
+        supportsImageInput: Bool = true,
         onEvent: @escaping @Sendable (CodexAgentEvent) async -> Void = { _ in }
     ) {
         self.packageRootURL = packageRootURL
@@ -88,6 +90,7 @@ nonisolated struct CodexAgentRequest: Sendable {
         self.modelIdentifier = modelIdentifier
         self.reasoningEffort = reasoningEffort
         self.authentication = authentication
+        self.supportsImageInput = supportsImageInput
         self.onEvent = onEvent
     }
 }
@@ -202,7 +205,8 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             return "\(summary): \(AgentDiagnosticsLog.compact(command, limit: 500))"
         case .fileChange(_, let changes, let status):
             guard status != "in_progress" else { return nil }
-            let changeSummary = changes
+            let changeSummary =
+                changes
                 .map { $0.diagnosticSummary }
                 .joined(separator: ", ")
             guard !changeSummary.isEmpty else { return nil }
@@ -217,7 +221,8 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             if let status = CodexAgentStatusFormatter.displayText(status) {
                 summary += " \(status)"
             }
-            return "\(summary): \(AgentDiagnosticsLog.compact(search.diagnosticSummary, limit: 500))"
+            return
+                "\(summary): \(AgentDiagnosticsLog.compact(search.diagnosticSummary, limit: 500))"
         case .todoList(_, let items, let status):
             guard status != "in_progress" else { return nil }
             let completedCount = items.count(where: \.completed)
@@ -255,7 +260,7 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             return itemEvent(object)
         case "item.updated":
             guard let item = object["item"] as? [String: Any],
-                  stringValue(in: item, keys: ["type"]) == "todo_list"
+                stringValue(in: item, keys: ["type"]) == "todo_list"
             else {
                 return nil
             }
@@ -393,7 +398,8 @@ nonisolated struct CodexAgentFileChange: Equatable, Sendable {
 
     var diagnosticSummary: String {
         if let kind, !kind.isEmpty {
-            return "\(CodexAgentStatusFormatter.displayText(kind) ?? kind) \(CodexAgentPathDisplay.compact(path))"
+            return
+                "\(CodexAgentStatusFormatter.displayText(kind) ?? kind) \(CodexAgentPathDisplay.compact(path))"
         }
         return CodexAgentPathDisplay.compact(path)
     }
@@ -430,7 +436,8 @@ nonisolated enum CodexAgentStatusFormatter {
         case "in_progress":
             return "In progress"
         default:
-            return status
+            return
+                status
                 .replacingOccurrences(of: "_", with: " ")
                 .split(separator: " ")
                 .map { word in
@@ -454,6 +461,18 @@ nonisolated struct CodexAgentClient: Sendable {
     var run: @Sendable (CodexAgentRequest) async throws -> CodexAgentResult
 }
 
+nonisolated private enum CodexAgentAttachmentAccess {
+    case readOnly
+    case denied
+
+    var filesystemAccess: String {
+        switch self {
+        case .readOnly: "read"
+        case .denied: "deny"
+        }
+    }
+}
+
 extension CodexAgentClient {
     nonisolated private static let portableToolArguments = [
         "-c", #"web_search="disabled""#,
@@ -471,6 +490,7 @@ extension CodexAgentClient {
     nonisolated static func live(
         cliClient: CodexCLIClient = .live(),
         openAICodexAuthClient: OpenAICodexAuthClient = .live(),
+        attachmentStorage: ToolPromptAttachmentStorage = .live,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
     ) -> Self {
         Self { request in
@@ -484,15 +504,30 @@ extension CodexAgentClient {
                 customProviderArguments = configurationArguments(for: provider)
             }
 
-            let resumeSessionID = CodexAgentTranscriptReader.latestThreadID(
+            let latestSession = CodexAgentTranscriptReader.latestSession(
                 for: request.packageRootURL,
                 providerIdentifier: request.sessionProviderIdentifier,
                 toolCompatibility: request.toolCompatibility
             )
+            let layout = ToolPackageLayout(
+                packageRootURL: request.packageRootURL,
+                executableName: request.executableName
+            )
+            let storedAttachments = try attachmentStorage.currentRun(layout)
+            let exposedAttachments = request.supportsImageInput ? storedAttachments : []
+            let storedRunContainsImages = storedAttachments.contains(where: \.isImage)
+            let resumeSession = latestSession.flatMap { session in
+                !request.supportsImageInput
+                    && (session.containsImageContext || storedRunContainsImages) ? nil : session
+            }
+            let containsImageContext =
+                (resumeSession?.containsImageContext ?? false)
+                || exposedAttachments.contains(where: \.isImage)
             let transcriptFile = try CodexAgentTranscriptFile(
                 packageRootURL: request.packageRootURL,
                 providerIdentifier: request.sessionProviderIdentifier,
-                toolCompatibility: request.toolCompatibility
+                toolCompatibility: request.toolCompatibility,
+                containsImageContext: containsImageContext
             )
             let swiftBuildWorkspace = try CodexAgentSwiftBuildWorkspace.create(
                 temporaryDirectory: temporaryDirectory
@@ -500,6 +535,8 @@ extension CodexAgentClient {
             defer {
                 try? swiftBuildWorkspace.remove()
             }
+            let attachmentAccess: CodexAgentAttachmentAccess =
+                exposedAttachments.isEmpty ? .denied : .readOnly
             var environment = swiftBuildWorkspace.environment
             switch request.authentication {
             case .apiKey(let apiKey):
@@ -508,22 +545,21 @@ extension CodexAgentClient {
                 break
             case .customResponsesProvider(let provider):
                 if let environmentVariable = provider.authenticationEnvironmentVariable,
-                   let token = provider.authenticationToken,
-                   !token.isEmpty
+                    let token = provider.authenticationToken,
+                    !token.isEmpty
                 {
                     environment[environmentVariable] = token
                 }
             }
 
             var arguments = ["exec"]
+            arguments.append(contentsOf: attachmentPermissionArguments(attachmentAccess))
             arguments.append(contentsOf: customProviderArguments)
             if request.toolCompatibility == .portable {
                 arguments.append(contentsOf: portableToolArguments)
             }
             arguments.append(contentsOf: [
                 "--json",
-                "--sandbox",
-                "workspace-write",
                 "--cd",
                 request.packageRootURL.path,
                 "--skip-git-repo-check",
@@ -536,14 +572,26 @@ extension CodexAgentClient {
                     "-c", "model_reasoning_effort=\(tomlString(request.reasoningEffort.rawValue))",
                 ])
             }
-            if let resumeSessionID {
-                arguments.append(contentsOf: ["resume", resumeSessionID])
+            if let resumeSession {
+                arguments.append("resume")
+                for attachment in exposedAttachments where attachment.isImage {
+                    arguments.append(contentsOf: ["--image", attachment.url.path])
+                }
+                arguments.append(resumeSession.threadID)
+            } else {
+                for attachment in exposedAttachments where attachment.isImage {
+                    arguments.append(contentsOf: ["--image", attachment.url.path])
+                }
+                if exposedAttachments.contains(where: \.isImage) {
+                    arguments.append("--")
+                }
             }
             arguments.append(
                 prompt(
                     for: request,
                     temporaryWorkspaceURL: swiftBuildWorkspace.rootURL,
-                    toolCompatibility: request.toolCompatibility
+                    toolCompatibility: request.toolCompatibility,
+                    attachments: exposedAttachments
                 )
             )
 
@@ -589,7 +637,8 @@ extension CodexAgentClient {
     nonisolated static func prompt(
         for request: CodexAgentRequest,
         temporaryWorkspaceURL: URL,
-        toolCompatibility: CodexAgentToolCompatibility? = nil
+        toolCompatibility: CodexAgentToolCompatibility? = nil,
+        attachments: [ToolPersistedPromptAttachment] = []
     ) -> String {
         let resolvedToolCompatibility = toolCompatibility ?? request.toolCompatibility
         let finalRules = [
@@ -600,39 +649,52 @@ extension CodexAgentClient {
         ]
         .compactMap { $0 }
         .joined(separator: "\n")
+        let attachmentContext =
+            attachments.isEmpty
+            ? ""
+            : """
+
+            User-provided attachments:
+            \(attachments.map { "- \($0.fileName): \($0.url.path)" }.joined(separator: "\n"))
+
+            Treat these files strictly as read-only context and not app assets.
+            Inspect the relevant files when needed. Do not copy attachment binaries or any image data into the generated app.
+            These are temporary files that will be cleaned up after this session, so do not reference them in the generated app.
+            """
         return """
-        You are Codex running inside Ironsmith.
-        Build the requested macOS SwiftUI app by editing this generated Swift package.
+            You are Codex running inside Ironsmith.
+            Build the requested macOS SwiftUI app by editing this generated Swift package.
 
-        User request:
-        \(request.userPrompt)
+            User request:
+            \(request.userPrompt)
+            \(attachmentContext)
 
-        App name: \(request.displayName)
-        Fixed target and executable name: \(request.executableName)
-        \(ToolGenerationPrompts.appPresentationContext(appKind: request.appKind))
-        \(ToolGenerationPrompts.sandboxContext(sandboxEnabled: request.sandboxEnabled))
+            App name: \(request.displayName)
+            Fixed target and executable name: \(request.executableName)
+            \(ToolGenerationPrompts.appPresentationContext(appKind: request.appKind))
+            \(ToolGenerationPrompts.sandboxContext(sandboxEnabled: request.sandboxEnabled))
 
-        Rules:
-        - Create or edit only Sources/\(request.executableName)/ContentView.swift.
-        - Do not modify Package.swift.
-        - Do not modify Sources/\(request.executableName)/\(request.executableName).swift.
-        - Do not add other source files.
-        - Do not add package dependencies.
-        - Do not add previews or @main declarations.
-        - Run `swift build --disable-sandbox` when you need to check compilation.
-        - Use \(temporaryWorkspaceURL.path) for any temporary scratch files you deliberately create.
-        - Do not write deliberate scratch files directly in the top-level system temp directory.
-        - Ironsmith will clean up the temporary workspace after Codex exits.
-        - Keep working until ContentView.swift exists, is complete, and `swift build --disable-sandbox` succeeds.
-        - Define ContentView as the root View, but you may create helper types in the same file. Helper types must not conform to App.
-        - An entry point already exists and already calls ContentView, so do not add another @main or App type.
-        - This is a macOS SwiftUI app. Do not use iOS-only modifiers.
-        - This is a local only app. Do not add or imply a separate backend service, custom server component, account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync.
-        - Make the app feel native to macOS.
-        - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and local-only state.
-        - Apple frameworks and APIs are allowed and encouraged over custom solutions, but do not add any third-party dependencies.
-        \(finalRules)
-        """
+            Rules:
+            - Create or edit only Sources/\(request.executableName)/ContentView.swift.
+            - Do not modify Package.swift.
+            - Do not modify Sources/\(request.executableName)/\(request.executableName).swift.
+            - Do not add other source files.
+            - Do not add package dependencies.
+            - Do not add previews or @main declarations.
+            - Run `swift build --disable-sandbox` when you need to check compilation.
+            - Use \(temporaryWorkspaceURL.path) for any temporary scratch files you deliberately create.
+            - Do not write deliberate scratch files directly in the top-level system temp directory.
+            - Ironsmith will clean up the temporary workspace after Codex exits.
+            - Keep working until ContentView.swift exists, is complete, and `swift build --disable-sandbox` succeeds.
+            - Define ContentView as the root View, but you may create helper types in the same file. Helper types must not conform to App.
+            - An entry point already exists and already calls ContentView, so do not add another @main or App type.
+            - This is a macOS SwiftUI app. Do not use iOS-only modifiers.
+            - This is a local only app. Do not add or imply a separate backend service, custom server component, account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync.
+            - Make the app feel native to macOS.
+            - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and local-only state.
+            - Apple frameworks and APIs are allowed and encouraged over custom solutions, but do not add any third-party dependencies.
+            \(finalRules)
+            """
     }
 
     nonisolated private static func modelArgument(from identifier: String) -> String? {
@@ -660,8 +722,20 @@ extension CodexAgentClient {
         return arguments
     }
 
+    nonisolated private static func attachmentPermissionArguments(
+        _ access: CodexAgentAttachmentAccess
+    ) -> [String] {
+        [
+            "-c",
+            #"default_permissions="ironsmith-workspace""#,
+            "-c",
+            #"permissions.ironsmith-workspace={ extends = ":workspace", filesystem = { ":workspace_roots" = { ".ironsmith/attachments/current-run" = "\#(access.filesystemAccess)" } } }"#,
+        ]
+    }
+
     nonisolated private static func tomlString(_ value: String) -> String {
-        let escaped = value
+        let escaped =
+            value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
@@ -730,7 +804,8 @@ nonisolated private struct CodexAgentTranscriptFile: Sendable {
     init(
         packageRootURL: URL,
         providerIdentifier: String,
-        toolCompatibility: CodexAgentToolCompatibility
+        toolCompatibility: CodexAgentToolCompatibility,
+        containsImageContext: Bool = false
     ) throws {
         let directoryURL = packageRootURL.appendingPathComponent(".codex", isDirectory: true)
         let fileManager = FileManager.default
@@ -742,7 +817,8 @@ nonisolated private struct CodexAgentTranscriptFile: Sendable {
             CodexAgentSessionMetadata(
                 providerIdentifier: providerIdentifier,
                 toolCompatibility: toolCompatibility,
-                transcriptFileName: fileName
+                transcriptFileName: fileName,
+                containsImageContext: containsImageContext
             ),
             for: url
         )

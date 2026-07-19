@@ -10,6 +10,7 @@ nonisolated struct AgentLanguageModelContext {
     let promptRefinementEnabled: Bool
     let codingAgentModelIdentifier: String
     let codexAgentAuthentication: CodexAgentAuthentication?
+    let codingAgentSupportsImageInput: Bool
     let reasoningEffort: ToolReasoningEffort
 
     var languageModel: any LanguageModel {
@@ -32,6 +33,7 @@ nonisolated struct AgentLanguageModelContext {
         promptRefinementEnabled: Bool = true,
         codingAgentModelIdentifier: String = "",
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
+        codingAgentSupportsImageInput: Bool = false,
         reasoningEffort: ToolReasoningEffort = .default,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
@@ -48,6 +50,7 @@ nonisolated struct AgentLanguageModelContext {
         self.promptRefinementEnabled = promptRefinementEnabled
         self.codingAgentModelIdentifier = codingAgentModelIdentifier
         self.codexAgentAuthentication = codexAgentAuthentication
+        self.codingAgentSupportsImageInput = codingAgentSupportsImageInput
         self.reasoningEffort = reasoningEffort
     }
 
@@ -61,6 +64,7 @@ nonisolated struct AgentLanguageModelContext {
         promptRefinementEnabled: Bool = true,
         codingAgentModelIdentifier: String = "",
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
+        codingAgentSupportsImageInput: Bool = false,
         reasoningEffort: ToolReasoningEffort = .default,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
@@ -88,6 +92,7 @@ nonisolated struct AgentLanguageModelContext {
             promptRefinementEnabled: promptRefinementEnabled,
             codingAgentModelIdentifier: codingAgentModelIdentifier,
             codexAgentAuthentication: codexAgentAuthentication,
+            codingAgentSupportsImageInput: codingAgentSupportsImageInput,
             reasoningEffort: reasoningEffort,
             afterLanguageModelInvocation: afterLanguageModelInvocation
         )
@@ -302,6 +307,8 @@ enum ToolNameSanitizer {
 
 nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let packageMetadataDirectoryName = ".ironsmith"
+    nonisolated static let attachmentsDirectoryName = "attachments"
+    nonisolated static let currentRunAttachmentsDirectoryName = "current-run"
     nonisolated static let versionsDirectoryName = "versions"
     nonisolated static let pendingContentViewDraftFilename = "pending-ContentView.swift"
     nonisolated static let pendingContentViewDraftPath =
@@ -324,6 +331,16 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var versionsDirectoryURL: URL {
         Self.versionsDirectoryURL(for: packageRootURL)
+    }
+
+    nonisolated var attachmentsDirectoryURL: URL {
+        packageMetadataDirectoryURL
+            .appendingPathComponent(Self.attachmentsDirectoryName, isDirectory: true)
+    }
+
+    nonisolated var currentRunAttachmentsDirectoryURL: URL {
+        attachmentsDirectoryURL
+            .appendingPathComponent(Self.currentRunAttachmentsDirectoryName, isDirectory: true)
     }
 
     nonisolated var pendingContentViewDraftURL: URL {

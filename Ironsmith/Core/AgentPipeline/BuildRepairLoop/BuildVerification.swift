@@ -2,19 +2,29 @@ import AnyLanguageModel
 import Foundation
 
 extension ContentViewBuildRepairLoop {
-    static func cleanContentViewSource(
+    static func prepareContentViewSource(
         _ contentViewPath: String,
         layout: ToolPackageLayout,
         context: ToolGenerationRuntimeContext
     ) async throws {
         let source = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
-        let normalized = ContentViewSourceCleanup.normalizedSource(source)
-        if normalized != source {
-            try context.write(normalized, to: contentViewPath, packageRootURL: layout.packageRootURL)
-        }
+        switch context.pipelineConfiguration.sourcePreparationPolicy {
+        case .none:
+            return
+        case .extractModelEnvelope:
+            let extracted = ToolGenerationRuntimeContext.cleanedSource(source)
+            if extracted != source {
+                try context.write(extracted, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            }
+        case .normalizeAndFormat:
+            let normalized = ContentViewSourceCleanup.normalizedSource(source)
+            if normalized != source {
+                try context.write(normalized, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            }
 
-        let url = try context.packageFileURL(for: contentViewPath, packageRootURL: layout.packageRootURL)
-        _ = await context.processClient.formatSwiftSource(url)
+            let url = try context.packageFileURL(for: contentViewPath, packageRootURL: layout.packageRootURL)
+            _ = await context.processClient.formatSwiftSource(url)
+        }
     }
 
     func buildCurrentSource(phase: String) async throws -> BuildState? {

@@ -60,16 +60,19 @@ extension AgentPipelineTests {
         let arguments = try #require(await cliCapture.arguments)
         let environment = try #require(await cliCapture.environment)
         #expect(result.terminationStatus == 0)
-        #expect(arguments.prefix(7) == [
+        #expect(arguments.prefix(9) == [
             "exec",
+            "-c",
+            #"default_permissions="ironsmith-workspace""#,
+            "-c",
+            #"permissions.ironsmith-workspace={ extends = ":workspace", filesystem = { ":workspace_roots" = { ".ironsmith/attachments/current-run" = "deny" } } }"#,
             "--json",
-            "--sandbox",
-            "workspace-write",
             "--cd",
             packageRoot.path,
             "--skip-git-repo-check",
         ])
         #expect(!arguments.contains("--add-dir"))
+        #expect(!arguments.contains("--sandbox"))
         #expect(arguments.contains("--model"))
         #expect(arguments.contains("gpt-5.5"))
         #expect(arguments.contains(#"model_reasoning_effort="xhigh""#))
@@ -155,6 +158,90 @@ extension AgentPipelineTests {
             }
             return false
         })
+    }
+
+    @Test
+    func codexAgentClientUsesPackageAttachmentsAndPassesImagesToExec() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory, withIntermediateDirectories: true)
+
+        let imageData = Data("image bytes".utf8)
+        let fileData = Data("reference notes".utf8)
+        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "Demo")
+        _ = try ToolPromptAttachmentStorage.live.replaceCurrentRun(
+            [
+                ToolPromptAttachment(
+                    fileName: "reference.png",
+                    kind: .image,
+                    mediaType: "image/png",
+                    data: imageData
+                ),
+                ToolPromptAttachment(
+                    fileName: "reference.txt",
+                    kind: .file,
+                    mediaType: "text/plain",
+                    data: fileData
+                ),
+            ],
+            layout
+        )
+        let capture = CodexAgentCLICapture()
+        let cliClient = CodexCLIClient(
+            run: { _ in CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1) },
+            runStreaming: { arguments, environment, onStdoutLine, _ in
+                await capture.record(arguments: arguments, environment: environment)
+                let imageFlag = try #require(arguments.firstIndex(of: "--image"))
+                let imageURL = URL(fileURLWithPath: arguments[imageFlag + 1])
+                #expect(try Data(contentsOf: imageURL) == imageData)
+                let prompt = try #require(arguments.last)
+                #expect(prompt.contains("reference.txt"))
+                #expect(prompt.contains("strictly as read-only context"))
+                await onStdoutLine(#"{"type":"thread.started","thread_id":"thread-images"}"#)
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured,
+            temporaryDirectory: temporaryDirectory
+        )
+
+        let result = try await client.run(
+            CodexAgentRequest(
+                packageRootURL: packageRoot,
+                executableName: "Demo",
+                displayName: "Demo",
+                appKind: .window,
+                sandboxEnabled: true,
+                userPrompt: "Build from references",
+                modelIdentifier: "gpt-5.5",
+                authentication: .apiKey("sk-test")
+            )
+        )
+
+        let arguments = try #require(await capture.arguments)
+        #expect(!arguments.contains("--add-dir"))
+        #expect(arguments.contains(
+            #"permissions.ironsmith-workspace={ extends = ":workspace", filesystem = { ":workspace_roots" = { ".ironsmith/attachments/current-run" = "read" } } }"#
+        ))
+        #expect(arguments.filter { $0 == "--image" }.count == 1)
+        let imageFlag = try #require(arguments.firstIndex(of: "--image"))
+        #expect(
+            URL(fileURLWithPath: arguments[imageFlag + 1]).standardizedFileURL
+                == layout.currentRunAttachmentsDirectoryURL
+                    .appendingPathComponent("1-reference.png")
+                    .standardizedFileURL
+        )
+        #expect(arguments[imageFlag + 2] == "--")
+        #expect(arguments.last?.contains("Build from references") == true)
+        #expect(try CodexAgentTranscriptReader.metadata(for: result.transcriptURL).containsImageContext)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: temporaryDirectory.path).isEmpty)
+        #expect(FileManager.default.fileExists(atPath: layout.currentRunAttachmentsDirectoryURL.path))
     }
 
     @Test
@@ -630,6 +717,68 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func codexAgentClientDoesNotResumeImageSessionWithUnsupportedModel() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        let transcriptDirectory = CodexAgentTranscriptReader.transcriptDirectoryURL(for: packageRoot)
+        try FileManager.default.createDirectory(
+            at: transcriptDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory, withIntermediateDirectories: true)
+        let imageTranscript = transcriptDirectory.appendingPathComponent("agent-image.jsonl")
+        try #"{"type":"thread.started","thread_id":"image-thread"}"#
+            .write(to: imageTranscript, atomically: true, encoding: .utf8)
+        try CodexAgentTranscriptReader.writeMetadata(
+            CodexAgentSessionMetadata(
+                providerIdentifier: "openai-api",
+                toolCompatibility: .openAINative,
+                transcriptFileName: imageTranscript.lastPathComponent,
+                containsImageContext: true
+            ),
+            for: imageTranscript
+        )
+
+        let capture = CodexAgentCLICapture()
+        let cliClient = CodexCLIClient(
+            run: { _ in CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1) },
+            runStreaming: { arguments, environment, onStdoutLine, _ in
+                await capture.record(arguments: arguments, environment: environment)
+                await onStdoutLine(#"{"type":"thread.started","thread_id":"text-thread"}"#)
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured,
+            temporaryDirectory: temporaryDirectory
+        )
+        let request = CodexAgentRequest(
+            packageRootURL: packageRoot,
+            executableName: "Demo",
+            displayName: "Demo",
+            appKind: .window,
+            sandboxEnabled: true,
+            userPrompt: "Continue",
+            modelIdentifier: "gpt-5.5",
+            authentication: .apiKey("sk-test"),
+            supportsImageInput: false
+        )
+
+        let result = try await client.run(request)
+        let arguments = try #require(await capture.arguments)
+        let metadata = try CodexAgentTranscriptReader.metadata(for: result.transcriptURL)
+        #expect(!arguments.contains("resume"))
+        #expect(!arguments.contains("image-thread"))
+        #expect(arguments.contains(
+            #"permissions.ironsmith-workspace={ extends = ":workspace", filesystem = { ":workspace_roots" = { ".ironsmith/attachments/current-run" = "deny" } } }"#
+        ))
+        #expect(arguments.last?.contains("User-provided attachments:") == false)
+        #expect(!metadata.containsImageContext)
+    }
+
+    @Test
     func codexAgentClientValidatesChatGPTCredentialBeforeRunning() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -752,6 +901,21 @@ extension AgentPipelineTests {
 
         let requestCapture = CodexAgentRequestCapture()
         let invocationCapture = LanguageModelInvocationCapture()
+        let attachmentID = UUID()
+        let persistedAttachmentCapture = PersistedAttachmentCapture()
+        let generatedSource = """
+        import SwiftUI
+
+        private struct AppFeedback {}
+
+        struct ContentView: View {
+            @State private var feedback: AppFeedback?
+
+            var body: some View {
+                Text("codex generated")
+            }
+        }
+        """
         let codexAgentClient = CodexAgentClient(run: { request in
             await requestCapture.record(request)
             let layout = ToolPackageLayout(
@@ -759,16 +923,7 @@ extension AgentPipelineTests {
                 executableName: request.executableName
             )
             #expect(!FileManager.default.fileExists(atPath: try layout.packageFileURL(for: layout.contentViewSourcePath).path))
-            let source = """
-            import SwiftUI
-
-            struct ContentView: View {
-                var body: some View {
-                    Text("codex generated")
-                }
-            }
-            """
-            try source.write(
+            try generatedSource.write(
                 to: try layout.packageFileURL(for: layout.contentViewSourcePath),
                 atomically: true,
                 encoding: .utf8
@@ -787,7 +942,20 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Codex Demo", iconPrompt: "")
+                let placeholderRoot = toolsDirectory.appendingPathComponent(
+                    "new-app",
+                    isDirectory: true
+                )
+                let placeholderLayout = ToolPackageLayout(
+                    packageRootURL: placeholderRoot,
+                    executableName: "NewApp"
+                )
+                #expect(FileManager.default.fileExists(
+                    atPath: placeholderLayout.currentRunAttachmentsDirectoryURL
+                        .appendingPathComponent("1-reference.txt").path
+                ))
+                #expect(!FileManager.default.fileExists(atPath: placeholderLayout.packageManifestURL.path))
+                return ToolMetadataSuggestion(displayName: "Codex Demo", iconPrompt: "")
             },
             promptRefinementClient: ToolPromptRefinementClient { _ in
                 "Refined codex prompt"
@@ -802,7 +970,20 @@ extension AgentPipelineTests {
 
         let result = try await runtime.generateTool(
             for: "Make a Codex demo",
-            settings: ToolGenerationSettings(appKind: .window)
+            settings: ToolGenerationSettings(appKind: .window),
+            attachments: [
+                ToolPromptAttachment(
+                    id: attachmentID,
+                    fileName: "reference.txt",
+                    kind: .file,
+                    data: Data("reference".utf8)
+                )
+            ],
+            lifecycle: ToolGenerationLifecycle(
+                didPersistAttachments: { ids in
+                    await persistedAttachmentCapture.record(ids)
+                }
+            )
         )
 
         let request = try #require(await requestCapture.request)
@@ -810,8 +991,85 @@ extension AgentPipelineTests {
         #expect(request.userPrompt == "Refined codex prompt")
         #expect(request.modelIdentifier == "gpt-5.5")
         #expect(request.authentication == .apiKey("sk-test"))
-        #expect(contentView.contains(#"Text("codex generated")"#))
+        #expect(contentView == generatedSource)
         #expect(await invocationCapture.count == 1)
+        #expect(await persistedAttachmentCapture.ids == [attachmentID])
+        #expect(result.packageRootURL.lastPathComponent == "codex-demo")
+        #expect(!FileManager.default.fileExists(
+            atPath: toolsDirectory.appendingPathComponent("new-app").path
+        ))
+        #expect(FileManager.default.fileExists(
+            atPath: ToolPackageLayout(
+                packageRootURL: result.packageRootURL,
+                executableName: result.executableName
+            ).currentRunAttachmentsDirectoryURL.appendingPathComponent("1-reference.txt").path
+        ))
+    }
+
+    @MainActor
+    @Test
+    func codexRuntimeEditPersistsAttachmentsAfterToolIsMarkedGenerating() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: "CodexEdit",
+            source: Self.originalEditableSource
+        )
+        tool.generationState = .generating
+        tool.generationPhase = .planning
+        tool.generationMode = .edit
+        tool.pendingPrompt = "Use the reference file"
+
+        let attachmentID = UUID()
+        let persistedAttachmentCapture = PersistedAttachmentCapture()
+        let codexAgentClient = CodexAgentClient { request in
+            let layout = ToolPackageLayout(
+                packageRootURL: request.packageRootURL,
+                executableName: request.executableName
+            )
+            #expect(FileManager.default.fileExists(
+                atPath: layout.currentRunAttachmentsDirectoryURL
+                    .appendingPathComponent("1-reference.txt").path
+            ))
+            return CodexAgentResult(
+                stdout: "",
+                stderr: "",
+                terminationStatus: 0,
+                transcriptURL: request.packageRootURL.appendingPathComponent(".codex/agent-test.jsonl")
+            )
+        }
+        let runtime = Self.makeRuntime(
+            languageModel: EmptyLanguageModel(),
+            pipelineConfiguration: .codex(),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            codexAgentClient: codexAgentClient,
+            codingAgentModelIdentifier: "gpt-5.5",
+            codexAgentAuthentication: .apiKey("sk-test")
+        )
+
+        _ = try await runtime.generateTool(
+            for: "Use the reference file",
+            existingTool: tool,
+            settings: .default,
+            attachments: [
+                ToolPromptAttachment(
+                    id: attachmentID,
+                    fileName: "reference.txt",
+                    kind: .file,
+                    data: Data("reference".utf8)
+                )
+            ],
+            lifecycle: ToolGenerationLifecycle(
+                didPersistAttachments: { ids in
+                    await persistedAttachmentCapture.record(ids)
+                }
+            )
+        )
+
+        #expect(await persistedAttachmentCapture.ids == [attachmentID])
     }
 
     @MainActor
@@ -954,6 +1212,14 @@ private actor CodexAgentRequestCapture {
 
     func record(_ request: CodexAgentRequest) {
         self.request = request
+    }
+}
+
+private actor PersistedAttachmentCapture {
+    private(set) var ids: [UUID] = []
+
+    func record(_ ids: [UUID]) {
+        self.ids = ids
     }
 }
 

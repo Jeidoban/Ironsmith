@@ -153,6 +153,7 @@ struct ToolGenerationRuntimeDependencies {
     let promptRefinementClient: ToolPromptRefinementClient
     let versionBackupClient: ToolVersionBackupClient
     let packageMaterializer: ToolPackageMaterializer
+    let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
 
     init(
@@ -166,6 +167,7 @@ struct ToolGenerationRuntimeDependencies {
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         versionBackupClient: ToolVersionBackupClient,
         packageMaterializer: ToolPackageMaterializer? = nil,
+        attachmentStorage: ToolPromptAttachmentStorage = .live,
         codexAgentClient: CodexAgentClient = .unconfigured
     ) {
         self.toolsDirectoryURL = toolsDirectoryURL
@@ -178,6 +180,7 @@ struct ToolGenerationRuntimeDependencies {
         self.promptRefinementClient = promptRefinementClient
         self.versionBackupClient = versionBackupClient
         self.packageMaterializer = packageMaterializer ?? ToolPackageMaterializer(fileClient: fileClient)
+        self.attachmentStorage = attachmentStorage
         self.codexAgentClient = codexAgentClient
     }
 
@@ -193,6 +196,7 @@ struct ToolGenerationRuntimeDependencies {
         promptRefinementClient: ToolPromptRefinementClient? = nil,
         versionBackupClient: ToolVersionBackupClient = .live,
         packageMaterializer: ToolPackageMaterializer? = nil,
+        attachmentStorage: ToolPromptAttachmentStorage = .live,
         codexAgentClient: CodexAgentClient = .live()
     ) -> Self {
         Self(
@@ -206,6 +210,7 @@ struct ToolGenerationRuntimeDependencies {
             promptRefinementClient: promptRefinementClient ?? .live(),
             versionBackupClient: versionBackupClient,
             packageMaterializer: packageMaterializer,
+            attachmentStorage: attachmentStorage,
             codexAgentClient: codexAgentClient
         )
     }
@@ -226,10 +231,12 @@ struct ToolGenerationRuntimeContext {
     let promptRefinementEnabled: Bool
     let versionBackupClient: ToolVersionBackupClient
     let packageMaterializer: ToolPackageMaterializer
+    let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
     let codingAgentModelIdentifier: String
     let codexAgentAuthentication: CodexAgentAuthentication?
     let reasoningEffort: ToolReasoningEffort
+    let codingAgentSupportsImageInput: Bool
 
     var languageModel: any LanguageModel {
         languageModelInvoker.languageModel
@@ -245,6 +252,10 @@ struct ToolGenerationRuntimeContext {
 
     var metadata: ToolGenerationStageConfiguration {
         languageModelInvoker.metadata
+    }
+
+    var sourcePatchFormat: ToolSourcePatchFormat {
+        pipelineConfiguration.codingAgent == .ironsmithSpark ? .unifiedDiff : .searchReplace
     }
 
     init(
@@ -265,10 +276,12 @@ struct ToolGenerationRuntimeContext {
         self.promptRefinementEnabled = languageModelContext.promptRefinementEnabled
         self.versionBackupClient = dependencies.versionBackupClient
         self.packageMaterializer = dependencies.packageMaterializer
+        self.attachmentStorage = dependencies.attachmentStorage
         self.codexAgentClient = dependencies.codexAgentClient
         self.codingAgentModelIdentifier = languageModelContext.codingAgentModelIdentifier
         self.codexAgentAuthentication = languageModelContext.codexAgentAuthentication
         self.reasoningEffort = languageModelContext.reasoningEffort
+        self.codingAgentSupportsImageInput = languageModelContext.codingAgentSupportsImageInput
     }
 
     func configuration(for stage: ToolGenerationStage) -> ToolGenerationStageConfiguration {
@@ -314,26 +327,48 @@ struct ToolGenerationRuntimeContext {
     static func cleanedSource(_ response: String) -> String {
         let strippedThinking = stripThinkingBlocks(from: response)
         let trimmed = strippedThinking.trimmingCharacters(in: .whitespacesAndNewlines)
-        let unfenced: String
-        if trimmed.hasPrefix("```") {
-            let lines = trimmed.components(separatedBy: .newlines)
-            var remaining = Array(lines.dropFirst())
-            if let last = remaining.last, last.trimmingCharacters(in: .whitespacesAndNewlines) == "```" {
-                remaining.removeLast()
-            }
-            unfenced = remaining.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
-            unfenced = trimmed
+        if let fencedSource = firstFencedSwiftSource(in: trimmed) {
+            return fencedSource
         }
 
-        let lines = unfenced.components(separatedBy: .newlines)
+        let lines = trimmed.components(separatedBy: .newlines)
         if let startIndex = lines.firstIndex(where: { isLikelySwiftSourceLine($0) }) {
             return lines[startIndex...]
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        return unfenced
+        return trimmed
+    }
+
+    private static func firstFencedSwiftSource(in response: String) -> String? {
+        let lines = response.components(separatedBy: .newlines)
+        var openingIndex = 0
+
+        while openingIndex < lines.count {
+            let opening = lines[openingIndex]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard opening == "```" || opening.hasPrefix("```swift") else {
+                openingIndex += 1
+                continue
+            }
+
+            let contentStart = openingIndex + 1
+            let closingIndex = lines[(contentStart)...].firstIndex { line in
+                line.trimmingCharacters(in: .whitespacesAndNewlines) == "```"
+            } ?? lines.endIndex
+            let candidateLines = lines[contentStart..<closingIndex]
+            if candidateLines.contains(where: { isLikelySwiftSourceLine($0) }) {
+                return candidateLines
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            openingIndex = closingIndex < lines.endIndex ? closingIndex + 1 : lines.endIndex
+        }
+
+        return nil
     }
 
     private static func stripThinkingBlocks(from response: String) -> String {

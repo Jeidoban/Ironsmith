@@ -5,9 +5,12 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PromptComposerView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var prompt: String
+    @Binding var isExpanded: Bool
     @Binding var sandboxEnabled: Bool
     @Binding var appKind: ToolAppKind
     @Binding var sandboxPermissions: GeneratedAppSandboxPermissions
@@ -21,16 +24,23 @@ struct PromptComposerView: View {
     let isSubmitEnabled: Bool
     let isSubmitting: Bool
     let isCodexAgentSupported: Bool
+    let showsAttachmentControls: Bool
+    let supportsAttachments: Bool
+    let attachments: [ToolPromptAttachment]
     let supportedReasoningEfforts: Set<ToolReasoningEffort>
     let isPromptFocused: FocusState<Bool>.Binding
     let onChooseModel: () -> Void
     let onSubmit: () -> Void
     let onCancel: () -> Void
+    let onAddAttachments: ([URL]) -> Void
+    let onRemoveAttachment: (UUID) -> Void
     @State private var pendingPermission: GeneratedAppResourcePermission?
+    @State private var isAttachmentDropTargeted = false
 
     var body: some View {
         VStack(spacing: 12) {
             promptEditor
+                .layoutPriority(isExpanded ? 1 : 0)
 
             HStack {
                 generationSettingsMenu
@@ -71,23 +81,47 @@ struct PromptComposerView: View {
     }
 
     private var promptEditor: some View {
+        VStack(spacing: 0) {
+            promptTextEditor
+                .frame(maxHeight: .infinity)
+
+            promptAccessoryBar
+        }
+        .frame(
+            height: isExpanded
+                ? nil
+                : PromptEditorLayout.compactTextEditorHeight
+                    + PromptEditorLayout.accessoryBarHeight
+        )
+        .frame(maxHeight: isExpanded ? .infinity : nil)
+        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            if isAttachmentDropTargeted {
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.accentColor.opacity(0.85), lineWidth: 2)
+            }
+        }
+        .onDrop(
+            of: PromptAttachmentDropReceiver.supportedTypeIdentifiers,
+            isTargeted: Binding(
+                get: { isAttachmentDropTargeted },
+                set: { isAttachmentDropTargeted = $0 && acceptsAttachmentDrops }
+            ),
+            perform: acceptDroppedItems
+        )
+        .animation(.easeInOut(duration: 0.12), value: isAttachmentDropTargeted)
+    }
+
+    private var promptTextEditor: some View {
         ZStack(alignment: .topLeading) {
-            TextEditor(text: $prompt)
-                .font(.body)
-                .scrollContentBackground(.hidden)
+            PromptTextEditor(
+                text: $prompt,
+                isFocused: isPromptFocused,
+                isSubmitEnabled: isSubmitEnabled,
+                onSubmit: onSubmit
+            )
                 .padding(.horizontal, PromptEditorLayout.textEditorHorizontalPadding)
-                .padding(.vertical, PromptEditorLayout.textEditorVerticalPadding)
-                .focused(isPromptFocused)
-                .onKeyPress(.return, phases: .down) { keyPress in
-                    if keyPress.modifiers.contains(.shift) {
-                        return .ignored
-                    }
-                    guard isSubmitEnabled else {
-                        return .handled
-                    }
-                    onSubmit()
-                    return .handled
-                }
+                .padding(.top, PromptEditorLayout.textEditorTopPadding)
                 .accessibilityIdentifier("tool-prompt-field")
 
             if prompt.isEmpty {
@@ -99,14 +133,121 @@ struct PromptComposerView: View {
                     .allowsHitTesting(false)
             }
         }
-        .frame(height: promptEditorHeight)
-        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
     }
 
-    private var promptEditorHeight: CGFloat {
-        let visibleLines = min(max(prompt.components(separatedBy: .newlines).count, 3), 6)
-        return PromptEditorLayout.baseHeight
-            + CGFloat(visibleLines - 3) * PromptEditorLayout.lineHeightIncrement
+    private var promptAccessoryBar: some View {
+        HStack(spacing: 6) {
+            if showsAttachmentControls || !attachments.isEmpty {
+                attachmentButton
+                if !attachments.isEmpty, !supportsAttachments {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .help(ToolAttachmentSupport.unavailableMessage)
+                        .accessibilityLabel(ToolAttachmentSupport.unavailableMessage)
+                }
+                ForEach(attachments) { attachment in
+                    PromptAttachmentPreview(
+                        attachment: attachment,
+                        isRemovalEnabled: !isSubmitting,
+                        onRemove: { onRemoveAttachment(attachment.id) }
+                    )
+                }
+            }
+            Spacer(minLength: 0)
+            expansionButton
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, PromptEditorLayout.accessoryBarTopPadding)
+        .padding(.bottom, PromptEditorLayout.accessoryBarBottomPadding)
+        .frame(height: PromptEditorLayout.accessoryBarHeight, alignment: .top)
+    }
+
+    private var attachmentButton: some View {
+        Button {
+            PromptAttachmentOpenPanel.present { urls in
+                guard !isSubmitting else { return }
+                onAddAttachments(urls)
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .background(accessoryButtonFill, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(accessoryButtonBorder, lineWidth: 0.75)
+                }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .disabled(
+            isSubmitting
+                || !showsAttachmentControls
+                || attachments.count >= ToolPromptAttachmentLoader.maximumAttachmentCount
+        )
+        .help(attachmentButtonHelp)
+        .accessibilityLabel("Add attachments")
+        .accessibilityIdentifier("prompt-attachment-button")
+    }
+
+    private var attachmentButtonHelp: String {
+        if !showsAttachmentControls { return ToolAttachmentSupport.unavailableMessage }
+        if attachments.count >= ToolPromptAttachmentLoader.maximumAttachmentCount {
+            return "You can attach up to six files."
+        }
+        return "Add files"
+    }
+
+    private var acceptsAttachmentDrops: Bool {
+        showsAttachmentControls
+            && !isSubmitting
+            && attachments.count < ToolPromptAttachmentLoader.maximumAttachmentCount
+    }
+
+    private func acceptDroppedItems(_ providers: [NSItemProvider]) -> Bool {
+        guard acceptsAttachmentDrops, !providers.isEmpty else { return false }
+        Task { @MainActor in
+            let receivedFiles = await PromptAttachmentDropReceiver.receive(providers: providers)
+            guard !receivedFiles.isEmpty else { return }
+            onAddAttachments(receivedFiles.map(\.url))
+            PromptAttachmentDropReceiver.cleanUp(receivedFiles)
+        }
+        return true
+    }
+
+    private var expansionButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.24)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            Image(
+                systemName: isExpanded
+                    ? "arrow.down.right.and.arrow.up.left"
+                    : "arrow.up.left.and.arrow.down.right"
+            )
+            .font(.system(size: 11, weight: .semibold))
+            .frame(width: 24, height: 24)
+            .background(accessoryButtonFill, in: Circle())
+            .overlay {
+                Circle()
+                    .stroke(accessoryButtonBorder, lineWidth: 0.75)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(isExpanded ? "Collapse prompt" : "Expand prompt")
+        .accessibilityLabel(isExpanded ? "Collapse prompt" : "Expand prompt")
+        .accessibilityIdentifier("prompt-expansion-button")
+    }
+
+    private var accessoryButtonFill: Color {
+        Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.07)
+    }
+
+    private var accessoryButtonBorder: Color {
+        Color.primary.opacity(colorScheme == .dark ? 0.20 : 0.10)
     }
 
     private var generationSettingsMenu: some View {
@@ -353,6 +494,30 @@ struct PromptComposerView: View {
     }
 }
 
+@MainActor
+private enum PromptAttachmentOpenPanel {
+    static func present(onSelection: @escaping ([URL]) -> Void) {
+        let panel = NSOpenPanel()
+        panel.identifier = NSUserInterfaceItemIdentifier(
+            "com.jeidoban.ironsmith.prompt-attachments"
+        )
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.canCreateDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.resolvesAliases = true
+        panel.allowedContentTypes = [.item]
+        panel.isMovable = true
+
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK else { return }
+            onSelection(panel.urls)
+        }
+        panel.begin(completionHandler: completion)
+        panel.makeKeyAndOrderFront(nil)
+    }
+}
+
 private enum CodingAgentMenuHelp {
     private static let tooltips: [String: String] = [
         ToolCodingAgentPreference.ironsmithSpark.displayName:
@@ -376,12 +541,65 @@ private enum CodingAgentMenuHelp {
 }
 
 private enum PromptEditorLayout {
-    static let baseHeight: CGFloat = 72
-    static let lineHeightIncrement: CGFloat = 16
+    static let compactTextEditorHeight: CGFloat = 46
+    static let accessoryBarHeight: CGFloat = 30
+    static let accessoryBarTopPadding: CGFloat = 2
+    static let accessoryBarBottomPadding: CGFloat = 4
     static let textEditorHorizontalPadding: CGFloat = 8
-    static let textEditorVerticalPadding: CGFloat = 12
+    static let textEditorTopPadding: CGFloat = 12
     static let placeholderLeadingPadding: CGFloat = 13
     static let placeholderTopPadding: CGFloat = 12
+}
+
+private struct PromptAttachmentPreview: View {
+    let attachment: ToolPromptAttachment
+    let isRemovalEnabled: Bool
+    let onRemove: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onRemove) {
+            ZStack {
+                thumbnail
+
+                if isHovering, isRemovalEnabled {
+                    Color.black.opacity(0.32)
+
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: 24, height: 24)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isRemovalEnabled)
+        .onHover { isHovering = $0 }
+        .help("Remove \(attachment.fileName)")
+        .accessibilityLabel("Remove \(attachment.fileName)")
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        if attachment.isImage, let image = NSImage(data: attachment.data) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 24, height: 24)
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(.quaternary.opacity(0.5))
+
+                Image(systemName: "doc.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 24, height: 24)
+        }
+    }
 }
 
 #Preview("Create Prompt") {
@@ -394,11 +612,13 @@ private enum PromptEditorLayout {
 
 private struct PromptComposerPreview: View {
     let isEditing: Bool
+    @State private var isExpanded = false
     @FocusState private var isPromptFocused: Bool
 
     var body: some View {
         PromptComposerView(
             prompt: .constant(""),
+            isExpanded: $isExpanded,
             sandboxEnabled: .constant(!isEditing),
             appKind: .constant(isEditing ? .menuBar : .window),
             sandboxPermissions: .constant(.default),
@@ -416,13 +636,18 @@ private struct PromptComposerPreview: View {
             isSubmitEnabled: isEditing,
             isSubmitting: false,
             isCodexAgentSupported: true,
+            showsAttachmentControls: true,
+            supportsAttachments: true,
+            attachments: [],
             supportedReasoningEfforts: [.low, .medium, .high],
             isPromptFocused: $isPromptFocused,
             onChooseModel: {},
             onSubmit: {},
-            onCancel: {}
+            onCancel: {},
+            onAddAttachments: { _ in },
+            onRemoveAttachment: { _ in }
         )
         .padding()
-        .frame(width: 360)
+        .frame(width: 360, height: 440)
     }
 }

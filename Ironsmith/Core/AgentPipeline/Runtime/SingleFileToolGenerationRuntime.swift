@@ -21,6 +21,7 @@ struct SingleFileToolGenerationRuntime {
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
         imageGenerationProvider: ToolImageGenerationProvider = .disabled,
+        attachments: [ToolPromptAttachment] = [],
         lifecycle: ToolGenerationLifecycle = .noop
     ) async throws -> ToolGenerationResult {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -38,6 +39,7 @@ struct SingleFileToolGenerationRuntime {
                     existingTool: existingTool,
                     settings: settings,
                     imageGenerationProvider: imageGenerationProvider,
+                    attachments: [],
                     lifecycle: lifecycle
                 )
             }
@@ -45,6 +47,7 @@ struct SingleFileToolGenerationRuntime {
                 prompt: effectivePrompt,
                 existingTool: existingTool,
                 settings: settings,
+                attachments: attachments,
                 lifecycle: lifecycle
             )
         }
@@ -53,6 +56,7 @@ struct SingleFileToolGenerationRuntime {
             prompt: trimmedPrompt,
             settings: settings,
             imageGenerationProvider: imageGenerationProvider,
+            attachments: attachments,
             lifecycle: lifecycle
         )
     }
@@ -93,6 +97,7 @@ struct SingleFileToolGenerationRuntime {
 
     private func prepareNewCreateSetup(
         metadata: ToolMetadataSuggestion,
+        placeholderRootURL: URL,
         prompt: String,
         settings: ToolGenerationSettings,
         lifecycle: ToolGenerationLifecycle
@@ -105,21 +110,30 @@ struct SingleFileToolGenerationRuntime {
         let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
         let contentViewPath = layout.contentViewSourcePath
 
-        try context.packageMaterializer.materializePackage(
+        try context.packageMaterializer.finalizePlaceholderPackage(
+            from: placeholderRootURL,
             layout: layout,
             displayName: displayName,
             settings: resolvedSettings
         )
-        try await lifecycle.prepareCreatedTool(
-            ToolGenerationPreparedTool(
-                name: displayName,
-                executableName: executableName,
-                bundleIdentifier: bundleIdentifier,
-                settings: resolvedSettings,
-                packageRootURL: packageRootURL
-            ),
-            prompt
-        )
+        do {
+            try await lifecycle.prepareCreatedTool(
+                ToolGenerationPreparedTool(
+                    name: displayName,
+                    executableName: executableName,
+                    bundleIdentifier: bundleIdentifier,
+                    settings: resolvedSettings,
+                    packageRootURL: packageRootURL
+                ),
+                prompt
+            )
+        } catch {
+            try? context.packageMaterializer.restorePlaceholderPackage(
+                from: layout,
+                to: placeholderRootURL
+            )
+            throw error
+        }
 
         return CreateToolSetup(
             displayName: displayName,
@@ -135,11 +149,13 @@ struct SingleFileToolGenerationRuntime {
     private func preparePlaceholderCreateTool(
         prompt: String,
         settings: ToolGenerationSettings,
+        attachments: [ToolPromptAttachment],
         lifecycle: ToolGenerationLifecycle
-    ) async throws {
+    ) async throws -> URL {
         let displayName = "New App"
         let executableName = ToolNameSanitizer.executableName(from: displayName)
         let packageRootURL = try context.makeUniquePackageRoot(displayName: displayName)
+        try context.packageMaterializer.createPlaceholderPackageDirectory(at: packageRootURL)
         try await lifecycle.prepareCreatedTool(
             ToolGenerationPreparedTool(
                 name: displayName,
@@ -150,6 +166,15 @@ struct SingleFileToolGenerationRuntime {
             ),
             prompt
         )
+        try await persistSubmittedAttachments(
+            attachments,
+            layout: ToolPackageLayout(
+                packageRootURL: packageRootURL,
+                executableName: executableName
+            ),
+            lifecycle: lifecycle
+        )
+        return packageRootURL
     }
 
     private func createTool(
@@ -157,6 +182,7 @@ struct SingleFileToolGenerationRuntime {
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
         imageGenerationProvider: ToolImageGenerationProvider,
+        attachments: [ToolPromptAttachment],
         lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let startingPhase = existingTool?.generationPhase ?? .initializing
@@ -164,10 +190,17 @@ struct SingleFileToolGenerationRuntime {
         if let existingTool, let resumedSetup = loadCreateSetup(for: existingTool, settings: settings) {
             setup = resumedSetup
         } else {
-            if existingTool == nil {
-                try await preparePlaceholderCreateTool(
+            let placeholderRootURL: URL
+            if let existingTool {
+                placeholderRootURL = existingTool.packageRootURL
+                try context.packageMaterializer.createPlaceholderPackageDirectory(
+                    at: placeholderRootURL
+                )
+            } else {
+                placeholderRootURL = try await preparePlaceholderCreateTool(
                     prompt: prompt,
                     settings: settings,
+                    attachments: attachments,
                     lifecycle: lifecycle
                 )
             }
@@ -181,6 +214,7 @@ struct SingleFileToolGenerationRuntime {
             try Task.checkCancellation()
             setup = try await prepareNewCreateSetup(
                 metadata: metadata,
+                placeholderRootURL: placeholderRootURL,
                 prompt: prompt,
                 settings: settings,
                 lifecycle: lifecycle
@@ -275,6 +309,7 @@ struct SingleFileToolGenerationRuntime {
 
             let generator = createGenerator(
                 userPrompt: contentPrompt,
+                originalUserPrompt: prompt,
                 appKind: setup.settings.appKind,
                 sandboxEnabled: setup.settings.sandboxEnabled,
                 layout: setup.layout,
@@ -354,10 +389,24 @@ struct SingleFileToolGenerationRuntime {
         return refinedPrompt
     }
 
+    private func persistSubmittedAttachments(
+        _ attachments: [ToolPromptAttachment],
+        layout: ToolPackageLayout,
+        lifecycle: ToolGenerationLifecycle
+    ) async throws {
+        let persistedIDs = try context.attachmentStorage.replaceCurrentRun(
+            attachments,
+            layout
+        )
+        guard !persistedIDs.isEmpty else { return }
+        try await lifecycle.didPersistAttachments(persistedIDs)
+    }
+
     private func editTool(
         prompt: String,
         existingTool: Tool,
         settings: ToolGenerationSettings,
+        attachments: [ToolPromptAttachment],
         lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
         let layout = ToolPackageLayout(
@@ -368,6 +417,13 @@ struct SingleFileToolGenerationRuntime {
         let startingPhase = existingTool.isGenerationReady
             ? ToolGenerationPhase.planning
             : (existingTool.generationPhase ?? .generatingEditDiff)
+        if !attachments.isEmpty {
+            try await persistSubmittedAttachments(
+                attachments,
+                layout: layout,
+                lifecycle: lifecycle
+            )
+        }
         if !existingTool.isGenerationReady,
            startingPhase == .packaging || startingPhase == .completed {
             return try await packageTool(
@@ -571,7 +627,8 @@ struct SingleFileToolGenerationRuntime {
             userPrompt: userPrompt,
             modelIdentifier: context.codingAgentModelIdentifier,
             reasoningEffort: context.reasoningEffort,
-            authentication: authentication
+            authentication: authentication,
+            supportsImageInput: context.codingAgentSupportsImageInput
         ) { event in
             await Self.handleCodexAgentEvent(event, lifecycle: lifecycle)
         }
@@ -750,17 +807,12 @@ struct SingleFileToolGenerationRuntime {
             throw CodexAgentError.missingContentView
         }
 
-        let sourceBeforeCleanup = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
-        guard !sourceBeforeCleanup.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let generatedSource = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
+        guard !generatedSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CodexAgentError.missingContentView
         }
 
         try await lifecycle.updatePhase(.generating, .repairing, nil)
-        try await ContentViewBuildRepairLoop.cleanContentViewSource(
-            contentViewPath,
-            layout: layout,
-            context: context
-        )
 
         let result = try await context.processClient.build(layout.packageRootURL)
         guard result.succeeded else {
@@ -789,8 +841,7 @@ struct SingleFileToolGenerationRuntime {
             )
         }
 
-        let source = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
-        if ContentViewSourceCleanup.isPlaceholderScaffold(source) {
+        if ContentViewSourceCleanup.isPlaceholderScaffold(generatedSource) {
             throw ToolGenerationError.compileFailed(
                 "ContentView.swift compiled but only contains the placeholder Generated App scaffold."
             )
@@ -842,6 +893,7 @@ struct SingleFileToolGenerationRuntime {
 
     private func createGenerator(
         userPrompt: String,
+        originalUserPrompt: String,
         appKind: ToolAppKind,
         sandboxEnabled: Bool,
         layout: ToolPackageLayout,
@@ -861,7 +913,22 @@ struct SingleFileToolGenerationRuntime {
         )
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialSource ? "continue create" : "create"
+            modeDescription: resumePartialSource ? "continue create" : "create",
+            diagnosticRewrite: makeDiagnosticRewrite(
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle
+            ) { currentSource, diagnostics in
+                ToolGenerationPrompts.diagnosticCreateWholeFileRewritePrompt(
+                    userPrompt: originalUserPrompt,
+                    generationPrompt: userPrompt,
+                    executableName: layout.executableName,
+                    sandboxEnabled: sandboxEnabled,
+                    appKind: appKind,
+                    currentSource: currentSource,
+                    diagnostics: diagnostics
+                )
+            }
         ) { session in
             if useCurrentSourceOnFirstAttempt && !didUseCurrentSource {
                 didUseCurrentSource = true
@@ -956,10 +1023,11 @@ struct SingleFileToolGenerationRuntime {
         var didUseCurrentSource = false
         var currentExistingSource = existingSource
         var previousPatchFailure: String?
+        let patchFormat = context.sourcePatchFormat
 
         return ContentViewCandidateGenerator(
             modeDescription: "edit",
-            instructions: ToolGenerationPrompts.searchReplaceEditInstructions,
+            instructions: ToolGenerationPrompts.editInstructions(for: patchFormat),
             retriesInvalidCandidates: true,
             invalidCandidateFallback: context.pipelineConfiguration
                 .fallsBackToWholeFileEditAfterInvalidInitialPatch
@@ -976,7 +1044,19 @@ struct SingleFileToolGenerationRuntime {
                         session: session
                     )
                 }
-                : nil
+                : nil,
+            diagnosticRewrite: makeDiagnosticRewrite(
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle
+            ) { currentSource, diagnostics in
+                ToolGenerationPrompts.diagnosticEditWholeFileRewritePrompt(
+                    userPrompt: userPrompt,
+                    executableName: layout.executableName,
+                    currentSource: currentSource,
+                    diagnostics: diagnostics
+                )
+            }
         ) { session in
             if useCurrentSourceOnFirstAttempt && !didUseCurrentSource {
                 didUseCurrentSource = true
@@ -1041,6 +1121,7 @@ struct SingleFileToolGenerationRuntime {
                     existingSource: currentExistingSource,
                     maximumPatchBlocks: context.repairStrategy.maxPatchBlocksPerTurn,
                     previousPatchFailure: previousPatchFailure,
+                    patchFormat: patchFormat,
                     lifecycle: lifecycle,
                     session: session
                 )
@@ -1049,6 +1130,69 @@ struct SingleFileToolGenerationRuntime {
                 previousPatchFailure = AgentDiagnosticsLog.renderError(error, limit: 800)
                 throw error
             }
+        }
+    }
+
+    private func makeDiagnosticRewrite(
+        layout: ToolPackageLayout,
+        contentViewPath: String,
+        lifecycle: ToolGenerationLifecycle,
+        prompt: @escaping (
+            _ currentSource: String,
+            _ diagnostics: [SwiftCompilerDiagnostic]
+        ) -> String
+    ) -> ContentViewCandidateGenerator.DiagnosticRewrite {
+        ContentViewCandidateGenerator.DiagnosticRewrite { currentSource, diagnostics, session in
+            try await regenerateContentViewFromDiagnostics(
+                prompt: prompt(currentSource, diagnostics),
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle,
+                session: session
+            )
+        }
+    }
+
+    private func regenerateContentViewFromDiagnostics(
+        prompt: String,
+        layout: ToolPackageLayout,
+        contentViewPath: String,
+        lifecycle: ToolGenerationLifecycle,
+        session: LanguageModelSession
+    ) async throws {
+        let draftPath = ToolPackageLayout.pendingContentViewDraftPath
+        do {
+            try Task.checkCancellation()
+            try await lifecycle.updatePhase(.generating, .generatingSource, nil)
+            let response = try await context.languageModelInvoker.respond(
+                stage: .codingAgent,
+                in: session,
+                to: prompt,
+                generating: String.self
+            ) { partialSource in
+                try context.write(
+                    partialSource,
+                    to: draftPath,
+                    packageRootURL: layout.packageRootURL
+                )
+            }
+            try Task.checkCancellation()
+            try context.write(
+                response,
+                to: contentViewPath,
+                packageRootURL: layout.packageRootURL
+            )
+        } catch {
+            AgentDiagnosticsLog.append(
+                """
+                Diagnostic whole-file rewrite request failed.
+                packageRoot: \(layout.packageRootURL.path)
+                error:
+                \(AgentDiagnosticsLog.renderError(error, limit: 1_500))
+                """
+            )
+            try? trimPendingSourceDraftToCleanBoundary(layout: layout)
+            throw error
         }
     }
 
@@ -1068,7 +1212,19 @@ struct SingleFileToolGenerationRuntime {
         )
 
         return ContentViewCandidateGenerator(
-            modeDescription: resumePartialSource ? "continue edit source" : "edit"
+            modeDescription: resumePartialSource ? "continue edit source" : "edit",
+            diagnosticRewrite: makeDiagnosticRewrite(
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle
+            ) { currentSource, diagnostics in
+                ToolGenerationPrompts.diagnosticEditWholeFileRewritePrompt(
+                    userPrompt: userPrompt,
+                    executableName: layout.executableName,
+                    currentSource: currentSource,
+                    diagnostics: diagnostics
+                )
+            }
         ) { session in
             if resumePartialSource && !didAttemptContinuation {
                 didAttemptContinuation = true
@@ -1235,7 +1391,8 @@ struct SingleFileToolGenerationRuntime {
             packageRootURL: layout.packageRootURL
         )
         guard !draft.isEmpty else { return }
-        if context.pipelineConfiguration.codingAgent == .ironsmithFlame {
+        switch context.sourcePatchFormat {
+        case .searchReplace:
             let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
                 draft,
                 to: originalSource,
@@ -1249,11 +1406,11 @@ struct SingleFileToolGenerationRuntime {
                 \(application.logSummary)
                 """
             )
-        } else {
-            guard let application = try ContentViewRepairSupport.applyCompletedSearchReplacePatchBlocks(
+        case .unifiedDiff:
+            guard let application = try ContentViewRepairSupport.applyCompletedDiffHunks(
                 draft,
                 to: originalSource,
-                maximumPatchBlocks: maximumPatchBlocks
+                maximumHunks: maximumPatchBlocks
             ) else {
                 AgentDiagnosticsLog.append(
                     """
@@ -1268,7 +1425,7 @@ struct SingleFileToolGenerationRuntime {
                 """
                 Applied completed edit patch blocks from interrupted draft.
                 packageRoot: \(layout.packageRootURL.path)
-                appliedBlockCount: \(application.appliedBlockCount)
+                appliedHunkCount: \(application.appliedHunkCount)
                 """
             )
         }
@@ -1383,6 +1540,7 @@ struct SingleFileToolGenerationRuntime {
         existingSource: String,
         maximumPatchBlocks: Int,
         previousPatchFailure: String?,
+        patchFormat: ToolSourcePatchFormat,
         lifecycle: ToolGenerationLifecycle,
         session: LanguageModelSession
     ) async throws {
@@ -1391,7 +1549,8 @@ struct SingleFileToolGenerationRuntime {
             executableName: layout.executableName,
             existingSource: existingSource,
             maximumPatchBlocks: maximumPatchBlocks,
-            previousPatchFailure: previousPatchFailure
+            previousPatchFailure: previousPatchFailure,
+            patchFormat: patchFormat
         )
         let draftPath = ToolPackageLayout.pendingContentViewDraftPath
         let response: String
@@ -1424,7 +1583,13 @@ struct SingleFileToolGenerationRuntime {
             throw error
         }
 
-        let sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(response)
+        let sanitizedPatch: String
+        switch patchFormat {
+        case .searchReplace:
+            sanitizedPatch = ContentViewRepairSupport.sanitizedSearchReplacePatchSummary(response)
+        case .unifiedDiff:
+            sanitizedPatch = ContentViewRepairSupport.sanitizedDiffSummary(response)
+        }
         try Task.checkCancellation()
         AgentDiagnosticsLog.append(
             """
@@ -1437,7 +1602,8 @@ struct SingleFileToolGenerationRuntime {
         )
         let editedSource: String
         do {
-            if context.pipelineConfiguration.codingAgent == .ironsmithFlame {
+            switch patchFormat {
+            case .searchReplace:
                 let application = try ContentViewRepairSupport.applySearchReplacePatchBestEffort(
                     sanitizedPatch,
                     to: existingSource,
@@ -1453,11 +1619,11 @@ struct SingleFileToolGenerationRuntime {
                         """
                     )
                 }
-            } else {
-                editedSource = try ContentViewRepairSupport.applyValidatedSearchReplacePatch(
+            case .unifiedDiff:
+                editedSource = try ContentViewRepairSupport.applyValidatedDiff(
                     sanitizedPatch,
                     to: existingSource,
-                    maximumPatchBlocks: maximumPatchBlocks
+                    maximumHunks: maximumPatchBlocks
                 )
             }
         } catch {

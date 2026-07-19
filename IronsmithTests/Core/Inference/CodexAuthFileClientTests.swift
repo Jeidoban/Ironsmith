@@ -134,6 +134,55 @@ extension InferenceTests {
     }
 
     @Test
+    func startingChatGPTSignInAgainCancelsThePreviousCallbackServer() async throws {
+        let callbackAttempts = OpenAICodexCallbackAttemptCounter()
+        let authClient = OpenAICodexPKCEAuthClient.live(
+            generatePKCE: {
+                OpenAICodexPKCE(verifier: "verifier", challenge: "challenge")
+            },
+            stateGenerator: { "state" },
+            launchAuthorizationURL: { _ in },
+            callbackServer: OpenAICodexOAuthCallbackServer(
+                authorizationCode: { _, launchAuthorizationURL in
+                    let attempt = await callbackAttempts.begin()
+                    try await launchAuthorizationURL()
+                    if attempt == 1 {
+                        try await Task.sleep(nanoseconds: 60_000_000_000)
+                    }
+                    return "code-\(attempt)"
+                }
+            ),
+            exchangeAuthorizationCode: { code, _ in
+                OpenAICodexCredential(
+                    accessToken: code,
+                    refreshToken: nil,
+                    expiresAt: nil,
+                    idToken: nil,
+                    accountID: nil,
+                    email: nil
+                )
+            }
+        )
+
+        let firstSignIn = Task {
+            try await authClient.signIn()
+        }
+        while await callbackAttempts.count == 0 {
+            await Task.yield()
+        }
+
+        let replacementCredential = try await authClient.signIn()
+        #expect(replacementCredential.accessToken == "code-2")
+
+        switch await firstSignIn.result {
+        case .success:
+            Issue.record("Expected the first ChatGPT sign-in to be canceled.")
+        case .failure(let error):
+            #expect(error is CancellationError)
+        }
+    }
+
+    @Test
     func openAICodexSignOutDeletesSharedAuthFile() async throws {
         let directory = try Self.temporaryDirectory()
         let authFileURL = directory.appendingPathComponent("auth.json")
@@ -468,6 +517,15 @@ private actor CodexCLIRequestRecorder {
 
     func record(_ request: CodexCLIProcessRequest) {
         requests.append(request)
+    }
+}
+
+private actor OpenAICodexCallbackAttemptCounter {
+    private(set) var count = 0
+
+    func begin() -> Int {
+        count += 1
+        return count
     }
 }
 

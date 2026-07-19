@@ -19,12 +19,15 @@ extension AgentPipelineTests {
             }
         }
         ```
+        The implementation is complete.
         """
 
         let cleaned = SingleFileToolGenerationRuntime.cleanedSource(response)
 
         #expect(cleaned.hasPrefix("import SwiftUI"))
         #expect(!(cleaned.contains("Here is the fixed ContentView.swift file:")))
+        #expect(!(cleaned.contains("```")))
+        #expect(!(cleaned.contains("The implementation is complete.")))
     }
 
     @Test
@@ -116,6 +119,27 @@ extension AgentPipelineTests {
         #expect(!(cleaned.contains("@main")))
         #expect(!(cleaned.contains("GeneratedApp")))
         #expect(!(cleaned.contains("#Preview")))
+    }
+
+    @Test
+    func contentViewSourceCleanupDoesNotMistakeAppPrefixedTypesForAppConformance() {
+        let source = """
+        import SwiftUI
+
+        private struct AppFeedback {}
+
+        struct ContentView: View {
+            @State private var feedback: AppFeedback?
+
+            var body: some View {
+                Text("Feedback")
+            }
+        }
+        """
+
+        let cleaned = ContentViewSourceCleanup.normalizedSource(source)
+
+        #expect(cleaned.contains("@State private var feedback: AppFeedback?"))
     }
 
     @Test

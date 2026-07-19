@@ -3,16 +3,19 @@ import Foundation
 
 final class ContentViewRepairConversation {
     private let makeSession: () -> LanguageModelSession
+    private let patchFormat: ToolSourcePatchFormat
     private(set) var session: LanguageModelSession
     private var sourceIsCurrentInSession = false
     private(set) var previousOutcome: String?
     private(set) var compactionSummary: String?
 
     init(context: ToolGenerationRuntimeContext) {
+        let patchFormat = context.sourcePatchFormat
+        self.patchFormat = patchFormat
         makeSession = {
             LanguageModelSession(
                 model: context.languageModel,
-                instructions: ToolGenerationPrompts.searchReplaceRepairInstructions
+                instructions: ToolGenerationPrompts.repairInstructions(for: patchFormat)
             )
         }
         session = makeSession()
@@ -49,7 +52,8 @@ final class ContentViewRepairConversation {
             editableSnippets: editableSnippets,
             previousOutcome: previousOutcome,
             compactionSummary: includeSource ? compactionSummary : nil,
-            maximumPatchBlocks: maximumPatchBlocks
+            maximumPatchBlocks: maximumPatchBlocks,
+            patchFormat: patchFormat
         )
         if includeSource {
             sourceIsCurrentInSession = true

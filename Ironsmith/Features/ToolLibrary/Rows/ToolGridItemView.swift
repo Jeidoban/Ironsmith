@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ToolGridItemView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let tool: Tool
     let state: ToolItemPresentationState
     let actions: ToolItemActions
@@ -121,14 +122,14 @@ struct ToolGridItemView: View {
         return "Right-click for available actions."
     }
 
-    private var backgroundStyle: some ShapeStyle {
+    private var backgroundStyle: Color {
         if state.isSelected {
-            return AnyShapeStyle(.tint.opacity(0.22))
+            return Color.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.20)
         }
         if isHovering {
-            return AnyShapeStyle(.quaternary.opacity(0.58))
+            return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.11)
         }
-        return AnyShapeStyle(.clear)
+        return .clear
     }
 
     private func selectIfAvailable() {

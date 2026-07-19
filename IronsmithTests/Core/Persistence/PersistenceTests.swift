@@ -80,7 +80,7 @@ struct PersistenceTests {
             #expect(tool.generationPhase == ToolGenerationPhase.generatingSource)
             #expect(tool.generationMode == ToolGenerationMode.create)
             #expect(tool.pendingPrompt == "Build a resumable app")
-            #expect(container.schema.version == IronsmithSchemaV4.versionIdentifier)
+            #expect(container.schema.version == IronsmithSchemaV5.versionIdentifier)
             #expect(container.migrationPlan != nil)
         }
     }
@@ -141,7 +141,7 @@ struct PersistenceTests {
         let tool = try #require(try context.fetch(FetchDescriptor<Tool>()).first)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV4.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV5.versionIdentifier)
         #expect(tool.id == toolID)
         #expect(tool.appKind == .menuBar)
         #expect(tool.generationState == .stopped)
@@ -209,7 +209,7 @@ struct PersistenceTests {
         let context = ModelContext(container)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV4.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV5.versionIdentifier)
         #expect(!(models.contains { $0.id == legacyModelID }))
         #expect(models.contains { $0.id == foundationModelID })
     }

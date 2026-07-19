@@ -164,7 +164,8 @@ extension RemoteModelClient {
                     identifier: $0.id,
                     displayName: $0.displayName,
                     estimatedToolCredits: $0.estimatedToolCredits,
-                    reasoningEfforts: $0.reasoningEfforts ?? []
+                    reasoningEfforts: $0.reasoningEfforts ?? [],
+                    supportsImageInput: $0.supportsImageInput ?? false
                 )
             }
         }
@@ -177,7 +178,8 @@ extension RemoteModelClient {
                 source: .remote,
                 installState: .installed,
                 estimatedToolCredits: $0.estimatedToolCredits,
-                reasoningEfforts: $0.reasoningEfforts
+                reasoningEfforts: $0.reasoningEfforts,
+                supportsImageInput: $0.supportsImageInput
             )
         }
         guard provider.kind != .ironsmith else { return models }
@@ -334,17 +336,20 @@ private struct RemoteModelEntry {
     let displayName: String
     let estimatedToolCredits: Int?
     let reasoningEfforts: [ToolReasoningEffort]
+    let supportsImageInput: Bool
 
     init(
         identifier: String,
         displayName: String,
         estimatedToolCredits: Int? = nil,
-        reasoningEfforts: [ToolReasoningEffort] = []
+        reasoningEfforts: [ToolReasoningEffort] = [],
+        supportsImageInput: Bool = false
     ) {
         self.identifier = identifier
         self.displayName = displayName
         self.estimatedToolCredits = estimatedToolCredits
         self.reasoningEfforts = reasoningEfforts
+        self.supportsImageInput = supportsImageInput
     }
 }
 
@@ -365,6 +370,7 @@ private struct IronsmithModelEntry: Decodable {
     let displayName: String
     let estimatedToolCredits: Int?
     let reasoningEfforts: [ToolReasoningEffort]?
+    let supportsImageInput: Bool?
 }
 
 private struct AnthropicModelsResponse: Decodable {

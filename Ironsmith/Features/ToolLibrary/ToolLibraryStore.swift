@@ -22,6 +22,14 @@ private enum ToolLibraryGenerationError: LocalizedError {
     }
 }
 
+private enum ToolLibraryAttachmentError: LocalizedError {
+    case unsupportedSelection
+
+    var errorDescription: String? {
+        ToolAttachmentSupport.unavailableMessage
+    }
+}
+
 private enum ToolLibraryRenameError: LocalizedError {
     case appBundleAlreadyExists(String)
 
@@ -54,6 +62,7 @@ final class ToolLibraryStore {
     var menuBarSystemImage = ToolMenuBarSymbol.fallback
     var sandboxPermissions = GeneratedAppSandboxPermissions.default
     var resourcePermissions = GeneratedAppResourcePermissions.none
+    private(set) var attachments: [ToolPromptAttachment] = []
     private(set) var launchingToolID: UUID?
     private(set) var runningToolIDs = Set<UUID>()
     var exportingToolID: UUID?
@@ -97,6 +106,23 @@ final class ToolLibraryStore {
 
     var hasSelectedTool: Bool {
         selectedToolID != nil
+    }
+
+    @discardableResult
+    func addAttachments(from urls: [URL]) -> Bool {
+        guard !isGenerating else { return false }
+        do {
+            attachments = try ToolPromptAttachmentLoader.load(urls: urls, existing: attachments)
+            return true
+        } catch {
+            presentError(error.localizedDescription)
+            return false
+        }
+    }
+
+    func removeAttachment(id: UUID) {
+        guard !isGenerating else { return }
+        attachments.removeAll { $0.id == id }
     }
 
     func toggleSelection(for tool: Tool, defaultSettings: ToolGenerationSettings = .default) {
@@ -329,6 +355,7 @@ final class ToolLibraryStore {
                 }
                 clearPendingGeneration(on: tool)
                 try modelContext.save()
+                removeCurrentRunAttachments(for: tool)
             }
         } catch {
             modelContext.rollback()
@@ -419,6 +446,7 @@ final class ToolLibraryStore {
         let submittedSettings = submittedGenerationSettings(
             defaultSettings: Self.defaultGenerationSettings(from: inferenceStore.generationPreferences)
         )
+        let submittedAttachments = attachments
         var activeTool: Tool?
         isGenerating = true
         generationStopWasRequested = false
@@ -435,10 +463,17 @@ final class ToolLibraryStore {
             let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
                 resolutionContext: codingAgentResolutionContext(
                     for: selectedTool,
-                    generationMode: selectedTool == nil ? .create : .edit
+                    generationMode: selectedTool == nil ? .create : .edit,
+                    requiresAttachmentSupport: !submittedAttachments.isEmpty
                 )
             )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
+            guard
+                submittedAttachments.isEmpty
+                    || languageModelContext.codingAgentSupportsImageInput
+            else {
+                throw ToolLibraryAttachmentError.unsupportedSelection
+            }
             if let selectedTool {
                 setActiveCodingAgent(activeCodingAgent, for: selectedTool)
                 markToolGenerating(
@@ -467,6 +502,7 @@ final class ToolLibraryStore {
                     settings: submittedSettings,
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
+                    attachments: submittedAttachments,
                     lifecycle: lifecycle
                 )
             )
@@ -478,10 +514,12 @@ final class ToolLibraryStore {
                 prompt: trimmedPrompt
             )
             try modelContext.save()
+            removeCurrentRunAttachments(for: completedTool)
             if shouldNotifyGenerationTerminalEvent {
                 await notifyGenerationFinished(completedTool)
             }
             prompt = Self.defaultPrompt
+            attachments = []
             await refreshIronsmithCreditsIfNeeded(inferenceStore)
         } catch {
             if IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled {
@@ -772,10 +810,14 @@ final class ToolLibraryStore {
 
         do {
             try await inferenceStore.prepareSelectedModelForGeneration()
+            let requiresAttachmentSupport = try !dependencies.attachmentStorage.currentRun(
+                tool.packageLayout
+            ).isEmpty
             let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
                 resolutionContext: codingAgentResolutionContext(
                     for: tool,
-                    generationMode: tool.generationMode ?? .create
+                    generationMode: tool.generationMode ?? .create,
+                    requiresAttachmentSupport: requiresAttachmentSupport
                 )
             )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
@@ -803,6 +845,7 @@ final class ToolLibraryStore {
             )
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
             try modelContext.save()
+            removeCurrentRunAttachments(for: tool)
             if shouldNotifyGenerationTerminalEvent {
                 await notifyGenerationFinished(tool)
             }
@@ -898,6 +941,12 @@ final class ToolLibraryStore {
                         self.setActiveCodingAgent(activeCodingAgent, for: tool)
                     }
                     onPrepared(tool)
+                }
+            },
+            didPersistAttachments: { persistedIDs in
+                await MainActor.run {
+                    let persistedIDSet = Set(persistedIDs)
+                    self.attachments.removeAll { persistedIDSet.contains($0.id) }
                 }
             },
             updatePendingPrompt: { prompt in
@@ -1021,6 +1070,16 @@ final class ToolLibraryStore {
         tool.updatedAt = .now
     }
 
+    private func removeCurrentRunAttachments(for tool: Tool) {
+        do {
+            try dependencies.attachmentStorage.removeCurrentRun(tool.packageLayout)
+        } catch {
+            AgentDiagnosticsLog.append(
+                "Current-run attachment cleanup failed: \(error.localizedDescription)"
+            )
+        }
+    }
+
     private func requirePreparedTool(_ tool: Tool?) throws -> Tool {
         guard let tool else {
             throw ToolLibraryGenerationError.missingPreparedTool
@@ -1080,7 +1139,8 @@ final class ToolLibraryStore {
 
     func codingAgentResolutionContext(
         for tool: Tool?,
-        generationMode: ToolGenerationMode
+        generationMode: ToolGenerationMode,
+        requiresAttachmentSupport: Bool = false
     ) -> ToolCodingAgentResolutionContext {
         guard generationMode == .edit,
               let tool,
@@ -1089,7 +1149,8 @@ final class ToolLibraryStore {
         else {
             return ToolCodingAgentResolutionContext(
                 generationMode: generationMode,
-                existingSourceLineCount: nil
+                existingSourceLineCount: nil,
+                requiresAttachmentSupport: requiresAttachmentSupport
             )
         }
 
@@ -1103,7 +1164,19 @@ final class ToolLibraryStore {
 
         return ToolCodingAgentResolutionContext(
             generationMode: generationMode,
-            existingSourceLineCount: lineCount
+            existingSourceLineCount: lineCount,
+            requiresAttachmentSupport: requiresAttachmentSupport
+        )
+    }
+
+    func currentCodingAgentResolutionContext(in modelContext: ModelContext)
+        -> ToolCodingAgentResolutionContext
+    {
+        let selectedTool = try? fetchSelectedTool(in: modelContext)
+        return codingAgentResolutionContext(
+            for: selectedTool,
+            generationMode: selectedTool == nil ? .create : .edit,
+            requiresAttachmentSupport: !attachments.isEmpty
         )
     }
 
@@ -1124,6 +1197,7 @@ struct ToolLibraryDependencies {
     var versionBackupClient: ToolVersionBackupClient = .live
     var buildClient: ToolBuildClient = .live()
     var packageMaterializer: ToolPackageMaterializer = .live
+    var attachmentStorage: ToolPromptAttachmentStorage = .live
     var notificationClient: ToolGenerationNotificationClient = .disabled
 
     static let live = ToolLibraryDependencies(
@@ -1134,6 +1208,7 @@ struct ToolLibraryDependencies {
         versionBackupClient: .live,
         buildClient: .live(),
         packageMaterializer: .live,
+        attachmentStorage: .live,
         notificationClient: .live
     )
 }

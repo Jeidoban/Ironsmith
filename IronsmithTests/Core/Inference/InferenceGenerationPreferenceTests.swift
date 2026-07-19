@@ -652,29 +652,30 @@ extension InferenceTests {
         customProvider.identifier = "custom.test"
         let anthropicProvider = ProviderCatalog.makeProvider(for: .anthropic)!
 
-        func model(_ identifier: String, provider: ProviderConfig) -> ModelConfig {
-            ModelConfig(
-                identifier: identifier,
-                displayName: identifier,
-                providerIdentifier: provider.identifier,
-                source: .remote,
-                installState: .installed
-            )
-        }
-
         func resolve(
             _ identifier: String,
             provider: ProviderConfig,
             lineCount: Int? = nil,
-            requested: ToolCodingAgentPreference = .automatic
+            requested: ToolCodingAgentPreference = .automatic,
+            requiresAttachmentSupport: Bool = false,
+            supportsImageInput: Bool = false
         ) -> ToolCodingAgent {
-            ToolCodingAgentResolver.resolve(
+            let model = ModelConfig(
+                identifier: identifier,
+                displayName: identifier,
+                providerIdentifier: provider.identifier,
+                source: .remote,
+                installState: .installed,
+                supportsImageInput: supportsImageInput
+            )
+            return ToolCodingAgentResolver.resolve(
                 requested: requested,
-                model: model(identifier, provider: provider),
+                model: model,
                 provider: provider,
                 context: ToolCodingAgentResolutionContext(
                     generationMode: lineCount == nil ? .create : .edit,
-                    existingSourceLineCount: lineCount
+                    existingSourceLineCount: lineCount,
+                    requiresAttachmentSupport: requiresAttachmentSupport
                 )
             )
         }
@@ -682,6 +683,23 @@ extension InferenceTests {
         #expect(resolve("future-model", provider: openAIProvider) == .codex)
         #expect(resolve("openai/gpt-5.4", provider: ironsmithProvider) == .codex)
         #expect(resolve("anthropic/claude-sonnet", provider: ironsmithProvider) == .ironsmithFlame)
+        #expect(
+            resolve(
+                "anthropic/claude-sonnet",
+                provider: ironsmithProvider,
+                requiresAttachmentSupport: true,
+                supportsImageInput: true
+            ) == .codex
+        )
+        #expect(
+            resolve(
+                "anthropic/claude-sonnet",
+                provider: ironsmithProvider,
+                requested: .ironsmithFlame,
+                requiresAttachmentSupport: true,
+                supportsImageInput: true
+            ) == .ironsmithFlame
+        )
         #expect(resolve("anthropic/claude-sonnet", provider: ironsmithProvider, lineCount: 600) == .ironsmithFlame)
         #expect(resolve("anthropic/claude-sonnet", provider: ironsmithProvider, lineCount: 601) == .codex)
 

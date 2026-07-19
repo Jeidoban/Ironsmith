@@ -108,8 +108,23 @@ nonisolated enum ToolModelFamily: Equatable, Sendable {
 nonisolated struct ToolCodingAgentResolutionContext: Equatable, Sendable {
     let generationMode: ToolGenerationMode
     let existingSourceLineCount: Int?
+    let requiresAttachmentSupport: Bool
 
-    static let create = Self(generationMode: .create, existingSourceLineCount: nil)
+    init(
+        generationMode: ToolGenerationMode,
+        existingSourceLineCount: Int?,
+        requiresAttachmentSupport: Bool = false
+    ) {
+        self.generationMode = generationMode
+        self.existingSourceLineCount = existingSourceLineCount
+        self.requiresAttachmentSupport = requiresAttachmentSupport
+    }
+
+    static let create = Self(
+        generationMode: .create,
+        existingSourceLineCount: nil,
+        requiresAttachmentSupport: false
+    )
 
     var isLargeEdit: Bool {
         generationMode == .edit && (existingSourceLineCount ?? 0) > 600
@@ -176,6 +191,11 @@ nonisolated enum ToolCodingAgentResolver {
         case .codex:
             return .codex
         case .automatic:
+            if context.requiresAttachmentSupport,
+               ToolAttachmentSupport.canUseCodexAttachments(model: model, provider: provider)
+            {
+                return .codex
+            }
             let defaultAgent = automaticDefault(model: model, provider: provider)
             if defaultAgent == .ironsmithFlame,
                context.isLargeEdit,
@@ -238,9 +258,25 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
     let rollsBackModelRepairWhenErrorCountIncreases: Bool
     let regeneratesAfterModelRepairStall: Bool
     let fallsBackToWholeFileEditAfterInvalidInitialPatch: Bool
+    let diagnosticWholeFileRewriteEnabled: Bool
     let maximumModelRepairAttempts: Int?
 
-    static func ironsmithSpark(repairStrategy: ToolRepairStrategy) -> Self {
+    var sourcePreparationPolicy: ToolSourcePreparationPolicy {
+        switch codingAgent {
+        case .ironsmithSpark:
+            return .normalizeAndFormat
+        case .ironsmithFlame:
+            return .extractModelEnvelope
+        case .codex:
+            return .none
+        }
+    }
+
+    static func ironsmithSpark(
+        repairStrategy: ToolRepairStrategy,
+        diagnosticWholeFileRewriteEnabled: Bool = IronsmithFeatureFlags
+            .isDiagnosticWholeFileRewriteEnabled()
+    ) -> Self {
         ToolGenerationPipelineConfiguration(
             codingAgent: .ironsmithSpark,
             repairStrategy: repairStrategy,
@@ -250,6 +286,7 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
             rollsBackModelRepairWhenErrorCountIncreases: true,
             regeneratesAfterModelRepairStall: true,
             fallsBackToWholeFileEditAfterInvalidInitialPatch: true,
+            diagnosticWholeFileRewriteEnabled: diagnosticWholeFileRewriteEnabled,
             maximumModelRepairAttempts: nil
         )
     }
@@ -264,6 +301,7 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
             rollsBackModelRepairWhenErrorCountIncreases: false,
             regeneratesAfterModelRepairStall: false,
             fallsBackToWholeFileEditAfterInvalidInitialPatch: false,
+            diagnosticWholeFileRewriteEnabled: false,
             maximumModelRepairAttempts: ToolGenerationRepairPolicy.largeModelMaximumRepairAttempts
         )
     }
@@ -278,9 +316,16 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
             rollsBackModelRepairWhenErrorCountIncreases: false,
             regeneratesAfterModelRepairStall: false,
             fallsBackToWholeFileEditAfterInvalidInitialPatch: false,
+            diagnosticWholeFileRewriteEnabled: false,
             maximumModelRepairAttempts: nil
         )
     }
+}
+
+enum ToolSourcePreparationPolicy: Equatable, Sendable {
+    case none
+    case extractModelEnvelope
+    case normalizeAndFormat
 }
 
 enum ToolRepairStrategy: Equatable, Sendable {

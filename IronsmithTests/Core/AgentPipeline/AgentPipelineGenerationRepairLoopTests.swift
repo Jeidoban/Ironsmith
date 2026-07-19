@@ -226,6 +226,7 @@ extension AgentPipelineTests {
 
         let executableName = "BuildAModelRepairTool"
         let builds = UnsupportedModifierBuilds(executableName: executableName)
+        let formatCapture = FormatCapture()
         let processClient = SwiftPackageProcessClient(
             build: { packageRoot in
                 await builds.next(packageRoot: packageRoot)
@@ -235,8 +236,9 @@ extension AgentPipelineTests {
             },
             launch: { _ in },
             stripQuarantine: { _ in },
-            formatSwiftSource: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            formatSwiftSource: { url in
+                await formatCapture.record(url)
+                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
         let responses = LanguageModelResponseQueue([
@@ -250,11 +252,11 @@ extension AgentPipelineTests {
             }
             """,
             """
-            <<<<<<< SEARCH
-                    Text("broken").definitelyNotReal()
-            =======
-                    Text("fixed by model repair")
-            >>>>>>> REPLACE
+            --- a/ContentView.swift
+            +++ b/ContentView.swift
+            @@ -5,1 +5,1 @@
+            -        Text("broken").definitelyNotReal()
+            +        Text("fixed by model repair")
             """
         ])
         let invocationCapture = LanguageModelInvocationCapture()
@@ -284,6 +286,96 @@ extension AgentPipelineTests {
         #expect(await responses.count == 2)
         #expect(await invocationCapture.count == 2)
         #expect(await builds.count == 2)
+        #expect(await formatCapture.formattedURLs.count == 1)
+    }
+
+    @MainActor
+    @Test
+    func modelRepairConversationIsTheOnlySourceWriterBetweenTurns() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let executableName = "ModelConversationTool"
+        let builds = ModelConversationBuilds(executableName: executableName)
+        let formatCapture = FormatCapture()
+        let processClient = SwiftPackageProcessClient(
+            build: { packageRoot in
+                await builds.next(packageRoot: packageRoot)
+            },
+            showBinPath: { packageRoot in
+                packageRoot.appendingPathComponent(".build/debug", isDirectory: true)
+            },
+            launch: { _ in },
+            stripQuarantine: { _ in },
+            formatSwiftSource: { url in
+                await formatCapture.record(url)
+                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let responses = LanguageModelResponseQueue([
+            """
+            import SwiftUI
+
+            struct ContentView: View {
+                @State private var tokens = ["one", "two"]
+                @State private var newIdx = 0
+
+                var body: some View {
+                    Text(tokens[newIdx]).definitelyNotReal()
+                }
+            }
+            """,
+            """
+            --- a/ContentView.swift
+            +++ b/ContentView.swift
+            @@ -8,1 +8,3 @@
+            -        Text(tokens[newIdx]).definitelyNotReal()
+            +        if newIdx< tokens.count {
+            +            Text(tokens[newIdx])
+            +        }
+            """,
+            """
+            --- a/ContentView.swift
+            +++ b/ContentView.swift
+            @@ -8,1 +8,1 @@
+            -        if newIdx< tokens.count {
+            +        if newIdx < tokens.count {
+            """
+        ])
+        let promptCapture = PromptCapture()
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await promptCapture.record(prompt)
+                return try await responses.next()
+            },
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: processClient,
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(displayName: "Model Conversation Tool", iconPrompt: "")
+            }
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Build a model conversation tool",
+            settings: .default
+        )
+
+        let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        let prompts = await promptCapture.prompts
+        #expect(contentView.contains("if newIdx < tokens.count"))
+        #expect(await responses.count == 3)
+        #expect(await builds.count == 3)
+        #expect(await formatCapture.formattedURLs.count == 1)
+        #expect(prompts.count == 3)
+        #expect(prompts[1].contains("Current authoritative ContentView.swift:"))
+        #expect(prompts[1].contains("Return only a unified diff for ContentView.swift."))
+        #expect(prompts[1].contains("Return at most 1 unified diff hunk(s)."))
+        #expect(!(prompts[2].contains("Current authoritative ContentView.swift:")))
+        #expect(prompts[2].contains("Return only a unified diff for ContentView.swift."))
     }
 
     @MainActor
@@ -295,6 +387,7 @@ extension AgentPipelineTests {
         let executableName = "BuildALargeModelRepair"
         let brokenLineCount = ToolGenerationRepairPolicy.regenerationThreshold + 1
         let builds = MultipleUnsupportedModifierBuilds(executableName: executableName)
+        let formatCapture = FormatCapture()
         let processClient = SwiftPackageProcessClient(
             build: { packageRoot in
                 await builds.next(packageRoot: packageRoot)
@@ -304,8 +397,9 @@ extension AgentPipelineTests {
             },
             launch: { _ in },
             stripQuarantine: { _ in },
-            formatSwiftSource: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+            formatSwiftSource: { url in
+                await formatCapture.record(url)
+                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
         let rowLineCount = brokenLineCount * ToolGenerationRepairPolicy.regenerationThresholdSourceLinesPerError
@@ -321,7 +415,11 @@ extension AgentPipelineTests {
         let largeBrokenSource = """
         import SwiftUI
 
+        private struct AppFeedback {}
+
         struct ContentView: View {
+            @State private var feedback: AppFeedback?
+
             var body: some View {
                 VStack {
         \(rowLines)
@@ -364,8 +462,10 @@ extension AgentPipelineTests {
         )
         #expect(contentView.contains(#"Text("Fixed 13")"#))
         #expect(!(contentView.contains("definitelyNotReal")))
+        #expect(contentView.contains("@State private var feedback: AppFeedback?"))
         #expect(await responses.count == 2)
         #expect(await builds.count == 2)
+        #expect(await formatCapture.formattedURLs.isEmpty)
     }
 
     @MainActor
@@ -670,7 +770,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func exhaustedModelRepairBudgetRegeneratesInsteadOfFailingCandidate() async throws {
+    func exhaustedModelRepairBudgetUsesDiagnosticRewriteBeforeScratchRegeneration() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -727,7 +827,12 @@ extension AgentPipelineTests {
                 try await responses.next(prompt)
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn)),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(
+                    maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.smallModelPatchBlocksPerTurn
+                ),
+                diagnosticWholeFileRewriteEnabled: true
+            ),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             metadataClient: .fallback()
@@ -743,14 +848,15 @@ extension AgentPipelineTests {
             encoding: .utf8
         )
         #expect(contentView.contains(#"Text("Regenerated after budget")"#))
-        #expect(await responses.generationCount == 2)
+        #expect(await responses.generationCount == 1)
+        #expect(await responses.diagnosticRewriteCount == 1)
         #expect(await responses.repairCount == ToolGenerationRepairPolicy.modelMaximumRepairAttempts)
         #expect(await builds.count == ToolGenerationRepairPolicy.modelMaximumRepairAttempts + 2)
     }
 
     @MainActor
     @Test
-    func smallModelPatchEditRequestsFreshPatchAfterRepairPatchStalls() async throws {
+    func smallModelPatchEditUsesWholeFileRewriteAfterRepairPatchStalls() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -762,17 +868,22 @@ extension AgentPipelineTests {
         )
         let builds = UnsupportedModifierBuilds(executableName: executableName)
         let responses = LanguageModelResponseQueue([
-            Self.breakOldTextPatch,
+            Self.breakOldTextUnifiedDiff,
             "not a patch",
             "still not a patch",
-            Self.renameOldToNewPatch
+            Self.simpleContentViewSource(text: "new")
         ])
+        let prompts = PromptCapture()
         let runtime = Self.makeRuntime(
-            languageModel: StubAgentLanguageModel { _, _ in
-                try await responses.next()
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await prompts.record(prompt)
+                return try await responses.next()
             },
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: true
+            ),
             toolsDirectoryURL: toolsDirectory,
             processClient: SwiftPackageProcessClient(
                 build: { packageRoot in
@@ -794,7 +905,13 @@ extension AgentPipelineTests {
         )
 
         let contentView = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        let capturedPrompts = await prompts.prompts
+        let rewritePrompt = try #require(capturedPrompts.first {
+            $0.contains("Narrow compiler repair stalled on this app.")
+        })
         #expect(contentView.contains(#"Text("new")"#))
+        #expect(rewritePrompt.contains("Original edit request: Change old to new"))
+        #expect(rewritePrompt.contains(#"Text("broken").definitelyNotReal()"#))
         #expect(await responses.count == 4)
         #expect(await builds.count == 2)
     }

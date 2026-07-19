@@ -31,7 +31,7 @@ enum ToolGenerationMode: String, Codable, CaseIterable, Equatable, Sendable {
     case edit
 }
 
-typealias Tool = IronsmithSchemaV4.Tool
+typealias Tool = IronsmithSchemaV5.Tool
 
 extension Tool {
     var validatedMenuBarSystemImage: String {

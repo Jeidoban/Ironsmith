@@ -7,6 +7,7 @@ import AppKit
 import SwiftUI
 
 struct ToolRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let tool: Tool
     let state: ToolItemPresentationState
     let actions: ToolItemActions
@@ -150,28 +151,20 @@ struct ToolRowView: View {
         }
     }
 
-    private var backgroundStyle: some ShapeStyle {
+    private var backgroundStyle: Color {
         if state.isSelected {
-            return AnyShapeStyle(.tint.opacity(0.28))
+            return Color.accentColor.opacity(colorScheme == .dark ? 0.28 : 0.24)
         }
 
         if !tool.isGenerationReady {
-            return AnyShapeStyle(.quaternary.opacity(0.52))
-        }
-
-        if state.isRunning {
-            return AnyShapeStyle(.tint.opacity(0.14))
-        }
-
-        if state.isExporting || state.isRebuilding || state.isRestoring {
-            return AnyShapeStyle(.tint.opacity(0.14))
+            return Color.primary.opacity(colorScheme == .dark ? 0.09 : 0.10)
         }
 
         if isHoveringRow {
-            return AnyShapeStyle(.quaternary.opacity(0.66))
+            return Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.13)
         }
 
-        return AnyShapeStyle(.quaternary.opacity(0.40))
+        return Color.primary.opacity(colorScheme == .dark ? 0.06 : 0.07)
     }
 }
 
@@ -223,7 +216,7 @@ enum ToolRowGenerationStatusResolver {
         activeCodingAgent: ToolCodingAgent?
     ) -> String {
         if activeCodingAgent == .codex && isCodexOwnedPhase(phase) {
-            return "Codex is working"
+            return "Agent is working"
         }
 
         switch phase {

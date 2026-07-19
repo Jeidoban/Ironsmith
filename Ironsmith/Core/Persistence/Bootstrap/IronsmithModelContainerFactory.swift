@@ -14,7 +14,7 @@ enum IronsmithModelContainerFactory {
 
     static func make(configuration: ModelConfiguration) throws -> ModelContainer {
         try ModelContainer(
-            for: Schema(versionedSchema: IronsmithSchemaV4.self),
+            for: Schema(versionedSchema: IronsmithSchemaV5.self),
             migrationPlan: IronsmithSchemaMigrationPlan.self,
             configurations: configuration
         )

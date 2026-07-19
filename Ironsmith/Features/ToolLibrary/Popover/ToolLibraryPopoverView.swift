@@ -36,6 +36,7 @@ struct ToolLibraryPopoverView: View {
     @State private var isShowingModelPicker = false
     @State private var isSigningInToIronsmith = false
     @State private var isSearchPresented = false
+    @State private var isPromptExpanded = false
     @State private var searchText = ""
     @FocusState private var isPromptFocused: Bool
 
@@ -86,33 +87,22 @@ struct ToolLibraryPopoverView: View {
                 }
             )
 
-            ScrollView {
-                toolCollectionContent
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.vertical, 14)
-            .padding(.leading, 14)
-            .padding(.trailing, 6)
-            .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
-            .task(id: restoreAvailabilityRefreshID) {
-                await toolLibraryStore.refreshRestoreAvailability(for: tools)
-            }
-            .task(id: publishedStoreLinkRefreshID) {
-                guard isStoreFeatureEnabled else {
-                    await storePublisher.refreshPublishedStoreApps(
-                        isSignedIn: false,
-                        tools: tools
-                    )
-                    return
+            if !isPromptExpanded {
+                ScrollView {
+                    toolCollectionContent
                 }
-                await storePublisher.refreshPublishedStoreApps(
-                    isSignedIn: inferenceStore.ironsmithSession != nil,
-                    tools: tools
-                )
+                .scrollIndicators(.hidden)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.vertical, 14)
+                .padding(.leading, 14)
+                .padding(.trailing, 6)
+                .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
+                .transition(.opacity)
             }
 
             PromptComposerView(
                 prompt: $toolLibraryStore.prompt,
+                isExpanded: $isPromptExpanded,
                 sandboxEnabled: sandboxEnabledBinding,
                 appKind: appKindBinding,
                 sandboxPermissions: sandboxPermissionsBinding,
@@ -126,6 +116,9 @@ struct ToolLibraryPopoverView: View {
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating,
                 isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(.codex),
+                showsAttachmentControls: selectedModelCanUseCodexAttachments,
+                supportsAttachments: selectedModelSupportsAttachments,
+                attachments: toolLibraryStore.attachments,
                 supportedReasoningEfforts: inferenceStore.selectedModelSupportedReasoningEfforts,
                 isPromptFocused: $isPromptFocused,
                 onChooseModel: {
@@ -133,6 +126,7 @@ struct ToolLibraryPopoverView: View {
                 },
                 onSubmit: {
                     guard inferenceStore.selectedModel != nil, !shouldForceNoModels else { return }
+                    collapsePromptIfNeeded()
                     if !showSandboxOverride {
                         toolLibraryStore.sandboxEnabled = true
                     }
@@ -143,12 +137,39 @@ struct ToolLibraryPopoverView: View {
                 },
                 onCancel: {
                     toolLibraryStore.cancelGeneration()
+                },
+                onAddAttachments: { urls in
+                    guard toolLibraryStore.addAttachments(from: urls) else { return }
+                    inferenceStore.generationPreferences.codingAgentPreference =
+                        ToolAttachmentSupport.preferenceAfterAddingAttachments(
+                            inferenceStore.generationPreferences.codingAgentPreference
+                        )
+                },
+                onRemoveAttachment: { id in
+                    toolLibraryStore.removeAttachment(id: id)
                 }
             )
+            .frame(maxHeight: isPromptExpanded ? .infinity : nil)
         }
         .padding(16)
         .frame(width: 340, height: 500)
         .accessibilityIdentifier("tool-library-root")
+        .task(id: restoreAvailabilityRefreshID) {
+            await toolLibraryStore.refreshRestoreAvailability(for: tools)
+        }
+        .task(id: publishedStoreLinkRefreshID) {
+            guard isStoreFeatureEnabled else {
+                await storePublisher.refreshPublishedStoreApps(
+                    isSignedIn: false,
+                    tools: tools
+                )
+                return
+            }
+            await storePublisher.refreshPublishedStoreApps(
+                isSignedIn: inferenceStore.ironsmithSession != nil,
+                tools: tools
+            )
+        }
         .onAppear {
             handlePopoverAppear()
         }
@@ -313,6 +334,13 @@ struct ToolLibraryPopoverView: View {
 
     private var iconGridColumns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    }
+
+    private func collapsePromptIfNeeded() {
+        guard isPromptExpanded else { return }
+        withAnimation(.easeInOut(duration: 0.24)) {
+            isPromptExpanded = false
+        }
     }
 
     private var viewMode: ToolLibraryViewMode {
@@ -533,6 +561,21 @@ struct ToolLibraryPopoverView: View {
     private var canSubmitPrompt: Bool {
         toolLibraryStore.canSubmitPrompt && inferenceStore.selectedModel != nil
             && !shouldForceNoModels
+            && (toolLibraryStore.attachments.isEmpty || selectedModelSupportsAttachments)
+    }
+
+    private var attachmentResolutionContext: ToolCodingAgentResolutionContext {
+        toolLibraryStore.currentCodingAgentResolutionContext(in: modelContext)
+    }
+
+    private var selectedModelSupportsAttachments: Bool {
+        inferenceStore.selectedModelSupportsAttachments(
+            resolutionContext: attachmentResolutionContext
+        )
+    }
+
+    private var selectedModelCanUseCodexAttachments: Bool {
+        inferenceStore.selectedModelCanUseCodexAttachments()
     }
 
     private var composerModelPickerTitle: String {

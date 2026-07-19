@@ -84,6 +84,56 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func packageMaterializerMovesPlaceholderWithCurrentRunAttachments() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let materializer = ToolPackageMaterializer.live
+        let placeholderRoot = root.appendingPathComponent("new-app", isDirectory: true)
+        try materializer.createPlaceholderPackageDirectory(at: placeholderRoot)
+        let placeholderLayout = ToolPackageLayout(
+            packageRootURL: placeholderRoot,
+            executableName: "NewApp"
+        )
+        _ = try ToolPromptAttachmentStorage.live.replaceCurrentRun(
+            [
+                ToolPromptAttachment(
+                    fileName: "reference.txt",
+                    kind: .file,
+                    data: Data("reference".utf8)
+                )
+            ],
+            placeholderLayout
+        )
+
+        let finalRoot = root.appendingPathComponent("demo-app", isDirectory: true)
+        let finalLayout = ToolPackageLayout(packageRootURL: finalRoot, executableName: "DemoApp")
+        try materializer.finalizePlaceholderPackage(
+            from: placeholderRoot,
+            layout: finalLayout,
+            displayName: "Demo App",
+            settings: .default
+        )
+
+        #expect(!FileManager.default.fileExists(atPath: placeholderRoot.path))
+        #expect(FileManager.default.fileExists(atPath: finalLayout.packageManifestURL.path))
+        #expect(FileManager.default.fileExists(
+            atPath: finalLayout.currentRunAttachmentsDirectoryURL
+                .appendingPathComponent("1-reference.txt").path
+        ))
+
+        try materializer.restorePlaceholderPackage(from: finalLayout, to: placeholderRoot)
+        #expect(!FileManager.default.fileExists(atPath: finalRoot.path))
+        #expect(!FileManager.default.fileExists(
+            atPath: placeholderRoot.appendingPathComponent("Package.swift").path
+        ))
+        #expect(FileManager.default.fileExists(
+            atPath: placeholderLayout.currentRunAttachmentsDirectoryURL
+                .appendingPathComponent("1-reference.txt").path
+        ))
+    }
+
+    @MainActor
+    @Test
     func toolBuildSettingsRoundTripThroughStoredTool() {
         let tool = StoredTool(
             name: "Timer",
