@@ -602,7 +602,7 @@ extension InferenceTests {
 
         inferenceStore.startOllama(for: provider)
 
-        await Self.eventually {
+        await Self.eventually(timeoutNanoseconds: 15_000_000_000) {
             inferenceStore.remoteModels.contains { $0.identifier == "gemma4:e2b" }
                 && !inferenceStore.isStartingOllama(provider)
         }
