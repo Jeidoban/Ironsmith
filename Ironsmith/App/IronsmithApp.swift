@@ -8,7 +8,11 @@ final class IronsmithAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         IronsmithEditCommandMenu.installIfNeeded()
-        applicationController = IronsmithApplicationController()
+        let applicationController = IronsmithApplicationController()
+        self.applicationController = applicationController
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(200)) {
+            applicationController.showToolLibraryPopover()
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -172,5 +176,9 @@ final class IronsmithApplicationController {
         Task {
             await inferenceStore.refreshIronsmithAccountSummaryIfNeededAfterCheckout()
         }
+    }
+
+    func showToolLibraryPopover() {
+        menuBarController?.show()
     }
 }

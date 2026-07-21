@@ -281,6 +281,33 @@ struct ContentViewBuildRepairLoop {
                     case .regenerate(let reason, let stalledState):
                         repairState = stalledState
                         lastFailedState = stalledState
+                        guard let deterministicallyRecoveredState = try await applyDeterministicRepairsUntilStable(
+                            startingFrom: stalledState,
+                            phasePrefix: "model repair stall deterministic recovery"
+                        ) else {
+                            try await lifecycle.updateRepairErrorCount(nil)
+                            AgentDiagnosticsLog.append(
+                                """
+                                Model repair stall resolved by deterministic recovery.
+                                packageRoot: \(layout.packageRootURL.path)
+                                trigger: \(reason.description)
+                                """
+                            )
+                            return
+                        }
+                        repairState = deterministicallyRecoveredState
+                        lastFailedState = deterministicallyRecoveredState
+                        try await lifecycle.updateRepairErrorCount(
+                            deterministicallyRecoveredState.contentViewErrors.isEmpty
+                                ? nil
+                                : deterministicallyRecoveredState.contentViewErrors.count
+                        )
+                        recordBestCandidate(
+                            from: deterministicallyRecoveredState,
+                            phase: "model repair stall deterministic recovery",
+                            bestCandidate: &bestCandidate
+                        )
+
                         guard !attemptedDiagnosticWholeFileRewrite,
                               reason.allowsDiagnosticWholeFileRewrite,
                               let diagnosticRewrite
@@ -292,7 +319,7 @@ struct ContentViewBuildRepairLoop {
                         attemptedDiagnosticWholeFileRewrite = true
                         switch try await runDiagnosticWholeFileRewrite(
                             diagnosticRewrite,
-                            startingFrom: stalledState,
+                            startingFrom: deterministicallyRecoveredState,
                             trigger: reason
                         ) {
                         case .finished:
