@@ -88,3 +88,27 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 ## License
 
 Ironsmith is licensed under the [GNU General Public License v3.0](LICENSE).
+
+## OpenAI Build Week instructions
+
+To use, make sure you are on macOS 26, preferably an Apple silicon Mac. The Xcode command line tools are needed, but Ironsmith will walk you through installing those.
+After that, I recommend logging in with your ChatGPT account, but you can also use an API key or use Claude, Gemini, or any OpenAI compatible API you want. 
+The onboarding screen should give you the option to log in with your ChatGPT account in the third option, but if you don't see it, 
+Go to settings, click the plus button next to providers, and select OpenAI. Then click the signin button to sign in with your ChatGPT account.
+
+After you're signed in, ask for whatever app you want using whatever model you'd like. I recommend GPT 5.6 Sol on High reasoning.
+
+To test features added during build week, try adding an image. You can drag and drop or add one manually. OpenAI models default to codex as the coding agent, but feel free to give
+Flame a try too. Its pretty token efficient for smaller apps and uses about 1/2 - 2/3 the usage of Codex. Try the new apps list view as well. In
+the hamburger menu on the top right of the popover, you should have an option to change the view.
+
+### Using 5.6 Sol
+
+The entirety of Icon generation, image input, Spark improvements, the new apps list view, and adding the 5.6 models themselves to Ironsmith was supercharged by 5.6 Sol.
+For example when testing the new 5.6 Luna model, I found that most calls it made to the responses endpoint were failing even though I hadn't changed anything. 
+I used 5.6 Sol Ultra mode to diagnose the issue, and it searched through the actual Codex binary and found that these models make use of a [new responses lite endpoint shape](https://github.com/Jeidoban/Ironsmith/blob/main/Ironsmith/Core/Inference/Providers/OpenAICodexLanguageModel.swift) for their requests and figured out what to change.
+It solved a problems that would have taken hours to days to research, and it did it in 20 minutes.
+
+It also helped greatly in helping me improve the Spark agent. Previously both Flame and Spark made use of Aider style search and replace for repairing code. However I kept finding small models
+like Gemma 4 E2B kept messing up that syntax, and instead reverted to using unified diffs. So to play to small models strengths I had 5.6 Sol [write a new unified diff parser](https://github.com/Jeidoban/Ironsmith/blob/main/Ironsmith/Core/AgentPipeline/ContentRepair/ContentViewRepairDiffApplier.swift) so small models 
+can more easily repair the code, and it worked like a charm. I've had much better success rates in having small models correctly repair their code.
