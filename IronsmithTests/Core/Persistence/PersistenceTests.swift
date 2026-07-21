@@ -324,6 +324,81 @@ struct PersistenceTests {
         }
     }
 
+    @MainActor
+    @Test
+    func unrelatedDefaultStoreIsNotImportedAsLegacyIronsmithData() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let legacyStoreURL = root.appendingPathComponent("legacy/default.store")
+        try FileManager.default.createDirectory(
+            at: legacyStoreURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Self.makeUnrelatedStore(at: legacyStoreURL)
+
+        let locations = Self.makePersistentStoreLocations(
+            root: root,
+            legacyStoreURL: legacyStoreURL
+        )
+        try IronsmithPersistentStorePreparer(locations: locations).prepare()
+
+        #expect(FileManager.default.fileExists(atPath: legacyStoreURL.path))
+        #expect(!FileManager.default.fileExists(atPath: locations.storeURL.path))
+    }
+
+    @MainActor
+    @Test
+    func copiedUnrelatedLegacyStoreIsQuarantinedAndReplacedWithFreshStore() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let legacyStoreURL = root.appendingPathComponent("legacy/default.store")
+        try FileManager.default.createDirectory(
+            at: legacyStoreURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Self.makeUnrelatedStore(at: legacyStoreURL)
+
+        let locations = Self.makePersistentStoreLocations(
+            root: root,
+            legacyStoreURL: legacyStoreURL
+        )
+        try FileManager.default.createDirectory(
+            at: locations.databaseDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        for suffix in ["", "-wal", "-shm"] {
+            let sourceURL = URL(fileURLWithPath: legacyStoreURL.path + suffix)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
+            try FileManager.default.copyItem(
+                at: sourceURL,
+                to: URL(fileURLWithPath: locations.storeURL.path + suffix)
+            )
+        }
+
+        try IronsmithPersistentStorePreparer(locations: locations)
+            .prepare(startupDate: Date(timeIntervalSince1970: 1_750_000_000))
+
+        #expect(!FileManager.default.fileExists(atPath: locations.storeURL.path))
+        let quarantines = try FileManager.default.contentsOfDirectory(
+            at: locations.backupsDirectoryURL,
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix("rejected-legacy-import-") }
+        let quarantine = try #require(quarantines.first)
+        #expect(FileManager.default.fileExists(
+            atPath: quarantine.appendingPathComponent(IronsmithPaths.databaseFileName).path
+        ))
+        #expect(FileManager.default.fileExists(atPath: legacyStoreURL.path))
+
+        let container = try IronsmithModelContainerFactory.make(
+            configuration: ModelConfiguration(url: locations.storeURL)
+        )
+        let context = ModelContext(container)
+        try AppDataBootstrapper.bootstrapIfNeeded(in: context)
+        #expect(try context.fetch(FetchDescriptor<ProviderConfig>()).count == 1)
+    }
+
     @Test
     func existingStoreIsBackedUpInsteadOfBeingReplacedByLegacyStore() throws {
         let root = try Self.makeTemporaryDirectory()
@@ -456,6 +531,29 @@ struct PersistenceTests {
         return root
     }
 
+    private static func makePersistentStoreLocations(
+        root: URL,
+        legacyStoreURL: URL
+    ) -> IronsmithPersistentStoreLocations {
+        IronsmithPersistentStoreLocations(
+            databaseDirectoryURL: root
+                .appendingPathComponent(".ironsmith", isDirectory: true)
+                .appendingPathComponent("db", isDirectory: true),
+            legacyStoreURL: legacyStoreURL
+        )
+    }
+
+    @MainActor
+    private static func makeUnrelatedStore(at url: URL) throws {
+        let container = try ModelContainer(
+            for: UnrelatedLegacyRecord.self,
+            configurations: ModelConfiguration(url: url)
+        )
+        let context = ModelContext(container)
+        context.insert(UnrelatedLegacyRecord(value: "Not Ironsmith"))
+        try context.save()
+    }
+
     private static func startupBackupDirectories(
         in locations: IronsmithPersistentStoreLocations
     ) throws -> [URL] {
@@ -464,5 +562,14 @@ struct PersistenceTests {
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         )
+    }
+}
+
+@Model
+private final class UnrelatedLegacyRecord {
+    var value: String
+
+    init(value: String) {
+        self.value = value
     }
 }

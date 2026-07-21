@@ -174,6 +174,84 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func sparkRepairStallRunsDeterministicRecoveryBeforeScratchRegeneration() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let executableName = "DeterministicStallRecoveryTool"
+        let responses = LanguageModelResponseQueue([
+            """
+            import SwiftUI
+
+            struct ContentView: View {
+                @State private var tokens = ["one", "two"]
+                @State private var newIdx = 0
+
+                var body: some View {
+                    Text(tokens[newIdx]).definitelyNotReal()
+                }
+            }
+            """,
+            """
+            --- a/ContentView.swift
+            +++ b/ContentView.swift
+            @@ -8,1 +8,3 @@
+            -        Text(tokens[newIdx]).definitelyNotReal()
+            +        if newIdx< tokens.count {
+            +            Text(tokens[newIdx])
+            +        }
+            """,
+            "not a patch",
+            "still not a patch",
+            Self.simpleContentViewSource(text: "Scratch regeneration should not run"),
+        ])
+        let prompts = PromptCapture()
+        let builds = ModelConversationBuilds(executableName: executableName)
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await prompts.record(prompt)
+                return try await responses.next()
+            },
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1),
+                diagnosticWholeFileRewriteEnabled: false
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: SwiftPackageProcessClient(
+                build: { packageRoot in
+                    await builds.next(packageRoot: packageRoot)
+                },
+                showBinPath: { packageRoot in
+                    packageRoot.appendingPathComponent(".build/debug", isDirectory: true)
+                },
+                launch: { _ in },
+                stripQuarantine: { _ in }
+            ),
+            metadataClient: ToolMetadataClient { _ in
+                ToolMetadataSuggestion(
+                    displayName: "Deterministic Stall Recovery Tool",
+                    iconPrompt: ""
+                )
+            }
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Build a deterministic stall recovery tool",
+            settings: .default
+        )
+
+        let source = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        let capturedPrompts = await prompts.prompts
+        #expect(source.contains("if newIdx < tokens.count"))
+        #expect(!capturedPrompts.contains {
+            $0.contains("Narrow compiler repair stalled on this app.")
+        })
+        #expect(await responses.count == 4)
+        #expect(await builds.count == 3)
+    }
+
+    @MainActor
+    @Test
     func regressedDiagnosticRewriteGetsFreshDiffRepairConversation() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
