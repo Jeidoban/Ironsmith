@@ -10,6 +10,7 @@ struct StoreToolImportRequest: Sendable {
     let app: StoreAppDetail
     let version: StoreVersionDownload
     let mode: StoreToolImportMode
+    var displayName: String? = nil
     var isOwnApp = false
     var initialGenerationState: ToolGenerationState = .ready
 }
@@ -38,9 +39,9 @@ extension StoreToolImportClient {
         StoreToolImportClient { request, modelContext in
             try IronsmithStoreClient.verifySourceHash(request.version)
 
-            let displayName = request.mode == .remix
+            let displayName = request.displayName ?? (request.mode == .remix
                 ? "\(request.app.name) Remix"
-                : request.app.name
+                : request.app.name)
             let packageRootURL = try packageMaterializer.makeUniquePackageRoot(
                 displayName: displayName,
                 toolsDirectoryURL: toolsDirectoryURL

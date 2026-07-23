@@ -40,6 +40,7 @@ final class StoreWindowStore {
     var isLoadingPublished = false
     var isLoadingDetail = false
     var workingAppID: String?
+    var workingVersionID: String?
     var errorMessage: String?
 
     @ObservationIgnored private let client: IronsmithStoreClient
@@ -227,7 +228,7 @@ final class StoreWindowStore {
     func installDisposition(for app: StoreAppDetail, tools: [Tool]) -> StoreAppInstallDisposition {
         let linkedTools = tools.filter { $0.storeAppId == app.id }
         if let currentTool = linkedTools.first(where: {
-            localSourceHash(for: $0) == app.currentVersion.sourceSha256
+            localSourceHash(for: $0) == app.currentVersion.sourceSha256.lowercased()
         }) {
             return .openExisting(currentTool)
         }
@@ -242,6 +243,20 @@ final class StoreWindowStore {
         return .createCopy
     }
 
+    func installDisposition(
+        for version: StoreVersionMetadata,
+        of app: StoreAppDetail,
+        tools: [Tool]
+    ) -> StoreAppInstallDisposition {
+        guard let matchingTool = tools.first(where: {
+            $0.storeAppId == app.id
+                && localSourceHash(for: $0) == version.sourceSha256.lowercased()
+        }) else {
+            return .createCopy
+        }
+        return .openExisting(matchingTool)
+    }
+
     func install(
         _ app: StoreAppDetail,
         mode: StoreToolImportMode,
@@ -252,7 +267,11 @@ final class StoreWindowStore {
     ) async {
         guard workingAppID == nil else { return }
         workingAppID = app.id
-        defer { workingAppID = nil }
+        workingVersionID = app.currentVersion.id
+        defer {
+            workingAppID = nil
+            workingVersionID = nil
+        }
         do {
             if inferenceStore.ironsmithSession != nil {
                 await refreshPublished()
@@ -282,37 +301,74 @@ final class StoreWindowStore {
                 app.id,
                 app.currentVersion.versionNumber
             )
-            let result = try await importClient.importTool(
-                StoreToolImportRequest(
-                    app: app,
-                    version: version,
-                    mode: mode,
-                    isOwnApp: isOwnApp,
-                    initialGenerationState: mode == .get ? .generating : .ready
-                ),
-                modelContext
+            try await importAndBuild(
+                version,
+                app: app,
+                mode: mode,
+                displayName: nil,
+                isOwnApp: isOwnApp,
+                modelContext: modelContext,
+                routeStore: routeStore
             )
-            routeStore.open(
-                .toolLibrary(
-                    .selectTool(id: result.tool.id, focusPrompt: mode == .remix)
-                )
-            )
-            if mode == .get {
-                do {
-                    try await buildClient.buildTool(result.tool)
-                    result.tool.generationState = .ready
-                    result.tool.generationPhase = .completed
-                    result.tool.generationErrorSummary = nil
-                    result.tool.updatedAt = Date()
-                    try modelContext.save()
-                } catch {
-                    result.tool.generationState = .failed
-                    result.tool.generationErrorSummary = error.localizedDescription
-                    result.tool.updatedAt = Date()
-                    try? modelContext.save()
-                    throw error
-                }
+        } catch {
+            present(error)
+        }
+    }
+
+    func installVersion(
+        _ version: StoreVersionMetadata,
+        of app: StoreAppDetail,
+        tools: [Tool],
+        modelContext: ModelContext,
+        routeStore: IronsmithRouteStore,
+        inferenceStore: InferenceStore
+    ) async {
+        guard workingAppID == nil else { return }
+        workingAppID = app.id
+        workingVersionID = version.id
+        defer {
+            workingAppID = nil
+            workingVersionID = nil
+        }
+        do {
+            if inferenceStore.ironsmithSession != nil {
+                await refreshPublished()
             }
+            if case .openExisting(let tool) = installDisposition(
+                for: version,
+                of: app,
+                tools: tools
+            ) {
+                routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+                return
+            }
+
+            let download = try await client.fetchVersion(
+                app.storeId,
+                app.id,
+                version.versionNumber
+            )
+            guard download.id == version.id else {
+                throw IronsmithStoreClientError.invalidResponse
+            }
+            guard download.sourceSha256.lowercased() == version.sourceSha256.lowercased() else {
+                throw IronsmithStoreClientError.sourceHashMismatch(
+                    expected: version.sourceSha256,
+                    actual: download.sourceSha256
+                )
+            }
+            let displayName = version.id == app.currentVersion.id
+                ? app.name
+                : "\(app.name) v\(version.versionNumber)"
+            try await importAndBuild(
+                download,
+                app: app,
+                mode: .get,
+                displayName: displayName,
+                isOwnApp: isOwnPublishedApp(app),
+                modelContext: modelContext,
+                routeStore: routeStore
+            )
         } catch {
             present(error)
         }
@@ -395,6 +451,49 @@ final class StoreWindowStore {
             tool.generationPhase = previousPhase
             tool.generationErrorSummary = previousError
             tool.updatedAt = Date()
+            try? modelContext.save()
+            throw error
+        }
+    }
+
+    private func importAndBuild(
+        _ version: StoreVersionDownload,
+        app: StoreAppDetail,
+        mode: StoreToolImportMode,
+        displayName: String?,
+        isOwnApp: Bool,
+        modelContext: ModelContext,
+        routeStore: IronsmithRouteStore
+    ) async throws {
+        let result = try await importClient.importTool(
+            StoreToolImportRequest(
+                app: app,
+                version: version,
+                mode: mode,
+                displayName: displayName,
+                isOwnApp: isOwnApp,
+                initialGenerationState: mode == .get ? .generating : .ready
+            ),
+            modelContext
+        )
+        routeStore.open(
+            .toolLibrary(
+                .selectTool(id: result.tool.id, focusPrompt: mode == .remix)
+            )
+        )
+        guard mode == .get else { return }
+
+        do {
+            try await buildClient.buildTool(result.tool)
+            result.tool.generationState = .ready
+            result.tool.generationPhase = .completed
+            result.tool.generationErrorSummary = nil
+            result.tool.updatedAt = Date()
+            try modelContext.save()
+        } catch {
+            result.tool.generationState = .failed
+            result.tool.generationErrorSummary = error.localizedDescription
+            result.tool.updatedAt = Date()
             try? modelContext.save()
             throw error
         }

@@ -240,7 +240,7 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
     let icon: StoreAsset?
     let screenshots: [StoreAsset]
     let currentVersion: StoreVersionMetadata
-    let recentVersions: [StoreVersionMetadata]
+    let versions: [StoreVersionMetadata]
     let remix: StoreRemixMetadata?
 
     var iconAsset: StoreAsset? {

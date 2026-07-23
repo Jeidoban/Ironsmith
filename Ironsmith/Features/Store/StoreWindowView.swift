@@ -286,9 +286,6 @@ private struct StoreHomeSectionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Divider()
-                .padding(.horizontal, 28)
-
             HStack(alignment: .firstTextBaseline) {
                 Text(section.title)
                     .font(.largeTitle.weight(.semibold))
@@ -573,10 +570,14 @@ private struct StoreAppDetailDestinationView: View {
             app: store.selectedAppDetail?.id == appID ? store.selectedAppDetail : nil,
             isLoading: store.isLoadingDetail,
             isWorking: store.workingAppID == appID,
+            workingVersionID: store.workingVersionID,
             installDisposition: detail.map {
                 store.installDisposition(for: $0, tools: tools)
             } ?? .createCopy,
             canRemix: detail.map { !store.isOwnPublishedApp($0) } ?? false,
+            versionInstallDisposition: { app, version in
+                store.installDisposition(for: version, of: app, tools: tools)
+            },
             onGet: { app in
                 Task {
                     await store.install(
@@ -594,6 +595,18 @@ private struct StoreAppDetailDestinationView: View {
                     await store.install(
                         app,
                         mode: .remix,
+                        tools: tools,
+                        modelContext: modelContext,
+                        routeStore: routeStore,
+                        inferenceStore: inferenceStore
+                    )
+                }
+            },
+            onInstallVersion: { app, version in
+                Task {
+                    await store.installVersion(
+                        version,
+                        of: app,
                         tools: tools,
                         modelContext: modelContext,
                         routeStore: routeStore,
@@ -619,190 +632,7 @@ private struct StoreAppDetailDestinationView: View {
     }
 }
 
-private struct StoreAppDetailView: View {
-    let app: StoreAppDetail?
-    let isLoading: Bool
-    let isWorking: Bool
-    let installDisposition: StoreAppInstallDisposition
-    let canRemix: Bool
-    let onGet: (StoreAppDetail) -> Void
-    let onRemix: (StoreAppDetail) -> Void
-
-    var body: some View {
-        Group {
-            if let app {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        HStack(alignment: .top, spacing: 16) {
-                            StoreIconView(url: app.iconAsset?.url, size: 88)
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(app.name)
-                                    .font(.largeTitle.weight(.semibold))
-                                Text(app.shortDescription)
-                                    .font(.title3.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                Text(
-                                    "\(app.authorDisplayName) · \(app.category.title) · Version \(app.currentVersion.versionNumber)"
-                                )
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                        }
-
-                        HStack {
-                            Button {
-                                onGet(app)
-                            } label: {
-                                Label(
-                                    installDisposition.buttonTitle,
-                                    systemImage: installDisposition.systemImage)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(isWorking)
-
-                            if canRemix {
-                                Button {
-                                    onRemix(app)
-                                } label: {
-                                    Label("Remix", systemImage: "wand.and.sparkles")
-                                }
-                                .disabled(isWorking)
-                            }
-
-                            if isWorking {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-
-                        Text(app.description)
-                            .font(.body)
-                            .textSelection(.enabled)
-
-                        if let screenshot = app.screenshots.first {
-                            Group {
-                                if let url = screenshot.url {
-                                    AsyncImage(url: url) { phase in
-                                        switch phase {
-                                        case .success(let image):
-                                            image
-                                                .resizable()
-                                                .scaledToFit()
-                                        case .failure:
-                                            StoreImagePlaceholder(systemImage: "photo")
-                                        case .empty:
-                                            ProgressView()
-                                        @unknown default:
-                                            EmptyView()
-                                        }
-                                    }
-                                } else {
-                                    StoreImagePlaceholder(systemImage: "photo")
-                                }
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: 360)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-
-                        StoreDetailMetadataView(app: app)
-                        StoreVersionHistoryView(versions: app.recentVersions)
-                    }
-                    .padding(28)
-                    .frame(maxWidth: 860, alignment: .leading)
-                }
-            } else if isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                StoreEmptyStateView(title: "App not found", systemImage: "square.grid.2x2")
-            }
-        }
-    }
-}
-
-private struct StoreDetailMetadataView: View {
-    let app: StoreAppDetail
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            StorePermissionChipsView(
-                permissions: app.currentVersion.generationSettings.permissionChips)
-
-            LabeledContent("Category") {
-                Text(app.category.title)
-            }
-            LabeledContent("Source Hash") {
-                Text(shortHash(app.currentVersion.sourceSha256))
-                    .monospaced()
-                    .textSelection(.enabled)
-            }
-            LabeledContent("Runtime") {
-                Text(app.currentVersion.runtimeVersion)
-                    .textSelection(.enabled)
-            }
-            LabeledContent("Scanner") {
-                Text(app.currentVersion.scannerVersion)
-                    .textSelection(.enabled)
-            }
-            LabeledContent("License") {
-                Text(app.currentVersion.license)
-            }
-            if let remix = app.remix {
-                LabeledContent("Remixed From") {
-                    Text("\(remix.appName) v\(remix.versionNumber)")
-                }
-            }
-        }
-    }
-
-    private func shortHash(_ hash: String) -> String {
-        guard hash.count > 16 else { return hash }
-        return "\(hash.prefix(12))...\(hash.suffix(6))"
-    }
-}
-
-private struct StoreVersionHistoryView: View {
-    let versions: [StoreVersionMetadata]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Versions")
-                .font(.headline)
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(versions) { version in
-                    HStack {
-                        Text("v\(version.versionNumber)")
-                            .font(.subheadline.weight(.semibold))
-                        Text(shortHash(version.sourceSha256))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(formattedDate(version.publishedAt))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-    }
-
-    private func shortHash(_ hash: String) -> String {
-        guard hash.count > 12 else { return hash }
-        return String(hash.prefix(12))
-    }
-
-    private func formattedDate(_ value: String) -> String {
-        guard let date = ISO8601DateFormatter().date(from: value) else {
-            return value
-        }
-        return date.formatted(date: .abbreviated, time: .omitted)
-    }
-}
-
-private struct StoreIconView: View {
+struct StoreIconView: View {
     let url: URL?
     let size: CGFloat
 
@@ -836,7 +666,7 @@ private struct StoreIconView: View {
     }
 }
 
-private struct StoreImagePlaceholder: View {
+struct StoreImagePlaceholder: View {
     let systemImage: String
 
     var body: some View {
@@ -849,29 +679,7 @@ private struct StoreImagePlaceholder: View {
     }
 }
 
-private struct StorePermissionChipsView: View {
-    let permissions: [String]
-
-    var body: some View {
-        if permissions.isEmpty {
-            Text("No extra permissions")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } else {
-            FlowLayout(spacing: 6) {
-                ForEach(permissions, id: \.self) { permission in
-                    Text(permission)
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.quaternary.opacity(0.45), in: Capsule())
-                }
-            }
-        }
-    }
-}
-
-private struct StoreEmptyStateView: View {
+struct StoreEmptyStateView: View {
     let title: String
     let systemImage: String
 
@@ -887,48 +695,6 @@ private struct StoreEmptyStateView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
-    }
-}
-
-private struct FlowLayout: Layout {
-    let spacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        layout(in: proposal.replacingUnspecifiedDimensions().width, subviews: subviews).size
-    }
-
-    func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) {
-        let placements = layout(in: bounds.width, subviews: subviews).placements
-        for placement in placements {
-            subviews[placement.index].place(
-                at: CGPoint(
-                    x: bounds.minX + placement.frame.minX, y: bounds.minY + placement.frame.minY),
-                proposal: ProposedViewSize(placement.frame.size)
-            )
-        }
-    }
-
-    private func layout(in width: CGFloat, subviews: Subviews) -> (
-        size: CGSize, placements: [(index: Int, frame: CGRect)]
-    ) {
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var lineHeight: CGFloat = 0
-        var placements: [(Int, CGRect)] = []
-        for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
-            if x > 0, x + size.width > width {
-                x = 0
-                y += lineHeight + spacing
-                lineHeight = 0
-            }
-            placements.append((index, CGRect(origin: CGPoint(x: x, y: y), size: size)))
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
-        return (CGSize(width: width, height: y + lineHeight), placements)
     }
 }
 
