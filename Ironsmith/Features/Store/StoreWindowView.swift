@@ -8,88 +8,109 @@ struct StoreWindowView: View {
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @State private var store = StoreWindowStore()
     @State private var path: [StoreNavigationDestination] = []
+    @State private var sidebarSelection: StoreSidebarSelection? = .discover
+    @State private var categoryRefreshToken = 0
     @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         @Bindable var store = store
 
-        NavigationStack(path: $path) {
-            StoreDiscoverHomeView(
-                store: store,
-                tools: tools,
-                inferenceStore: inferenceStore,
-                onOpen: openApp,
-                onSeeAll: openSection,
-                onGet: install
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            StoreSidebarView(
+                selection: $sidebarSelection,
+                searchText: $store.searchText
             )
-            .navigationTitle("App Store")
-            .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search App Store")
-            .toolbar {
-                ToolbarItemGroup {
-                    Button {
-                        Task {
-                            if store.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .isEmpty
-                            {
-                                await store.refreshHome()
-                            } else {
-                                await store.refreshDiscover()
+                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
+        } detail: {
+            NavigationStack(path: $path) {
+                Group {
+                    switch sidebarSelection ?? .discover {
+                    case .discover:
+                        StoreDiscoverHomeView(
+                            store: store,
+                            tools: tools,
+                            inferenceStore: inferenceStore,
+                            onOpen: openApp,
+                            onSeeAll: openSection,
+                            onGet: install
+                        )
+                    case .category(let category):
+                        StoreSectionAppsView(
+                            section: StoreSectionRoute(category: category),
+                            refreshToken: categoryRefreshToken,
+                            store: store,
+                            tools: tools,
+                            inferenceStore: inferenceStore,
+                            onOpen: openApp,
+                            onGet: install
+                        )
+                    case .published:
+                        StorePublishedListView(
+                            store: store,
+                            tools: tools,
+                            inferenceStore: inferenceStore,
+                            onOpen: openApp,
+                            onUpdateVersion: { tool in
+                                routeStore.open(.toolLibrary(.publishTool(tool.id)))
                             }
-                        }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                        )
                     }
-                    .help("Refresh")
-
-                    Button {
-                        path = [.published]
-                        Task { await store.refreshPublished() }
-                    } label: {
-                        Label("Published", systemImage: "square.and.arrow.up")
-                    }
-                    .help("Published")
                 }
-            }
-            .navigationDestination(for: StoreNavigationDestination.self) { destination in
-                switch destination {
-                case .app(let appID):
-                    StoreAppDetailDestinationView(
-                        appID: appID,
-                        store: store,
-                        tools: tools,
-                        modelContext: modelContext,
-                        routeStore: routeStore,
-                        inferenceStore: inferenceStore
-                    )
-                case .section(let section):
-                    StoreSectionAppsView(
-                        section: section,
-                        store: store,
-                        tools: tools,
-                        inferenceStore: inferenceStore,
-                        onOpen: openApp,
-                        onGet: install
-                    )
-                case .published:
-                    StorePublishedListView(
-                        store: store,
-                        tools: tools,
-                        inferenceStore: inferenceStore,
-                        onOpen: openApp,
-                        onUpdateVersion: { tool in
-                            routeStore.open(.toolLibrary(.publishTool(tool.id)))
-                        }
-                    )
+                .navigationTitle(navigationTitle)
+                .navigationDestination(for: StoreNavigationDestination.self) { destination in
+                    switch destination {
+                    case .app(let appID):
+                        StoreAppDetailDestinationView(
+                            appID: appID,
+                            store: store,
+                            tools: tools,
+                            modelContext: modelContext,
+                            routeStore: routeStore,
+                            inferenceStore: inferenceStore
+                        )
+                    case .section(let section):
+                        StoreSectionAppsView(
+                            section: section,
+                            refreshToken: 0,
+                            store: store,
+                            tools: tools,
+                            inferenceStore: inferenceStore,
+                            onOpen: openApp,
+                            onGet: install
+                        )
+                    }
                 }
             }
         }
+        .navigationSplitViewStyle(.balanced)
+        .toolbar(removing: .sidebarToggle)
         .onChange(of: store.searchText) { _, _ in
             searchTask?.cancel()
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
-                await store.refreshDiscover()
+                if store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    await store.refreshHome(showLoadingIndicator: false)
+                } else {
+                    sidebarSelection = .discover
+                    path = []
+                    await store.refreshDiscover()
+                }
             }
+        }
+        .onChange(of: sidebarSelection) { _, selection in
+            path = []
+            if selection != .discover {
+                store.searchText = ""
+            }
+            if selection == .discover {
+                Task { await store.refreshHome(showLoadingIndicator: false) }
+            } else if selection == .published {
+                Task { await store.refreshPublished() }
+            }
+        }
+        .onChange(of: store.contentRevision) { _, _ in
+            Task { await refreshStoreContent() }
         }
         .task {
             await store.loadInitial(inferenceStore: inferenceStore)
@@ -140,22 +161,48 @@ struct StoreWindowView: View {
         }
     }
 
+    private var navigationTitle: String {
+        switch sidebarSelection ?? .discover {
+        case .discover: "App Store"
+        case .category(let category): category.title
+        case .published: "Published"
+        }
+    }
+
+    @MainActor
+    private func refreshStoreContent() async {
+        if store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await store.refreshHome(showLoadingIndicator: false)
+        } else {
+            await store.refreshDiscover(showLoadingIndicator: false)
+        }
+        if inferenceStore.ironsmithSession != nil {
+            await store.refreshPublished(showLoadingIndicator: false)
+        }
+        categoryRefreshToken += 1
+    }
+
     @MainActor
     private func handleStoreRoute(_ route: IronsmithStoreRoute) {
         switch route {
         case .root:
+            sidebarSelection = .discover
             path = []
-            Task { await store.refreshHome() }
+            Task { await store.refreshHome(showLoadingIndicator: false) }
         case .published:
-            path = [.published]
+            sidebarSelection = .published
+            path = []
             Task { await store.refreshPublished() }
         case .publishedApp(let appID):
-            path = [.published]
+            sidebarSelection = .published
+            path = []
             Task { @MainActor in
-                await store.refreshPublished()
+                await store.refreshHome(showLoadingIndicator: false)
+                await store.refreshPublished(showLoadingIndicator: false)
+                categoryRefreshToken += 1
                 if let app = store.publishedApps.first(where: { $0.id == appID }) {
                     store.select(app)
-                    path = [.published, .app(app.id)]
+                    path = [.app(app.id)]
                 }
             }
         }
@@ -165,7 +212,34 @@ struct StoreWindowView: View {
 private enum StoreNavigationDestination: Hashable {
     case app(String)
     case section(StoreSectionRoute)
+}
+
+private enum StoreSidebarSelection: Hashable {
+    case discover
+    case category(StoreAppCategory)
     case published
+}
+
+private struct StoreSidebarView: View {
+    @Binding var selection: StoreSidebarSelection?
+    @Binding var searchText: String
+
+    var body: some View {
+        List(selection: $selection) {
+            Label("Discover", systemImage: "sparkles")
+                .tag(StoreSidebarSelection.discover)
+
+            ForEach(StoreAppCategory.allCases) { category in
+                Label(category.title, systemImage: category.systemImage)
+                    .tag(StoreSidebarSelection.category(category))
+            }
+
+            Label("Published", systemImage: "square.and.arrow.up")
+                .tag(StoreSidebarSelection.published)
+        }
+        .listStyle(.sidebar)
+        .searchable(text: $searchText, placement: .sidebar, prompt: "Search")
+    }
 }
 
 private struct StoreSectionRoute: Hashable, Identifiable {
@@ -179,6 +253,13 @@ private struct StoreSectionRoute: Hashable, Identifiable {
         title = section.title
         sort = section.sort
         category = section.category
+    }
+
+    init(category: StoreAppCategory) {
+        id = "category-\(category.rawValue)"
+        title = category.title
+        sort = .recent
+        self.category = category
     }
 }
 
@@ -219,12 +300,15 @@ private struct StoreDiscoverHomeView: View {
                             .frame(maxWidth: .infinity, alignment: .trailing)
                             .padding(.horizontal, 28)
                     }
-                    ForEach(store.homeSections) { section in
+                    ForEach(store.homeSections.filter { $0.category == nil }) { section in
                         StoreHomeSectionView(
                             section: section,
                             tools: tools,
                             inferenceStore: inferenceStore,
                             workingAppID: store.workingAppID,
+                            actionTitle: {
+                                store.installDisposition(for: $0, tools: tools).buttonTitle
+                            },
                             onOpen: onOpen,
                             onSeeAll: { onSeeAll(section) },
                             onGet: onGet
@@ -261,7 +345,9 @@ private struct StoreSearchResultsView: View {
                 StoreAppRowsView(
                     apps: store.discoverApps,
                     workingAppID: store.workingAppID,
-                    actionTitle: "Get",
+                    actionTitle: {
+                        store.installDisposition(for: $0, tools: tools).buttonTitle
+                    },
                     onOpen: onOpen,
                     onAction: { onGet($0, .get) }
                 )
@@ -276,6 +362,7 @@ private struct StoreHomeSectionView: View {
     let tools: [Tool]
     let inferenceStore: InferenceStore
     let workingAppID: String?
+    let actionTitle: (StoreAppSummary) -> String
     let onOpen: (StoreAppSummary) -> Void
     let onSeeAll: () -> Void
     let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
@@ -303,7 +390,7 @@ private struct StoreHomeSectionView: View {
                     VStack(spacing: 0) {
                         StoreAppStoreRowView(
                             app: app,
-                            actionTitle: "Get",
+                            actionTitle: actionTitle(app),
                             isWorking: workingAppID == app.id,
                             onOpen: { onOpen(app) },
                             onAction: { onGet(app, .get) }
@@ -320,6 +407,7 @@ private struct StoreHomeSectionView: View {
 
 private struct StoreSectionAppsView: View {
     let section: StoreSectionRoute
+    let refreshToken: Int
     @Bindable var store: StoreWindowStore
     let tools: [Tool]
     let inferenceStore: InferenceStore
@@ -348,7 +436,9 @@ private struct StoreSectionAppsView: View {
                     StoreAppRowsView(
                         apps: apps,
                         workingAppID: store.workingAppID,
-                        actionTitle: "Get",
+                        actionTitle: {
+                            store.installDisposition(for: $0, tools: tools).buttonTitle
+                        },
                         onOpen: onOpen,
                         onAction: { onGet($0, .get) }
                     )
@@ -358,10 +448,15 @@ private struct StoreSectionAppsView: View {
             .padding(.vertical, 24)
         }
         .navigationTitle(section.title)
-        .task(id: section) {
-            isLoading = true
+        .task(id: "\(section.id)-\(refreshToken)") {
+            let showsLoadingIndicator = apps.isEmpty
+            if showsLoadingIndicator {
+                isLoading = true
+            }
             apps = await store.loadSectionApps(sort: section.sort, category: section.category)
-            isLoading = false
+            if showsLoadingIndicator {
+                isLoading = false
+            }
         }
     }
 }
@@ -369,7 +464,7 @@ private struct StoreSectionAppsView: View {
 private struct StoreAppRowsView: View {
     let apps: [StoreAppSummary]
     let workingAppID: String?
-    let actionTitle: String
+    let actionTitle: (StoreAppSummary) -> String
     let onOpen: (StoreAppSummary) -> Void
     let onAction: (StoreAppSummary) -> Void
 
@@ -378,7 +473,7 @@ private struct StoreAppRowsView: View {
             ForEach(apps) { app in
                 StoreAppStoreRowView(
                     app: app,
-                    actionTitle: actionTitle,
+                    actionTitle: actionTitle(app),
                     isWorking: workingAppID == app.id,
                     onOpen: { onOpen(app) },
                     onAction: { onAction(app) }
@@ -494,14 +589,6 @@ private struct StorePublishedListView: View {
             .padding(.vertical, 24)
         }
         .navigationTitle("Published")
-        .toolbar {
-            Button {
-                Task { await store.refreshPublished() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help("Refresh")
-        }
     }
 }
 

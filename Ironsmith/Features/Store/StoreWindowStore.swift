@@ -41,6 +41,7 @@ final class StoreWindowStore {
     var isLoadingDetail = false
     var workingAppID: String?
     var workingVersionID: String?
+    var contentRevision = 0
     var errorMessage: String?
 
     @ObservationIgnored private let client: IronsmithStoreClient
@@ -105,9 +106,15 @@ final class StoreWindowStore {
         }
     }
 
-    func refreshHome() async {
-        isLoadingDiscover = true
-        defer { isLoadingDiscover = false }
+    func refreshHome(showLoadingIndicator: Bool = true) async {
+        if showLoadingIndicator {
+            isLoadingDiscover = true
+        }
+        defer {
+            if showLoadingIndicator {
+                isLoadingDiscover = false
+            }
+        }
         do {
             homeSections = try await client.listHomeSections(selectedStoreId)
             if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -119,14 +126,20 @@ final class StoreWindowStore {
         }
     }
 
-    func refreshDiscover() async {
+    func refreshDiscover(showLoadingIndicator: Bool = true) async {
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedSearch.isEmpty else {
-            await refreshHome()
+            await refreshHome(showLoadingIndicator: showLoadingIndicator)
             return
         }
-        isLoadingDiscover = true
-        defer { isLoadingDiscover = false }
+        if showLoadingIndicator {
+            isLoadingDiscover = true
+        }
+        defer {
+            if showLoadingIndicator {
+                isLoadingDiscover = false
+            }
+        }
         do {
             let page = try await client.listApps(
                 selectedStoreId,
@@ -194,9 +207,15 @@ final class StoreWindowStore {
         }
     }
 
-    func refreshPublished() async {
-        isLoadingPublished = true
-        defer { isLoadingPublished = false }
+    func refreshPublished(showLoadingIndicator: Bool = true) async {
+        if showLoadingIndicator {
+            isLoadingPublished = true
+        }
+        defer {
+            if showLoadingIndicator {
+                isLoadingPublished = false
+            }
+        }
         do {
             let page = try await client.listApps(
                 selectedStoreId,
@@ -223,6 +242,32 @@ final class StoreWindowStore {
 
     func isOwnPublishedApp(_ app: StoreAppDetail) -> Bool {
         publishedApps.contains { $0.id == app.id }
+    }
+
+    func installDisposition(
+        for app: StoreAppSummary,
+        tools: [Tool]
+    ) -> StoreAppInstallDisposition {
+        let unchangedLinkedTools = tools.filter { tool in
+            guard tool.storeAppId == app.id,
+                let importedHash = tool.storeSourceSha256?.lowercased()
+            else {
+                return false
+            }
+            return localSourceHash(for: tool) == importedHash
+        }
+        if let currentTool = unchangedLinkedTools.first(where: {
+            $0.storeVersionNumber == app.latestVersionNumber
+        }) {
+            return .openExisting(currentTool)
+        }
+        if let olderTool = unchangedLinkedTools.first(where: {
+            guard let versionNumber = $0.storeVersionNumber else { return false }
+            return versionNumber < app.latestVersionNumber
+        }) {
+            return .updateExisting(olderTool)
+        }
+        return .createCopy
     }
 
     func installDisposition(for app: StoreAppDetail, tools: [Tool]) -> StoreAppInstallDisposition {
@@ -274,7 +319,7 @@ final class StoreWindowStore {
         }
         do {
             if inferenceStore.ironsmithSession != nil {
-                await refreshPublished()
+                await refreshPublished(showLoadingIndicator: false)
             }
             let isOwnApp = isOwnPublishedApp(app)
             if mode == .get {
@@ -291,6 +336,7 @@ final class StoreWindowStore {
                         routeStore: routeStore,
                         inferenceStore: inferenceStore
                     )
+                    contentRevision += 1
                     return
                 case .createCopy:
                     break
@@ -310,6 +356,7 @@ final class StoreWindowStore {
                 modelContext: modelContext,
                 routeStore: routeStore
             )
+            contentRevision += 1
         } catch {
             present(error)
         }
@@ -332,7 +379,7 @@ final class StoreWindowStore {
         }
         do {
             if inferenceStore.ironsmithSession != nil {
-                await refreshPublished()
+                await refreshPublished(showLoadingIndicator: false)
             }
             if case .openExisting(let tool) = installDisposition(
                 for: version,
@@ -369,6 +416,7 @@ final class StoreWindowStore {
                 modelContext: modelContext,
                 routeStore: routeStore
             )
+            contentRevision += 1
         } catch {
             present(error)
         }
@@ -388,6 +436,7 @@ final class StoreWindowStore {
             if selectedAppID == updated.id {
                 selectedAppDetail = updated
             }
+            contentRevision += 1
         } catch {
             present(error)
         }

@@ -218,6 +218,115 @@ struct StoreImportTests {
 
     @MainActor
     @Test
+    func storeSummaryInstallDispositionUsesVersionLinkageAndProtectsEditedTools() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let store = StoreWindowStore(
+            client: .unconfigured,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+        let oldSource = Self.sourceCode("old")
+        let currentSource = Self.sourceCode("current")
+        let oldMetadata = Self.versionMetadata(versionNumber: 1, sourceCode: oldSource)
+        let currentMetadata = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000202",
+            versionNumber: 2,
+            sourceCode: currentSource
+        )
+        let app = Self.appListing(
+            sourceCode: currentSource,
+            versions: [currentMetadata, oldMetadata]
+        )
+        let summary = StoreAppSummary(detail: app)
+        let client = StoreToolImportClient.live(toolsDirectoryURL: root)
+        let oldImport = try await client.importTool(
+            StoreToolImportRequest(
+                app: app,
+                version: Self.versionDownload(
+                    versionNumber: 1,
+                    appId: app.id,
+                    sourceCode: oldSource,
+                    sourceSha256: oldMetadata.sourceSha256
+                ),
+                mode: .get
+            ),
+            context
+        )
+
+        guard case .updateExisting(let tool) = store.installDisposition(
+            for: summary,
+            tools: [oldImport.tool]
+        ) else {
+            Issue.record("Expected the listing row to show Update for an unchanged older version.")
+            return
+        }
+        #expect(tool.id == oldImport.tool.id)
+
+        let currentImport = try await client.importTool(
+            StoreToolImportRequest(
+                app: app,
+                version: Self.versionDownload(
+                    id: currentMetadata.id,
+                    versionNumber: 2,
+                    appId: app.id,
+                    sourceCode: currentSource,
+                    sourceSha256: currentMetadata.sourceSha256
+                ),
+                mode: .get
+            ),
+            context
+        )
+        guard case .openExisting(let tool) = store.installDisposition(
+            for: summary,
+            tools: [currentImport.tool]
+        ) else {
+            Issue.record("Expected the listing row to show Open for an unchanged current version.")
+            return
+        }
+        #expect(tool.id == currentImport.tool.id)
+
+        try Self.sourceCode("edited").write(
+            to: try currentImport.tool.packageLayout.packageFileURL(
+                for: currentImport.tool.contentViewSourcePath
+            ),
+            atomically: true,
+            encoding: .utf8
+        )
+        guard case .createCopy = store.installDisposition(
+            for: summary,
+            tools: [currentImport.tool]
+        ) else {
+            Issue.record("Expected an edited current copy to show Get.")
+            return
+        }
+    }
+
+    @MainActor
+    @Test
+    func successfulStoreMutationRequestsImplicitContentRefresh() async {
+        let app = Self.appListing(sourceCode: Self.sourceCode("published"))
+        var client = IronsmithStoreClient.unconfigured
+        client.patchListing = { _, _, _ in app }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        await store.setStatus(StoreAppSummary(detail: app), status: .unlisted)
+
+        #expect(store.contentRevision == 1)
+    }
+
+    @MainActor
+    @Test
     func historicalVersionInstallCreatesAttributedSeparateCopyWithoutMutatingExistingTool()
         async throws
     {

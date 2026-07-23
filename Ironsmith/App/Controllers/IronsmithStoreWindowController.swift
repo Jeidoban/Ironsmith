@@ -20,7 +20,16 @@ final class IronsmithStoreWindowController: NSWindowController {
 
         let window = NSWindow()
         window.title = "App Store"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.styleMask = [
+            .titled,
+            .closable,
+            .miniaturizable,
+            .resizable,
+            .fullSizeContentView,
+        ]
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 980, height: 680)
         window.setContentSize(NSSize(width: 1200, height: 800))
