@@ -107,10 +107,8 @@ final class ToolLibraryStorePublisher {
         )
         publishingToolID = tool.id
         publishName = tool.name
-        publishShortDescription =
-            linkedPublishedApp(for: tool)?.shortDescription
-            ?? Self.defaultShortDescription(for: tool)
-        publishDescription = "Created with Ironsmith."
+        publishShortDescription = ""
+        publishDescription = ""
         publishCategory = linkedPublishedApp(for: tool)?.category ?? .utilities
         publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
         publishScreenshotData = nil
@@ -223,14 +221,6 @@ final class ToolLibraryStorePublisher {
     private func linkedPublishedApp(for tool: Tool) -> StoreAppSummary? {
         guard let storeAppId = tool.storeAppId else { return nil }
         return publishedStoreAppsByID[storeAppId]
-    }
-
-    private static func defaultShortDescription(for tool: Tool) -> String {
-        let trimmedName = tool.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedName.isEmpty {
-            return String(trimmedName.prefix(40))
-        }
-        return "Created with Ironsmith."
     }
 
     private func applyPublishedStoreLinkage(_ app: StoreAppDetail, to tool: Tool) {

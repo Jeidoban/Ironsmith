@@ -425,9 +425,9 @@ private struct StoreAppStoreRowView: View {
                     .frame(width: 88)
             } else {
                 Button(actionTitle, action: onAction)
-                    .font(.headline)
-                    .controlSize(.regular)
                     .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
                     .frame(width: 88)
             }
         }
