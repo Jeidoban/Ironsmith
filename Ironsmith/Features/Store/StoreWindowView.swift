@@ -469,18 +469,24 @@ private struct StoreAppRowsView: View {
     let onOpen: (StoreAppSummary) -> Void
     let onAction: (StoreAppSummary) -> Void
 
+    private let columns = [
+        GridItem(.adaptive(minimum: 430), spacing: 44, alignment: .top)
+    ]
+
     var body: some View {
-        VStack(spacing: 0) {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 0) {
             ForEach(apps) { app in
-                StoreAppStoreRowView(
-                    app: app,
-                    actionTitle: actionTitle(app),
-                    isWorking: workingAppID == app.id,
-                    onOpen: { onOpen(app) },
-                    onAction: { onAction(app) }
-                )
-                Divider()
-                    .padding(.leading, 88)
+                VStack(spacing: 0) {
+                    StoreAppStoreRowView(
+                        app: app,
+                        actionTitle: actionTitle(app),
+                        isWorking: workingAppID == app.id,
+                        onOpen: { onOpen(app) },
+                        onAction: { onAction(app) }
+                    )
+                    Divider()
+                        .padding(.leading, 88)
+                }
             }
         }
     }
@@ -538,6 +544,10 @@ private struct StorePublishedListView: View {
     let onOpen: (StoreAppSummary) -> Void
     let onUpdateVersion: (Tool) -> Void
 
+    private let columns = [
+        GridItem(.adaptive(minimum: 430), spacing: 44, alignment: .top)
+    ]
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -562,26 +572,28 @@ private struct StorePublishedListView: View {
                     )
                     .frame(minHeight: 420)
                 } else {
-                    VStack(spacing: 0) {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 0) {
                         ForEach(store.publishedApps) { app in
-                            StorePublishedRowView(
-                                app: app,
-                                linkedTool: tools.first { $0.storeAppId == app.id },
-                                isWorking: store.workingAppID == app.id,
-                                onSelect: { onOpen(app) },
-                                onUpdateVersion: onUpdateVersion,
-                                onToggleStatus: {
-                                    Task {
-                                        await store.setStatus(
-                                            app,
-                                            status: app.status == .published
-                                                ? .unlisted : .published
-                                        )
+                            VStack(spacing: 0) {
+                                StorePublishedRowView(
+                                    app: app,
+                                    linkedTool: tools.first { $0.storeAppId == app.id },
+                                    isWorking: store.workingAppID == app.id,
+                                    onSelect: { onOpen(app) },
+                                    onUpdateVersion: onUpdateVersion,
+                                    onToggleStatus: {
+                                        Task {
+                                            await store.setStatus(
+                                                app,
+                                                status: app.status == .published
+                                                    ? .unlisted : .published
+                                            )
+                                        }
                                     }
-                                }
-                            )
-                            Divider()
-                                .padding(.leading, 72)
+                                )
+                                Divider()
+                                    .padding(.leading, 72)
+                            }
                         }
                     }
                     .padding(.horizontal, 28)
