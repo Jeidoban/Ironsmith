@@ -53,8 +53,8 @@ struct ToolLibraryPopoverHeaderView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help("App Store")
-                .accessibilityLabel("App Store")
+                .help("Ironsmith Store")
+                .accessibilityLabel("Ironsmith Store")
                 .accessibilityIdentifier("app-store-button")
             }
 
@@ -102,7 +102,7 @@ struct ToolLibraryPopoverHeaderView: View {
                 Divider()
 
                 if isStoreEnabled {
-                    Button("Browse App Store...") {
+                    Button("Browse Ironsmith Store...") {
                         onOpenStore()
                     }
 

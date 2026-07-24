@@ -50,7 +50,9 @@ struct StoreAppDetailView: View {
                             onInstall: onInstallVersion
                         )
                     }
-                    .padding(28)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 12)
+                    .padding(.bottom, 28)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .task(id: app.id) {

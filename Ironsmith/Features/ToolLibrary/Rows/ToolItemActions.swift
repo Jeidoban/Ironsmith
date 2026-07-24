@@ -122,7 +122,7 @@ struct ToolItemActionsMenu: View {
     }
 
     private var storePublishActionTitle: String {
-        state.canUpdateStoreVersion ? "Update Store Version..." : "Publish to App Store..."
+        state.canUpdateStoreVersion ? "Update Store Version..." : "Publish to Ironsmith Store..."
     }
 
     private var canContinue: Bool {

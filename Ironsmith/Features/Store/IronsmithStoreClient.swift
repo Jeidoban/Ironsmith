@@ -327,11 +327,11 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
         case .notConfigured:
             return "Ironsmith service is not configured."
         case .missingSession:
-            return "Sign in with Ironsmith before using the App Store."
+            return "Sign in with Ironsmith before using the Ironsmith Store."
         case .invalidResponse:
-            return "The App Store returned an invalid response."
+            return "The Ironsmith Store returned an invalid response."
         case .requestFailed(let statusCode, let message):
-            return "The App Store returned HTTP \(statusCode): \(message)"
+            return "The Ironsmith Store returned HTTP \(statusCode): \(message)"
         case .sourceHashMismatch:
             return "The downloaded source did not match the scanned source hash."
         }

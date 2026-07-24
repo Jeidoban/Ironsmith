@@ -57,7 +57,7 @@
                     Text("Feature Flags")
                         .font(.headline)
 
-                    Toggle("App Store", isOn: $storeFeatureEnabled)
+                    Toggle("Ironsmith Store", isOn: $storeFeatureEnabled)
                         .toggleStyle(.switch)
 
                     Toggle(

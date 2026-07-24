@@ -19,7 +19,7 @@ final class IronsmithStoreWindowController: NSWindowController {
         self.routeStore = routeStore
 
         let window = NSWindow()
-        window.title = "App Store"
+        window.title = "Ironsmith Store"
         window.styleMask = [
             .titled,
             .closable,

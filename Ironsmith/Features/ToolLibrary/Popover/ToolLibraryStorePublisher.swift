@@ -98,7 +98,7 @@ final class ToolLibraryStorePublisher {
     ) async {
         await inferenceStore.refreshIronsmithAccountSummary()
         guard inferenceStore.ironsmithSession != nil else {
-            errorMessage = "Sign in with Ironsmith before publishing to the App Store."
+            errorMessage = "Sign in with Ironsmith before publishing to the Ironsmith Store."
             return
         }
         await refreshPublishedStoreApps(

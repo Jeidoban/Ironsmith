@@ -15,12 +15,12 @@ struct StoreWindowView: View {
     var body: some View {
         @Bindable var store = store
 
-        NavigationSplitView(columnVisibility: .constant(.all)) {
+        NavigationSplitView {
             StoreSidebarView(
                 selection: $sidebarSelection,
                 searchText: $store.searchText
             )
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
         } detail: {
             NavigationStack(path: $path) {
                 Group {
@@ -83,7 +83,6 @@ struct StoreWindowView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .toolbar(removing: .sidebarToggle)
         .onChange(of: store.searchText) { _, _ in
             searchTask?.cancel()
             searchTask = Task {
@@ -123,7 +122,7 @@ struct StoreWindowView: View {
             handleStoreRoute(route)
         }
         .alert(
-            "App Store",
+            "Ironsmith Store",
             isPresented: Binding(
                 get: { store.errorMessage != nil },
                 set: { isPresented in
@@ -163,7 +162,7 @@ struct StoreWindowView: View {
 
     private var navigationTitle: String {
         switch sidebarSelection ?? .discover {
-        case .discover: "App Store"
+        case .discover: "Ironsmith Store"
         case .category(let category): category.title
         case .published: "Published"
         }
@@ -316,7 +315,8 @@ private struct StoreDiscoverHomeView: View {
                     }
                 }
             }
-            .padding(.vertical, 24)
+            .padding(.top, 10)
+            .padding(.bottom, 24)
         }
     }
 }
@@ -445,7 +445,8 @@ private struct StoreSectionAppsView: View {
                     .padding(.horizontal, 28)
                 }
             }
-            .padding(.vertical, 24)
+            .padding(.top, 10)
+            .padding(.bottom, 24)
         }
         .navigationTitle(section.title)
         .task(id: "\(section.id)-\(refreshToken)") {
@@ -586,7 +587,8 @@ private struct StorePublishedListView: View {
                     .padding(.horizontal, 28)
                 }
             }
-            .padding(.vertical, 24)
+            .padding(.top, 10)
+            .padding(.bottom, 24)
         }
         .navigationTitle("Published")
     }

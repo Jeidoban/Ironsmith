@@ -20,7 +20,7 @@ struct ToolLibraryStorePublishSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(isUpdatingPublishedListing ? "Update Store Version" : "Publish to App Store")
+            Text(isUpdatingPublishedListing ? "Update Store Version" : "Publish to Ironsmith Store")
                 .font(.headline)
 
             if needsDisplayName {
