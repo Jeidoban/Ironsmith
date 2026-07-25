@@ -3,6 +3,7 @@ import Foundation
 
 nonisolated enum IronsmithStoreConstants {
     static let communityStoreId = "00000000-0000-4000-8000-000000000011"
+    static let appListPageSize = 30
 
     static var runtimeVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
@@ -396,6 +397,10 @@ extension IronsmithStoreClient {
                 var queryItems = [
                     URLQueryItem(name: "scope", value: scope.rawValue),
                     URLQueryItem(name: "sort", value: sort.rawValue),
+                    URLQueryItem(
+                        name: "limit",
+                        value: String(IronsmithStoreConstants.appListPageSize)
+                    ),
                 ]
                 if let search, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     queryItems.append(URLQueryItem(name: "q", value: search))

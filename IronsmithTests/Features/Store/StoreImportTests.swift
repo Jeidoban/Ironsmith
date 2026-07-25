@@ -327,6 +327,132 @@ struct StoreImportTests {
 
     @MainActor
     @Test
+    func searchPaginationAppendsUniqueResultsAndAdvancesCursor() async {
+        let first = Self.appSummary(id: "app-one")
+        let second = Self.appSummary(id: "app-two")
+        let recorder = StoreListRequestRecorder()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, scope, search, cursor, sort, category in
+            await recorder.record(
+                scope: scope,
+                search: search,
+                cursor: cursor,
+                sort: sort,
+                category: category
+            )
+            if cursor == nil {
+                return StoreAppPage(apps: [first], nextCursor: "page-two")
+            }
+            return StoreAppPage(apps: [first, second], nextCursor: nil)
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+        store.searchText = "calculator"
+
+        await store.refreshDiscover()
+        await store.loadMoreSearchResults()
+
+        #expect(store.searchResults.map(\.id) == [first.id, second.id])
+        #expect(store.searchResultsNextCursor == nil)
+        let requests = await recorder.requests
+        #expect(requests.map(\.cursor) == [nil, "page-two"])
+        #expect(requests.allSatisfy { $0.scope == .discover })
+        #expect(requests.allSatisfy { $0.search == "calculator" })
+    }
+
+    @MainActor
+    @Test
+    func sectionPaginationForwardsCategorySortAndCursor() async {
+        let app = Self.appSummary(id: "section-app")
+        let recorder = StoreListRequestRecorder()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, scope, search, cursor, sort, category in
+            await recorder.record(
+                scope: scope,
+                search: search,
+                cursor: cursor,
+                sort: sort,
+                category: category
+            )
+            return StoreAppPage(
+                apps: [app],
+                nextCursor: cursor == nil ? "next-section-page" : nil
+            )
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        let firstPage = await store.loadSectionApps(
+            sort: .trending,
+            category: .games
+        )
+        let secondPage = await store.loadSectionApps(
+            sort: .trending,
+            category: .games,
+            cursor: firstPage?.nextCursor
+        )
+
+        #expect(firstPage?.nextCursor == "next-section-page")
+        #expect(secondPage?.nextCursor == nil)
+        let requests = await recorder.requests
+        #expect(requests.map(\.cursor) == [nil, "next-section-page"])
+        #expect(requests.allSatisfy { $0.scope == .discover })
+        #expect(requests.allSatisfy { $0.search == nil })
+        #expect(requests.allSatisfy { $0.sort == .trending })
+        #expect(requests.allSatisfy { $0.category == .games })
+    }
+
+    @MainActor
+    @Test
+    func publishedPaginationAppendsUniqueResultsAndAdvancesCursor() async {
+        let first = Self.appSummary(id: "published-one")
+        let second = Self.appSummary(id: "published-two")
+        let recorder = StoreListRequestRecorder()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, scope, search, cursor, sort, category in
+            await recorder.record(
+                scope: scope,
+                search: search,
+                cursor: cursor,
+                sort: sort,
+                category: category
+            )
+            if cursor == nil {
+                return StoreAppPage(apps: [first], nextCursor: "published-page-two")
+            }
+            return StoreAppPage(apps: [first, second], nextCursor: nil)
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        await store.refreshPublished()
+        await store.loadMorePublishedApps()
+
+        #expect(store.publishedApps.map(\.id) == [first.id, second.id])
+        #expect(store.publishedAppsNextCursor == nil)
+        let requests = await recorder.requests
+        #expect(requests.map(\.cursor) == [nil, "published-page-two"])
+        #expect(requests.allSatisfy { $0.scope == .mine })
+        #expect(requests.allSatisfy { $0.search == nil })
+    }
+
+    @MainActor
+    @Test
     func historicalVersionInstallCreatesAttributedSeparateCopyWithoutMutatingExistingTool()
         async throws
     {
@@ -583,6 +709,22 @@ struct StoreImportTests {
         """
     }
 
+    private static func appSummary(id: String) -> StoreAppSummary {
+        StoreAppSummary(
+            id: id,
+            storeId: "00000000-0000-4000-8000-000000000011",
+            authorDisplayName: "Jade",
+            name: id,
+            shortDescription: "A Store app",
+            category: .utilities,
+            status: .published,
+            latestVersionNumber: 1,
+            publishedAt: "2026-06-27T00:00:00.000Z",
+            updatedAt: "2026-06-27T00:00:00.000Z",
+            icon: nil
+        )
+    }
+
     private static func appListing(
         sourceCode: String,
         versions suppliedVersions: [StoreVersionMetadata]? = nil
@@ -679,5 +821,35 @@ struct StoreImportTests {
                 "ironsmith-store-import-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
+    }
+}
+
+private actor StoreListRequestRecorder {
+    struct Request: Sendable {
+        let scope: StoreAppListScope
+        let search: String?
+        let cursor: String?
+        let sort: StoreAppListSort
+        let category: StoreAppCategory?
+    }
+
+    private(set) var requests: [Request] = []
+
+    func record(
+        scope: StoreAppListScope,
+        search: String?,
+        cursor: String?,
+        sort: StoreAppListSort,
+        category: StoreAppCategory?
+    ) {
+        requests.append(
+            Request(
+                scope: scope,
+                search: search,
+                cursor: cursor,
+                sort: sort,
+                category: category
+            )
+        )
     }
 }

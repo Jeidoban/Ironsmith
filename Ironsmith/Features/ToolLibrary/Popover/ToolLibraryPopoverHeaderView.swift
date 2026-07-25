@@ -48,7 +48,7 @@ struct ToolLibraryPopoverHeaderView: View {
 
             if isStoreEnabled {
                 Button(action: onOpenStore) {
-                    Image(systemName: "shippingbox")
+                    Image(systemName: "storefront")
                         .font(.system(size: 15, weight: .semibold))
                 }
                 .buttonStyle(.plain)

@@ -30,14 +30,18 @@ final class StoreWindowStore {
     var stores: [AppStoreDescriptor] = []
     var selectedStoreId = IronsmithStoreConstants.communityStoreId
     var homeSections: [StoreHomeSection] = []
-    var discoverApps: [StoreAppSummary] = []
+    var searchResults: [StoreAppSummary] = []
+    var searchResultsNextCursor: String?
     var publishedApps: [StoreAppSummary] = []
+    var publishedAppsNextCursor: String?
     var selectedAppID: String?
     var selectedAppDetail: StoreAppDetail?
     var searchText = ""
     var isLoadingStores = false
     var isLoadingDiscover = false
+    var isLoadingMoreSearchResults = false
     var isLoadingPublished = false
+    var isLoadingMorePublishedApps = false
     var isLoadingDetail = false
     var workingAppID: String?
     var workingVersionID: String?
@@ -78,7 +82,7 @@ final class StoreWindowStore {
             homeSections
             .flatMap(\.apps)
             .first { $0.id == id }
-            ?? discoverApps.first { $0.id == id }
+            ?? searchResults.first { $0.id == id }
             ?? publishedApps.first { $0.id == id }
     }
 
@@ -110,6 +114,7 @@ final class StoreWindowStore {
         if showLoadingIndicator {
             isLoadingDiscover = true
         }
+        searchResultsNextCursor = nil
         defer {
             if showLoadingIndicator {
                 isLoadingDiscover = false
@@ -118,7 +123,8 @@ final class StoreWindowStore {
         do {
             homeSections = try await client.listHomeSections(selectedStoreId)
             if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                discoverApps = []
+                searchResults = []
+                searchResultsNextCursor = nil
             }
             reconcileSelection()
         } catch {
@@ -135,6 +141,7 @@ final class StoreWindowStore {
         if showLoadingIndicator {
             isLoadingDiscover = true
         }
+        searchResultsNextCursor = nil
         defer {
             if showLoadingIndicator {
                 isLoadingDiscover = false
@@ -149,7 +156,45 @@ final class StoreWindowStore {
                 .recent,
                 nil
             )
-            discoverApps = page.apps
+            guard searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch else {
+                return
+            }
+            searchResults = page.apps
+            searchResultsNextCursor = page.nextCursor
+            reconcileSelection()
+        } catch {
+            present(error)
+        }
+    }
+
+    func loadMoreSearchResults() async {
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearch.isEmpty,
+            let cursor = searchResultsNextCursor,
+            !isLoadingMoreSearchResults
+        else {
+            return
+        }
+
+        isLoadingMoreSearchResults = true
+        defer { isLoadingMoreSearchResults = false }
+        do {
+            let page = try await client.listApps(
+                selectedStoreId,
+                .discover,
+                trimmedSearch,
+                cursor,
+                .recent,
+                nil
+            )
+            guard searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch else {
+                return
+            }
+            guard searchResultsNextCursor == cursor else {
+                return
+            }
+            appendUnique(page.apps, to: &searchResults)
+            searchResultsNextCursor = page.nextCursor
             reconcileSelection()
         } catch {
             present(error)
@@ -158,20 +203,21 @@ final class StoreWindowStore {
 
     func loadSectionApps(
         sort: StoreAppListSort,
-        category: StoreAppCategory?
-    ) async -> [StoreAppSummary] {
+        category: StoreAppCategory?,
+        cursor: String? = nil
+    ) async -> StoreAppPage? {
         do {
             return try await client.listApps(
                 selectedStoreId,
                 .discover,
                 nil,
-                nil,
+                cursor,
                 sort,
                 category
-            ).apps
+            )
         } catch {
             present(error)
-            return []
+            return nil
         }
     }
 
@@ -211,6 +257,7 @@ final class StoreWindowStore {
         if showLoadingIndicator {
             isLoadingPublished = true
         }
+        publishedAppsNextCursor = nil
         defer {
             if showLoadingIndicator {
                 isLoadingPublished = false
@@ -226,6 +273,34 @@ final class StoreWindowStore {
                 nil
             )
             publishedApps = page.apps
+            publishedAppsNextCursor = page.nextCursor
+            reconcileSelection()
+        } catch {
+            present(error)
+        }
+    }
+
+    func loadMorePublishedApps() async {
+        guard let cursor = publishedAppsNextCursor, !isLoadingMorePublishedApps else {
+            return
+        }
+
+        isLoadingMorePublishedApps = true
+        defer { isLoadingMorePublishedApps = false }
+        do {
+            let page = try await client.listApps(
+                selectedStoreId,
+                .mine,
+                nil,
+                cursor,
+                .recent,
+                nil
+            )
+            guard publishedAppsNextCursor == cursor else {
+                return
+            }
+            appendUnique(page.apps, to: &publishedApps)
+            publishedAppsNextCursor = page.nextCursor
             reconcileSelection()
         } catch {
             present(error)
@@ -635,8 +710,8 @@ final class StoreWindowStore {
         } else {
             publishedApps.insert(summary, at: 0)
         }
-        if let index = discoverApps.firstIndex(where: { $0.id == app.id }) {
-            discoverApps[index] = summary
+        if let index = searchResults.firstIndex(where: { $0.id == app.id }) {
+            searchResults[index] = summary
         }
         for sectionIndex in homeSections.indices {
             if let appIndex = homeSections[sectionIndex].apps.firstIndex(where: { $0.id == app.id })
@@ -666,6 +741,11 @@ final class StoreWindowStore {
         }
         selectedAppDetail = nil
         self.selectedAppID = nil
+    }
+
+    private func appendUnique(_ apps: [StoreAppSummary], to existingApps: inout [StoreAppSummary]) {
+        let existingIDs = Set(existingApps.map(\.id))
+        existingApps.append(contentsOf: apps.filter { !existingIDs.contains($0.id) })
     }
 
     private func present(_ error: Error) {

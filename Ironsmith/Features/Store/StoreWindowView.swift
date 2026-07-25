@@ -85,6 +85,7 @@ struct StoreWindowView: View {
         .navigationSplitViewStyle(.balanced)
         .onChange(of: store.searchText) { _, _ in
             searchTask?.cancel()
+            store.searchResultsNextCursor = nil
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
@@ -334,24 +335,29 @@ private struct StoreSearchResultsView: View {
                 .font(.largeTitle.weight(.semibold))
                 .padding(.horizontal, 28)
 
-            if store.isLoadingDiscover, store.discoverApps.isEmpty {
+            if store.isLoadingDiscover, store.searchResults.isEmpty {
                 ProgressView()
                     .frame(maxWidth: .infinity)
                     .padding(.top, 80)
-            } else if store.discoverApps.isEmpty {
+            } else if store.searchResults.isEmpty {
                 StoreEmptyStateView(title: "No search results", systemImage: "magnifyingglass")
                     .frame(minHeight: 360)
             } else {
                 StoreAppRowsView(
-                    apps: store.discoverApps,
+                    apps: store.searchResults,
                     workingAppID: store.workingAppID,
                     actionTitle: {
                         store.installDisposition(for: $0, tools: tools).buttonTitle
                     },
                     onOpen: onOpen,
-                    onAction: { onGet($0, .get) }
+                    onAction: { onGet($0, .get) },
+                    onApproachingEnd: {
+                        await store.loadMoreSearchResults()
+                    }
                 )
                 .padding(.horizontal, 28)
+
+                StorePaginationProgressView(isLoading: store.isLoadingMoreSearchResults)
             }
         }
     }
@@ -414,7 +420,9 @@ private struct StoreSectionAppsView: View {
     let onOpen: (StoreAppSummary) -> Void
     let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
     @State private var apps: [StoreAppSummary] = []
+    @State private var nextCursor: String?
     @State private var isLoading = true
+    @State private var isLoadingMore = false
 
     var body: some View {
         ScrollView {
@@ -440,9 +448,12 @@ private struct StoreSectionAppsView: View {
                             store.installDisposition(for: $0, tools: tools).buttonTitle
                         },
                         onOpen: onOpen,
-                        onAction: { onGet($0, .get) }
+                        onAction: { onGet($0, .get) },
+                        onApproachingEnd: loadMore
                     )
                     .padding(.horizontal, 28)
+
+                    StorePaginationProgressView(isLoading: isLoadingMore)
                 }
             }
             .padding(.top, 10)
@@ -450,14 +461,64 @@ private struct StoreSectionAppsView: View {
         }
         .navigationTitle(section.title)
         .task(id: "\(section.id)-\(refreshToken)") {
-            let showsLoadingIndicator = apps.isEmpty
-            if showsLoadingIndicator {
-                isLoading = true
-            }
-            apps = await store.loadSectionApps(sort: section.sort, category: section.category)
+            await reload()
+        }
+    }
+
+    private func reload() async {
+        let showsLoadingIndicator = apps.isEmpty
+        if showsLoadingIndicator {
+            isLoading = true
+        }
+        defer {
             if showsLoadingIndicator {
                 isLoading = false
             }
+        }
+        guard
+            let page = await store.loadSectionApps(
+                sort: section.sort,
+                category: section.category
+            )
+        else {
+            return
+        }
+        apps = page.apps
+        nextCursor = page.nextCursor
+    }
+
+    private func loadMore() async {
+        guard let nextCursor, !isLoadingMore else {
+            return
+        }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        guard
+            let page = await store.loadSectionApps(
+                sort: section.sort,
+                category: section.category,
+                cursor: nextCursor
+            )
+        else {
+            return
+        }
+        guard self.nextCursor == nextCursor else {
+            return
+        }
+        let existingIDs = Set(apps.map(\.id))
+        apps.append(contentsOf: page.apps.filter { !existingIDs.contains($0.id) })
+        self.nextCursor = page.nextCursor
+    }
+}
+
+private struct StorePaginationProgressView: View {
+    let isLoading: Bool
+
+    var body: some View {
+        if isLoading {
+            ProgressView()
+                .controlSize(.small)
+            .frame(maxWidth: .infinity, minHeight: 32)
         }
     }
 }
@@ -468,14 +529,16 @@ private struct StoreAppRowsView: View {
     let actionTitle: (StoreAppSummary) -> String
     let onOpen: (StoreAppSummary) -> Void
     let onAction: (StoreAppSummary) -> Void
+    var onApproachingEnd: (() async -> Void)? = nil
 
     private let columns = [
         GridItem(.adaptive(minimum: 430), spacing: 44, alignment: .top)
     ]
+    private let paginationPrefetchItemCount = 4
 
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 0) {
-            ForEach(apps) { app in
+            ForEach(Array(apps.enumerated()), id: \.element.id) { index, app in
                 VStack(spacing: 0) {
                     StoreAppStoreRowView(
                         app: app,
@@ -486,6 +549,17 @@ private struct StoreAppRowsView: View {
                     )
                     Divider()
                         .padding(.leading, 88)
+                }
+                .onAppear {
+                    guard
+                        index >= max(apps.count - paginationPrefetchItemCount, 0),
+                        let onApproachingEnd
+                    else {
+                        return
+                    }
+                    Task {
+                        await onApproachingEnd()
+                    }
                 }
             }
         }
@@ -573,7 +647,8 @@ private struct StorePublishedListView: View {
                     .frame(minHeight: 420)
                 } else {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 0) {
-                        ForEach(store.publishedApps) { app in
+                        ForEach(Array(store.publishedApps.enumerated()), id: \.element.id) {
+                            index, app in
                             VStack(spacing: 0) {
                                 StorePublishedRowView(
                                     app: app,
@@ -594,9 +669,21 @@ private struct StorePublishedListView: View {
                                 Divider()
                                     .padding(.leading, 72)
                             }
+                            .onAppear {
+                                guard
+                                    index >= max(store.publishedApps.count - 4, 0)
+                                else {
+                                    return
+                                }
+                                Task {
+                                    await store.loadMorePublishedApps()
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 28)
+
+                    StorePaginationProgressView(isLoading: store.isLoadingMorePublishedApps)
                 }
             }
             .padding(.top, 10)
