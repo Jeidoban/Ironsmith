@@ -1,6 +1,10 @@
 import SwiftData
 import SwiftUI
 
+private let storeAppGridColumns = [
+    GridItem(.adaptive(minimum: 340), spacing: 28, alignment: .top)
+]
+
 struct StoreWindowView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(InferenceStore.self) private var inferenceStore
@@ -83,6 +87,7 @@ struct StoreWindowView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 600, minHeight: 400)
         .onChange(of: store.searchText) { _, _ in
             searchTask?.cancel()
             store.searchResultsNextCursor = nil
@@ -373,10 +378,6 @@ private struct StoreHomeSectionView: View {
     let onSeeAll: () -> Void
     let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 430), spacing: 44, alignment: .top)
-    ]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
@@ -391,7 +392,7 @@ private struct StoreHomeSectionView: View {
             }
             .padding(.horizontal, 28)
 
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 0) {
+            LazyVGrid(columns: storeAppGridColumns, alignment: .leading, spacing: 0) {
                 ForEach(Array(section.apps.prefix(6))) { app in
                     VStack(spacing: 0) {
                         StoreAppStoreRowView(
@@ -518,7 +519,7 @@ private struct StorePaginationProgressView: View {
         if isLoading {
             ProgressView()
                 .controlSize(.small)
-            .frame(maxWidth: .infinity, minHeight: 32)
+                .frame(maxWidth: .infinity, minHeight: 32)
         }
     }
 }
@@ -531,13 +532,10 @@ private struct StoreAppRowsView: View {
     let onAction: (StoreAppSummary) -> Void
     var onApproachingEnd: (() async -> Void)? = nil
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 430), spacing: 44, alignment: .top)
-    ]
     private let paginationPrefetchItemCount = 4
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 0) {
+        LazyVGrid(columns: storeAppGridColumns, alignment: .leading, spacing: 0) {
             ForEach(Array(apps.enumerated()), id: \.element.id) { index, app in
                 VStack(spacing: 0) {
                     StoreAppStoreRowView(
@@ -618,10 +616,6 @@ private struct StorePublishedListView: View {
     let onOpen: (StoreAppSummary) -> Void
     let onUpdateVersion: (Tool) -> Void
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 430), spacing: 44, alignment: .top)
-    ]
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -646,7 +640,7 @@ private struct StorePublishedListView: View {
                     )
                     .frame(minHeight: 420)
                 } else {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 0) {
+                    LazyVGrid(columns: storeAppGridColumns, alignment: .leading, spacing: 0) {
                         ForEach(Array(store.publishedApps.enumerated()), id: \.element.id) {
                             index, app in
                             VStack(spacing: 0) {
