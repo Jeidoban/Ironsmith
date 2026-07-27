@@ -90,6 +90,8 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 Ironsmith is licensed under the [GNU General Public License v3.0](LICENSE).
 
 ## OpenAI Build Week instructions
+Due to this being a continuiously worked on project, I can't keep this repo frozen for the contest. Use https://github.com/Jeidoban/Ironsmith/compare/645e3d2cd21fd620737d9e9cfc529534ea3292c4...e824efac03ac786e16cb45d75e46f8866981521c to see what was worked on during the contest. Download this release to test:
+https://github.com/Jeidoban/Ironsmith/releases/tag/v0.4.1
 
 To use, make sure you are on macOS 26, preferably an Apple silicon Mac. The Xcode command line tools are needed, but Ironsmith will walk you through installing those.
 After that, I recommend logging in with your ChatGPT account, but you can also use an API key or use Claude, Gemini, or any OpenAI compatible API you want. 
