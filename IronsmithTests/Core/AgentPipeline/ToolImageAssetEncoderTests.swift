@@ -10,6 +10,8 @@ import Testing
 struct ToolImageAssetEncoderTests {
     @Test
     func iconJPEGsUseRequiredDimensionsLimitsColorAndOpaqueBackground() throws {
+        #expect(ToolImageAssetEncoder.iconJPEGQuality == 0.60)
+        #expect(ToolImageAssetEncoder.screenshotJPEGQuality == 0.70)
         let source = try Self.transparentIconImage()
 
         let assets = try ToolImageAssetEncoder.iconAssets(from: source)
@@ -170,8 +172,8 @@ struct ToolImageAssetEncoderTests {
         let wideAsset = try ToolImageAssetEncoder.screenshot(from: wide)
         let smallAsset = try ToolImageAssetEncoder.screenshot(from: small)
 
-        #expect(wideAsset.width == 1280)
-        #expect(wideAsset.height == 640)
+        #expect(wideAsset.width == 1920)
+        #expect(wideAsset.height == 960)
         #expect(smallAsset.width == 400)
         #expect(smallAsset.height == 300)
         #expect(wideAsset.data.count <= ToolImageAssetEncoder.screenshotMaximumBytes)
@@ -182,17 +184,17 @@ struct ToolImageAssetEncoderTests {
 
     @Test
     func oversizedScreenshotShrinksDimensionsAtFixedQuality() throws {
-        let noisy = try Self.noisyImage(width: 1280, height: 960)
+        let noisy = try Self.noisyImage(width: 1920, height: 1440)
 
         let asset = try ToolImageAssetEncoder.screenshot(from: noisy)
 
         #expect(asset.data.count <= ToolImageAssetEncoder.screenshotMaximumBytes)
-        #expect(asset.width < 1280)
-        #expect(asset.height < 960)
+        #expect(asset.width < 1920)
+        #expect(asset.height < 1440)
         #expect(
             abs(
                 Double(asset.width) / Double(asset.height)
-                    - Double(1280) / Double(960)
+                    - Double(1920) / Double(1440)
             ) < 0.002
         )
         #expect(asset.width >= ToolImageAssetEncoder.screenshotMinimumDimension)

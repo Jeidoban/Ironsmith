@@ -48,11 +48,11 @@ nonisolated enum ToolImageAssetEncoder {
     static let iconJPEGQuality = 0.60
     static let iconMasterMaximumBytes = 256 * 1024
     static let iconThumbnailMaximumBytes = 64 * 1024
-    static let screenshotMaximumWidth = 1280
-    static let screenshotMaximumHeight = 960
+    static let screenshotMaximumWidth = 1920
+    static let screenshotMaximumHeight = 1440
     static let screenshotMaximumBytes = 512 * 1024
     static let screenshotMinimumDimension = 64
-    static let screenshotJPEGQuality = 0.60
+    static let screenshotJPEGQuality = 0.70
 
     static func iconAssets(from image: CGImage) throws -> ToolJPEGIconAssets {
         let master = try jpeg(
