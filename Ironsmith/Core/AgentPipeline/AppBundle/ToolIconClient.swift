@@ -48,7 +48,8 @@ actor ToolHostedIconPaletteStore {
         let preferredIndex = ToolIconClient.hostedIconPaletteIndex(for: displayName)
         let recentIndices = recentPaletteIndices(paletteCount: paletteCount)
         let excludedIndices = Set(recentIndices)
-        let selectedIndex = (0..<paletteCount)
+        let selectedIndex =
+            (0..<paletteCount)
             .lazy
             .map { (preferredIndex + $0) % paletteCount }
             .first { !excludedIndices.contains($0) } ?? preferredIndex
@@ -80,8 +81,6 @@ actor ToolHostedIconPaletteStore {
 struct ToolIconClient: Sendable {
     var ensureIconAssets: @Sendable (ToolIconRequest) async throws -> URL
 
-    nonisolated private static let cachedPreviewPNGPixelSize = 256
-
     nonisolated static let noOp = ToolIconClient { request in
         request.layout.cachedAppIconICNSURL
     }
@@ -89,11 +88,11 @@ struct ToolIconClient: Sendable {
     static func cachedOnly(fileManager: FileManager = .default) -> ToolIconClient {
         let fileManagerBox = ToolIconFileManager(fileManager)
         return ToolIconClient { request in
-            if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconICNSURL.path) {
-                return request.layout.cachedAppIconICNSURL
-            }
-            if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconPNGURL.path) {
-                return request.layout.cachedAppIconPNGURL
+            if let cached = try Self.prepareCachedIconAssets(
+                request: request,
+                fileManager: fileManagerBox.value
+            ) {
+                return cached
             }
             throw ToolAppBundleError.iconGenerationProducedNoImage
         }
@@ -109,14 +108,16 @@ struct ToolIconClient: Sendable {
         let imageClient = imageClient ?? .live()
         let fileManagerBox = ToolIconFileManager(fileManager)
         return ToolIconClient { request in
-            if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconICNSURL.path) {
-                return request.layout.cachedAppIconICNSURL
-            }
-
             try fileManagerBox.value.createDirectory(
                 at: request.layout.packageMetadataDirectoryURL,
                 withIntermediateDirectories: true
             )
+            if let cached = try Self.prepareCachedIconAssets(
+                request: request,
+                fileManager: fileManagerBox.value
+            ) {
+                return cached
+            }
 
             var selectedPaletteIndex: Int?
             if request.imageProvider != .imagePlayground {
@@ -154,8 +155,11 @@ struct ToolIconClient: Sendable {
                         Self.iconPrompt(for: request, hostedPalette: hostedPalette)
                     )
                 }
-                try Self.writePNG(cgImage, to: request.layout.cachedAppIconPNGURL)
-                try Self.writeICNS(cgImage, request: request, fileManager: fileManagerBox.value)
+                try Self.writeOriginalIconAssets(
+                    cgImage,
+                    request: request,
+                    fileManager: fileManagerBox.value
+                )
                 return request.layout.cachedAppIconICNSURL
             } catch is CancellationError {
                 throw CancellationError()
@@ -195,6 +199,11 @@ struct ToolIconClient: Sendable {
                 }
             }
 
+            if fileManagerBox.value.fileExists(
+                atPath: request.layout.cachedAppIconThumbnailJPEGURL.path
+            ) {
+                return request.layout.cachedAppIconThumbnailJPEGURL
+            }
             if fileManagerBox.value.fileExists(atPath: request.layout.cachedAppIconPNGURL.path) {
                 return request.layout.cachedAppIconPNGURL
             }
@@ -309,7 +318,8 @@ struct ToolIconClient: Sendable {
             foregroundRGB: 0xD9FFF4
         ),
         ToolIconPalette(
-            description: "a charcoal-to-graphite background with silver and muted chartreuse accents",
+            description:
+                "a charcoal-to-graphite background with silver and muted chartreuse accents",
             backgroundStartRGB: 0x2F3338,
             backgroundEndRGB: 0x59616A,
             foregroundRGB: 0xE7EBEF
@@ -327,7 +337,8 @@ struct ToolIconClient: Sendable {
             foregroundRGB: 0xDCEEFF
         ),
         ToolIconPalette(
-            description: "a crimson-to-vermilion background with warm ivory and deep maroon accents",
+            description:
+                "a crimson-to-vermilion background with warm ivory and deep maroon accents",
             backgroundStartRGB: 0xC92A3B,
             backgroundEndRGB: 0xF04E32,
             foregroundRGB: 0xFFF1E3
@@ -422,8 +433,11 @@ struct ToolIconClient: Sendable {
                 paletteIndex: paletteIndex
             )
         }
-        try Self.writePNG(fallback, to: request.layout.cachedAppIconPNGURL)
-        try Self.writeICNS(fallback, request: request, fileManager: fileManager)
+        try Self.writeOriginalIconAssets(
+            fallback,
+            request: request,
+            fileManager: fileManager
+        )
         return request.layout.cachedAppIconICNSURL
     }
 
@@ -509,28 +523,171 @@ struct ToolIconClient: Sendable {
         )
     }
 
-    nonisolated private static func writePNG(_ cgImage: CGImage, to url: URL) throws {
-        guard cgImage.width > 0, cgImage.height > 0 else {
-            throw ToolAppBundleError.iconEncodingFailed
+    nonisolated static func installDownloadedIconAssets(
+        masterJPEG: Data,
+        thumbnailJPEG: Data,
+        request: ToolIconRequest,
+        fileManager: FileManager = .default
+    ) throws {
+        let masterImage = try ToolImageAssetEncoder.validateIconMasterJPEG(masterJPEG)
+        _ = try ToolImageAssetEncoder.validateIconThumbnailJPEG(thumbnailJPEG)
+        try fileManager.createDirectory(
+            at: request.layout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try writeJPEGAssets(
+            master: masterJPEG,
+            thumbnail: thumbnailJPEG,
+            layout: request.layout,
+            fileManager: fileManager
+        )
+        try writeICNS(masterImage, request: request, fileManager: fileManager)
+        try? fileManager.removeItem(at: request.layout.cachedAppIconPNGURL)
+    }
+
+    nonisolated private static func writeOriginalIconAssets(
+        _ image: CGImage,
+        request: ToolIconRequest,
+        fileManager: FileManager
+    ) throws {
+        let assets = try ToolImageAssetEncoder.iconAssets(from: image)
+        try writeJPEGAssets(
+            master: assets.masterData,
+            thumbnail: assets.thumbnailData,
+            layout: request.layout,
+            fileManager: fileManager
+        )
+        try writeICNS(image, request: request, fileManager: fileManager)
+        try? fileManager.removeItem(at: request.layout.cachedAppIconPNGURL)
+    }
+
+    nonisolated private static func prepareCachedIconAssets(
+        request: ToolIconRequest,
+        fileManager: FileManager
+    ) throws -> URL? {
+        let layout = request.layout
+        let hasMaster = fileManager.fileExists(atPath: layout.cachedAppIconMasterJPEGURL.path)
+        let hasThumbnail = fileManager.fileExists(
+            atPath: layout.cachedAppIconThumbnailJPEGURL.path
+        )
+        let hasICNS = fileManager.fileExists(atPath: layout.cachedAppIconICNSURL.path)
+        let hasLegacyPNG = fileManager.fileExists(atPath: layout.cachedAppIconPNGURL.path)
+
+        if hasMaster, hasThumbnail {
+            if !hasICNS {
+                let masterData = try Data(contentsOf: layout.cachedAppIconMasterJPEGURL)
+                let masterImage = try ToolImageAssetEncoder.validateIconMasterJPEG(masterData)
+                try writeICNS(masterImage, request: request, fileManager: fileManager)
+            }
+            return layout.cachedAppIconICNSURL
         }
-        let previewPixelSize = min(max(cgImage.width, cgImage.height), cachedPreviewPNGPixelSize)
-        let previewImage = try scaledImage(cgImage, pixelSize: previewPixelSize)
-        let capacity = max(4_096, previewImage.width * previewImage.height * 4)
-        guard let data = NSMutableData(capacity: capacity),
-            let destination = CGImageDestinationCreateWithData(
-                data,
-                "public.png" as CFString,
-                1,
-                nil
+
+        if hasICNS {
+            do {
+                let sourceImage = try ToolImageAssetEncoder.largestImage(
+                    at: layout.cachedAppIconICNSURL
+                )
+                let assets = try ToolImageAssetEncoder.iconAssets(from: sourceImage)
+                let masterData =
+                    hasMaster
+                    ? try Data(contentsOf: layout.cachedAppIconMasterJPEGURL)
+                    : assets.masterData
+                let thumbnailData =
+                    hasThumbnail
+                    ? try Data(contentsOf: layout.cachedAppIconThumbnailJPEGURL)
+                    : assets.thumbnailData
+                try writeJPEGAssets(
+                    master: masterData,
+                    thumbnail: thumbnailData,
+                    layout: layout,
+                    fileManager: fileManager
+                )
+                try? fileManager.removeItem(at: layout.cachedAppIconPNGURL)
+            } catch {
+                AgentDiagnosticsLog.append(
+                    """
+                    Legacy ICNS migration failed; preserving the existing app icon.
+                    displayName: \(request.displayName)
+                    error:
+                    \(AgentDiagnosticsLog.renderError(error, limit: 500))
+                    """
+                )
+            }
+            return layout.cachedAppIconICNSURL
+        }
+
+        if hasMaster {
+            let masterData = try Data(contentsOf: layout.cachedAppIconMasterJPEGURL)
+            let masterImage = try ToolImageAssetEncoder.validateIconMasterJPEG(masterData)
+            if !hasThumbnail {
+                let assets = try ToolImageAssetEncoder.iconAssets(from: masterImage)
+                try writeJPEGAssets(
+                    master: masterData,
+                    thumbnail: assets.thumbnailData,
+                    layout: layout,
+                    fileManager: fileManager
+                )
+            }
+            try writeICNS(masterImage, request: request, fileManager: fileManager)
+            return layout.cachedAppIconICNSURL
+        }
+
+        if hasLegacyPNG {
+            let legacyData = try Data(contentsOf: layout.cachedAppIconPNGURL)
+            let legacyImage = try ToolImageAssetEncoder.decodeImage(
+                legacyData,
+                applyingOrientation: true
             )
-        else {
-            throw ToolAppBundleError.iconEncodingFailed
+            try writeOriginalIconAssets(
+                legacyImage,
+                request: request,
+                fileManager: fileManager
+            )
+            return layout.cachedAppIconICNSURL
         }
-        CGImageDestinationAddImage(destination, previewImage, nil)
-        guard CGImageDestinationFinalize(destination), data.length > 0 else {
-            throw ToolAppBundleError.iconEncodingFailed
+
+        return nil
+    }
+
+    nonisolated private static func writeJPEGAssets(
+        master: Data,
+        thumbnail: Data,
+        layout: ToolPackageLayout,
+        fileManager: FileManager
+    ) throws {
+        let masterURL = layout.cachedAppIconMasterJPEGURL
+        let thumbnailURL = layout.cachedAppIconThumbnailJPEGURL
+        let previousMaster = try existingData(at: masterURL, fileManager: fileManager)
+        let previousThumbnail = try existingData(at: thumbnailURL, fileManager: fileManager)
+
+        do {
+            try master.write(to: masterURL, options: .atomic)
+            try thumbnail.write(to: thumbnailURL, options: .atomic)
+        } catch {
+            restore(previousMaster, at: masterURL, fileManager: fileManager)
+            restore(previousThumbnail, at: thumbnailURL, fileManager: fileManager)
+            throw error
         }
-        try (data as Data).write(to: url, options: .atomic)
+    }
+
+    nonisolated private static func existingData(
+        at url: URL,
+        fileManager: FileManager
+    ) throws -> Data? {
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        return try Data(contentsOf: url)
+    }
+
+    nonisolated private static func restore(
+        _ data: Data?,
+        at url: URL,
+        fileManager: FileManager
+    ) {
+        if let data {
+            try? data.write(to: url, options: .atomic)
+        } else {
+            try? fileManager.removeItem(at: url)
+        }
     }
 
     nonisolated private static func writePNGFile(_ cgImage: CGImage, to url: URL) throws {
@@ -558,10 +715,14 @@ struct ToolIconClient: Sendable {
         request: ToolIconRequest,
         fileManager: FileManager
     ) throws {
+        let identifier = UUID().uuidString
         let iconsetURL = request.layout.packageMetadataDirectoryURL
-            .appendingPathComponent("AppIcon.iconset", isDirectory: true)
-        if fileManager.fileExists(atPath: iconsetURL.path) {
-            try fileManager.removeItem(at: iconsetURL)
+            .appendingPathComponent("AppIcon-\(identifier).iconset", isDirectory: true)
+        let stagedICNSURL = request.layout.packageMetadataDirectoryURL
+            .appendingPathComponent("AppIcon-\(identifier).icns")
+        defer {
+            try? fileManager.removeItem(at: iconsetURL)
+            try? fileManager.removeItem(at: stagedICNSURL)
         }
         try fileManager.createDirectory(at: iconsetURL, withIntermediateDirectories: true)
 
@@ -569,19 +730,21 @@ struct ToolIconClient: Sendable {
         for size in sizes {
             let baseURL = iconsetURL.appendingPathComponent("icon_\(size)x\(size).png")
             let retinaURL = iconsetURL.appendingPathComponent("icon_\(size)x\(size)@2x.png")
-            try Self.writePNGFile(Self.scaledImage(cgImage, pixelSize: size), to: baseURL)
-            try Self.writePNGFile(Self.scaledImage(cgImage, pixelSize: size * 2), to: retinaURL)
-        }
-
-        if fileManager.fileExists(atPath: request.layout.cachedAppIconICNSURL.path) {
-            try fileManager.removeItem(at: request.layout.cachedAppIconICNSURL)
+            try Self.writePNGFile(
+                ToolImageAssetEncoder.squareImage(cgImage, pixelSize: size, opaque: false),
+                to: baseURL
+            )
+            try Self.writePNGFile(
+                ToolImageAssetEncoder.squareImage(cgImage, pixelSize: size * 2, opaque: false),
+                to: retinaURL
+            )
         }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
         process.arguments = [
             "-c", "icns",
-            "-o", request.layout.cachedAppIconICNSURL.path,
+            "-o", stagedICNSURL.path,
             iconsetURL.path,
         ]
         let outputPipe = Pipe()
@@ -597,10 +760,8 @@ struct ToolIconClient: Sendable {
             String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
             ?? ""
 
-        try? fileManager.removeItem(at: iconsetURL)
-
         guard process.terminationStatus == 0,
-            fileManager.fileExists(atPath: request.layout.cachedAppIconICNSURL.path)
+            fileManager.fileExists(atPath: stagedICNSURL.path)
         else {
             AgentDiagnosticsLog.append(
                 """
@@ -613,32 +774,17 @@ struct ToolIconClient: Sendable {
             )
             throw ToolAppBundleError.iconEncodingFailed
         }
-    }
-
-    nonisolated private static func scaledImage(_ cgImage: CGImage, pixelSize: Int) throws
-        -> CGImage
-    {
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard
-            let context = CGContext(
-                data: nil,
-                width: pixelSize,
-                height: pixelSize,
-                bitsPerComponent: 8,
-                bytesPerRow: 0,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        if fileManager.fileExists(atPath: request.layout.cachedAppIconICNSURL.path) {
+            _ = try fileManager.replaceItemAt(
+                request.layout.cachedAppIconICNSURL,
+                withItemAt: stagedICNSURL
             )
-        else {
-            throw ToolAppBundleError.iconEncodingFailed
+        } else {
+            try fileManager.moveItem(
+                at: stagedICNSURL,
+                to: request.layout.cachedAppIconICNSURL
+            )
         }
-
-        context.interpolationQuality = .high
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: pixelSize, height: pixelSize))
-        guard let scaled = context.makeImage() else {
-            throw ToolAppBundleError.iconEncodingFailed
-        }
-        return scaled
     }
 }
 

@@ -385,6 +385,21 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
         packageMetadataDirectoryURL.appendingPathComponent("AppIcon.png")
     }
 
+    nonisolated var cachedAppIconMasterJPEGURL: URL {
+        packageMetadataDirectoryURL.appendingPathComponent("AppIconMaster.jpg")
+    }
+
+    nonisolated var cachedAppIconThumbnailJPEGURL: URL {
+        packageMetadataDirectoryURL.appendingPathComponent("AppIconThumbnail.jpg")
+    }
+
+    nonisolated var cachedAppIconPreviewURL: URL {
+        if FileManager.default.fileExists(atPath: cachedAppIconThumbnailJPEGURL.path) {
+            return cachedAppIconThumbnailJPEGURL
+        }
+        return cachedAppIconPNGURL
+    }
+
     nonisolated var cachedAppIconICNSURL: URL {
         packageMetadataDirectoryURL.appendingPathComponent("AppIcon.icns")
     }

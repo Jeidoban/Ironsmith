@@ -26,6 +26,7 @@ nonisolated enum StoreAppStatus: String, Codable, Equatable, Sendable {
 
 nonisolated enum StoreAssetKind: String, Codable, Equatable, Sendable {
     case icon
+    case iconMaster
     case screenshot
 }
 
@@ -260,6 +261,7 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
     let createdAt: String
     let updatedAt: String
     let icon: StoreAsset?
+    let iconMaster: StoreAsset?
     let screenshots: [StoreAsset]
     let currentVersion: StoreVersionMetadata
     let versions: [StoreVersionMetadata]
@@ -268,7 +270,6 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
     var iconAsset: StoreAsset? {
         icon
     }
-
 }
 
 nonisolated struct StoreAppPage: Equatable, Sendable {
@@ -292,8 +293,9 @@ nonisolated struct StorePublicationRequest: Sendable {
     let category: StoreAppCategory
     let sourceCode: String
     let generationSettings: ToolGenerationSettings
-    let iconPNG: Data
-    let screenshotPNGs: [Data]
+    let iconMasterJPEG: Data
+    let iconThumbnailJPEG: Data
+    let screenshotJPEGs: [Data]
     let remixedFromVersionId: String?
 }
 
@@ -302,8 +304,9 @@ nonisolated struct StoreVersionPublicationRequest: Sendable {
     let appId: String
     let sourceCode: String
     let generationSettings: ToolGenerationSettings
-    let iconPNG: Data?
-    let screenshotPNGs: [Data]
+    let iconMasterJPEG: Data?
+    let iconThumbnailJPEG: Data?
+    let screenshotJPEGs: [Data]
     let replaceScreenshots: Bool
     let remixedFromVersionId: String?
 }
@@ -455,10 +458,18 @@ extension IronsmithStoreClient {
                         data: Data(request.sourceCode.utf8)
                     )
                     .addingFile(
-                        name: "icon", filename: "icon.png", contentType: "image/png",
-                        data: request.iconPNG
+                        name: "iconMaster",
+                        filename: "icon-master.jpg",
+                        contentType: "image/jpeg",
+                        data: request.iconMasterJPEG
                     )
-                    .addingScreenshotFiles(request.screenshotPNGs)
+                    .addingFile(
+                        name: "iconThumbnail",
+                        filename: "icon-thumbnail.jpg",
+                        contentType: "image/jpeg",
+                        data: request.iconThumbnailJPEG
+                    )
+                    .addingScreenshotFiles(request.screenshotJPEGs)
                 let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(request.storeId)/apps",
                     method: "POST",
@@ -469,6 +480,12 @@ extension IronsmithStoreClient {
                 return response.data
             },
             publishVersion: { request in
+                guard
+                    (request.iconMasterJPEG == nil)
+                        == (request.iconThumbnailJPEG == nil)
+                else {
+                    throw IronsmithStoreClientError.invalidResponse
+                }
                 let metadata = StoreVersionMetadataPayload(
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
                     generationSettings: StoreGenerationSettingsDTO(
@@ -484,11 +501,23 @@ extension IronsmithStoreClient {
                         contentType: "text/x-swift",
                         data: Data(request.sourceCode.utf8)
                     )
-                if let iconPNG = request.iconPNG {
+                if let iconMasterJPEG = request.iconMasterJPEG,
+                    let iconThumbnailJPEG = request.iconThumbnailJPEG
+                {
                     body = body.addingFile(
-                        name: "icon", filename: "icon.png", contentType: "image/png", data: iconPNG)
+                        name: "iconMaster",
+                        filename: "icon-master.jpg",
+                        contentType: "image/jpeg",
+                        data: iconMasterJPEG
+                    )
+                    body = body.addingFile(
+                        name: "iconThumbnail",
+                        filename: "icon-thumbnail.jpg",
+                        contentType: "image/jpeg",
+                        data: iconThumbnailJPEG
+                    )
                 }
-                body = body.addingScreenshotFiles(request.screenshotPNGs)
+                body = body.addingScreenshotFiles(request.screenshotJPEGs)
                 let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(request.storeId)/apps/\(request.appId)/versions",
                     method: "POST",
@@ -679,7 +708,7 @@ nonisolated private struct StoreVersionMetadataPayload: Encodable {
     let replaceScreenshots: Bool
 }
 
-nonisolated private struct StoreMultipartBody {
+nonisolated struct StoreMultipartBody {
     let boundary: String
     private(set) var data = Data()
 
@@ -725,8 +754,8 @@ nonisolated private struct StoreMultipartBody {
         for (index, screenshot) in screenshots.enumerated() {
             copy = copy.addingFile(
                 name: "screenshots",
-                filename: "screenshot-\(index + 1).png",
-                contentType: "image/png",
+                filename: "screenshot-\(index + 1).jpg",
+                contentType: "image/jpeg",
                 data: screenshot
             )
         }

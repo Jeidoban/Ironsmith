@@ -1,3 +1,5 @@
+import AppKit
+import CoreGraphics
 import Foundation
 import SwiftData
 import Testing
@@ -5,6 +7,43 @@ import Testing
 @testable import Ironsmith
 
 struct StoreImportTests {
+    @Test
+    func storeMultipartUsesJPEGAssetContract() throws {
+        let body = StoreMultipartBody(boundary: "JPEG-Test-Boundary")
+            .addingFile(
+                name: "iconMaster",
+                filename: "icon-master.jpg",
+                contentType: "image/jpeg",
+                data: Data("master-bytes".utf8)
+            )
+            .addingFile(
+                name: "iconThumbnail",
+                filename: "icon-thumbnail.jpg",
+                contentType: "image/jpeg",
+                data: Data("thumbnail-bytes".utf8)
+            )
+            .addingScreenshotFiles([Data("screenshot-bytes".utf8)])
+        let encoded = String(decoding: body.data, as: UTF8.self)
+
+        #expect(
+            encoded.contains(
+                #"name="iconMaster"; filename="icon-master.jpg""#
+            )
+        )
+        #expect(
+            encoded.contains(
+                #"name="iconThumbnail"; filename="icon-thumbnail.jpg""#
+            )
+        )
+        #expect(
+            encoded.contains(
+                #"name="screenshots"; filename="screenshot-1.jpg""#
+            )
+        )
+        #expect(encoded.components(separatedBy: "Content-Type: image/jpeg").count == 4)
+        #expect(encoded.hasSuffix("--JPEG-Test-Boundary--\r\n"))
+    }
+
     @MainActor
     @Test
     func storeSourceHashVerificationRejectsTamperedDownloads() throws {
@@ -59,6 +98,82 @@ struct StoreImportTests {
         #expect(tool.storeSourceSha256 == version.sourceSha256)
         #expect(tool.storeImportedAt != nil)
         #expect(tool.storeRemixedFromVersionId == version.id)
+    }
+
+    @MainActor
+    @Test
+    func storeImportPersistsJPEGsAndBuildsICNSFromMaster() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let source = Self.sourceCode("downloaded icon")
+        let iconImage = try Self.transparentIconImage()
+        let iconAssets = try ToolImageAssetEncoder.iconAssets(from: iconImage)
+        let masterURL = URL(string: "https://assets.example.test/master.jpg")!
+        let thumbnailURL = URL(string: "https://assets.example.test/thumbnail.jpg")!
+        let app = Self.appListing(
+            sourceCode: source,
+            icon: StoreAsset(
+                id: UUID().uuidString,
+                kind: .icon,
+                sortOrder: 0,
+                width: 256,
+                height: 256,
+                byteSize: iconAssets.thumbnailData.count,
+                url: thumbnailURL
+            ),
+            iconMaster: StoreAsset(
+                id: UUID().uuidString,
+                kind: .iconMaster,
+                sortOrder: 0,
+                width: 1024,
+                height: 1024,
+                byteSize: iconAssets.masterData.count,
+                url: masterURL
+            )
+        )
+        let version = Self.versionDownload(
+            appId: app.id,
+            sourceCode: source,
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: source)
+        )
+        let client = StoreToolImportClient.live(
+            toolsDirectoryURL: root,
+            iconDataLoader: { url in
+                switch url {
+                case masterURL:
+                    return iconAssets.masterData
+                case thumbnailURL:
+                    return iconAssets.thumbnailData
+                default:
+                    throw IronsmithStoreClientError.invalidResponse
+                }
+            }
+        )
+
+        let result = try await client.importTool(
+            StoreToolImportRequest(app: app, version: version, mode: .get),
+            context
+        )
+        let layout = result.tool.packageLayout
+
+        #expect(
+            try Data(contentsOf: layout.cachedAppIconMasterJPEGURL)
+                == iconAssets.masterData
+        )
+        #expect(
+            try Data(contentsOf: layout.cachedAppIconThumbnailJPEGURL)
+                == iconAssets.thumbnailData
+        )
+        #expect(FileManager.default.fileExists(atPath: layout.cachedAppIconICNSURL.path))
+        let importedICNS = try ToolImageAssetEncoder.largestImage(
+            at: layout.cachedAppIconICNSURL
+        )
+        let corner = try #require(
+            NSBitmapImageRep(cgImage: importedICNS).colorAt(x: 0, y: 0)
+        )
+        #expect(corner.alphaComponent > 0.99)
     }
 
     @MainActor
@@ -258,10 +373,12 @@ struct StoreImportTests {
             context
         )
 
-        guard case .updateExisting(let tool) = store.installDisposition(
-            for: summary,
-            tools: [oldImport.tool]
-        ) else {
+        guard
+            case .updateExisting(let tool) = store.installDisposition(
+                for: summary,
+                tools: [oldImport.tool]
+            )
+        else {
             Issue.record("Expected the listing row to show Update for an unchanged older version.")
             return
         }
@@ -281,10 +398,12 @@ struct StoreImportTests {
             ),
             context
         )
-        guard case .openExisting(let tool) = store.installDisposition(
-            for: summary,
-            tools: [currentImport.tool]
-        ) else {
+        guard
+            case .openExisting(let tool) = store.installDisposition(
+                for: summary,
+                tools: [currentImport.tool]
+            )
+        else {
             Issue.record("Expected the listing row to show Open for an unchanged current version.")
             return
         }
@@ -297,10 +416,12 @@ struct StoreImportTests {
             atomically: true,
             encoding: .utf8
         )
-        guard case .createCopy = store.installDisposition(
-            for: summary,
-            tools: [currentImport.tool]
-        ) else {
+        guard
+            case .createCopy = store.installDisposition(
+                for: summary,
+                tools: [currentImport.tool]
+            )
+        else {
             Issue.record("Expected an edited current copy to show Get.")
             return
         }
@@ -535,11 +656,13 @@ struct StoreImportTests {
         #expect(installed.storeRemixedFromVersionId == historicalMetadata.id)
         #expect(store.workingVersionID == nil)
 
-        guard case .openExisting(let matchingTool) = store.installDisposition(
-            for: historicalMetadata,
-            of: app,
-            tools: tools
-        ) else {
+        guard
+            case .openExisting(let matchingTool) = store.installDisposition(
+                for: historicalMetadata,
+                of: app,
+                tools: tools
+            )
+        else {
             Issue.record("Expected the exact installed historical version to open.")
             return
         }
@@ -727,7 +850,9 @@ struct StoreImportTests {
 
     private static func appListing(
         sourceCode: String,
-        versions suppliedVersions: [StoreVersionMetadata]? = nil
+        versions suppliedVersions: [StoreVersionMetadata]? = nil,
+        icon: StoreAsset? = nil,
+        iconMaster: StoreAsset? = nil
     ) -> StoreAppDetail {
         let storeId = "00000000-0000-4000-8000-000000000011"
         let appId = "00000000-0000-4000-8000-000000000101"
@@ -758,7 +883,8 @@ struct StoreImportTests {
             publishedAt: "2026-06-27T00:00:00.000Z",
             createdAt: "2026-06-27T00:00:00.000Z",
             updatedAt: "2026-06-27T00:00:00.000Z",
-            icon: nil,
+            icon: icon,
+            iconMaster: iconMaster,
             screenshots: [],
             currentVersion: currentVersion,
             versions: versions,
@@ -785,6 +911,27 @@ struct StoreImportTests {
             remixedFromVersionId: nil,
             publishedAt: publishedAt
         )
+    }
+
+    private static func transparentIconImage() throws -> CGImage {
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        guard
+            let context = CGContext(
+                data: nil,
+                width: 1024,
+                height: 1024,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else {
+            throw ToolImageAssetEncodingError.couldNotCreateImage
+        }
+        context.clear(CGRect(x: 0, y: 0, width: 1024, height: 1024))
+        context.setFillColor(CGColor(red: 0.8, green: 0.2, blue: 0.1, alpha: 1))
+        context.fillEllipse(in: CGRect(x: 128, y: 128, width: 768, height: 768))
+        return try #require(context.makeImage())
     }
 
     private static func versionDownload(

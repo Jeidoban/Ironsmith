@@ -249,7 +249,9 @@ enum ToolRowGenerationStatusResolver {
         switch phase {
         case .generatingSource, .generatingEditDiff, .generatingRepairDiff, .repairing:
             return true
-        case .initializing, .planning, .generatingIcon, .waitingForIcon, .refiningPrompt, .packaging, .completed, nil:
+        case .initializing, .planning, .generatingIcon, .waitingForIcon, .refiningPrompt,
+            .packaging,
+            .completed, nil:
             return false
         }
     }
@@ -303,7 +305,7 @@ struct ToolIconImageView: View {
         let layout = ToolPackageLayout(
             packageRootURL: tool.packageRootURL, executableName: tool.executableName)
         return ToolIconLoadKey(
-            path: layout.cachedAppIconPNGURL.path,
+            path: layout.cachedAppIconPreviewURL.path,
             updatedAt: tool.updatedAt
         )
     }

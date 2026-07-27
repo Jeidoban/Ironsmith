@@ -155,6 +155,15 @@ final class ToolLibraryStorePublisher {
                 encoding: .utf8
             )
             let settings = tool.generationSettings(defaults: defaultSettings)
+            _ = try await iconClient.ensureIconAssets(
+                ToolIconRequest(displayName: tool.name, layout: tool.packageLayout)
+            )
+            let iconMasterJPEG = try Data(
+                contentsOf: tool.packageLayout.cachedAppIconMasterJPEGURL
+            )
+            let iconThumbnailJPEG = try Data(
+                contentsOf: tool.packageLayout.cachedAppIconThumbnailJPEGURL
+            )
             let app: StoreAppDetail
             if let linkedApp = linkedPublishedApp(for: tool) {
                 app = try await storeClient.publishVersion(
@@ -163,17 +172,14 @@ final class ToolLibraryStorePublisher {
                         appId: linkedApp.id,
                         sourceCode: source,
                         generationSettings: settings,
-                        iconPNG: nil,
-                        screenshotPNGs: publishScreenshotData.map { [$0] } ?? [],
+                        iconMasterJPEG: iconMasterJPEG,
+                        iconThumbnailJPEG: iconThumbnailJPEG,
+                        screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         replaceScreenshots: publishScreenshotData != nil,
                         remixedFromVersionId: tool.storeRemixedFromVersionId
                     )
                 )
             } else {
-                _ = try await iconClient.ensureIconAssets(
-                    ToolIconRequest(displayName: tool.name, layout: tool.packageLayout)
-                )
-                let iconPNG = try Data(contentsOf: tool.packageLayout.cachedAppIconPNGURL)
                 app = try await storeClient.publishApp(
                     StorePublicationRequest(
                         storeId: tool.storeId ?? IronsmithStoreConstants.communityStoreId,
@@ -185,8 +191,9 @@ final class ToolLibraryStorePublisher {
                         category: publishCategory,
                         sourceCode: source,
                         generationSettings: settings,
-                        iconPNG: iconPNG,
-                        screenshotPNGs: publishScreenshotData.map { [$0] } ?? [],
+                        iconMasterJPEG: iconMasterJPEG,
+                        iconThumbnailJPEG: iconThumbnailJPEG,
+                        screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         remixedFromVersionId: tool.storeRemixedFromVersionId
                     )
                 )
@@ -211,8 +218,15 @@ final class ToolLibraryStorePublisher {
             }
         }
         do {
-            publishScreenshotData = try Data(contentsOf: url)
-            publishScreenshotName = url.lastPathComponent
+            let source = try Data(contentsOf: url)
+            let decoded = try ToolImageAssetEncoder.decodeImage(
+                source,
+                applyingOrientation: true
+            )
+            let screenshot = try ToolImageAssetEncoder.screenshot(from: decoded)
+            publishScreenshotData = screenshot.data
+            publishScreenshotName =
+                url.deletingPathExtension().lastPathComponent + ".jpg"
         } catch {
             present(error)
         }

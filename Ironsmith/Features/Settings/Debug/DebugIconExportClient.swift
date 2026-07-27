@@ -107,15 +107,15 @@
                 throw DebugIconExportError.unsupportedFormat(request.format)
             }
 
-            let masterImage = try squareImage(
+            let masterImage = try ToolImageAssetEncoder.squareImage(
                 request.image,
                 pixelSize: request.masterPixelSize,
-                fillsOpaqueBackground: request.format == .jpeg
+                opaque: request.format == .jpeg
             )
-            let thumbnailImage = try squareImage(
+            let thumbnailImage = try ToolImageAssetEncoder.squareImage(
                 request.image,
                 pixelSize: request.thumbnailPixelSize,
-                fillsOpaqueBackground: request.format == .jpeg
+                opaque: request.format == .jpeg
             )
             let requestedQuality = min(max(request.quality, minimumLossyQuality), 1)
             let masterEncoding = try encodeMaster(
@@ -224,55 +224,6 @@
             return data as Data
         }
 
-        private static func squareImage(
-            _ image: CGImage,
-            pixelSize: Int,
-            fillsOpaqueBackground: Bool
-        ) throws -> CGImage {
-            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
-                ?? CGColorSpaceCreateDeviceRGB()
-            guard
-                let context = CGContext(
-                    data: nil,
-                    width: pixelSize,
-                    height: pixelSize,
-                    bitsPerComponent: 8,
-                    bytesPerRow: 0,
-                    space: colorSpace,
-                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                )
-            else {
-                throw DebugIconExportError.couldNotScaleImage
-            }
-
-            let canvas = CGRect(x: 0, y: 0, width: pixelSize, height: pixelSize)
-            if fillsOpaqueBackground {
-                context.setFillColor(CGColor(gray: 1, alpha: 1))
-                context.fill(canvas)
-            }
-
-            let scale = max(
-                CGFloat(pixelSize) / CGFloat(image.width),
-                CGFloat(pixelSize) / CGFloat(image.height)
-            )
-            let drawSize = CGSize(
-                width: CGFloat(image.width) * scale,
-                height: CGFloat(image.height) * scale
-            )
-            let drawRect = CGRect(
-                x: (CGFloat(pixelSize) - drawSize.width) / 2,
-                y: (CGFloat(pixelSize) - drawSize.height) / 2,
-                width: drawSize.width,
-                height: drawSize.height
-            )
-            context.interpolationQuality = .high
-            context.draw(image, in: drawRect)
-            guard let result = context.makeImage() else {
-                throw DebugIconExportError.couldNotScaleImage
-            }
-            return result
-        }
-
         private static func runDirectoryName(
             providerName: String,
             format: DebugIconImageFormat
@@ -280,7 +231,8 @@
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
-            let provider = providerName
+            let provider =
+                providerName
                 .lowercased()
                 .replacingOccurrences(
                     of: "[^a-z0-9]+",

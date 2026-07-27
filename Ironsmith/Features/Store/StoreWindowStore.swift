@@ -368,10 +368,12 @@ final class StoreWindowStore {
         of app: StoreAppDetail,
         tools: [Tool]
     ) -> StoreAppInstallDisposition {
-        guard let matchingTool = tools.first(where: {
-            $0.storeAppId == app.id
-                && localSourceHash(for: $0) == version.sourceSha256.lowercased()
-        }) else {
+        guard
+            let matchingTool = tools.first(where: {
+                $0.storeAppId == app.id
+                    && localSourceHash(for: $0) == version.sourceSha256.lowercased()
+            })
+        else {
             return .createCopy
         }
         return .openExisting(matchingTool)
@@ -479,7 +481,8 @@ final class StoreWindowStore {
                     actual: download.sourceSha256
                 )
             }
-            let displayName = version.id == app.currentVersion.id
+            let displayName =
+                version.id == app.currentVersion.id
                 ? app.name
                 : "\(app.name) v\(version.versionNumber)"
             try await importAndBuild(
@@ -533,6 +536,7 @@ final class StoreWindowStore {
         let previousError = tool.generationErrorSummary
         let previousLinkage = StoreToolLinkageSnapshot(tool: tool)
         let layout = tool.packageLayout
+        let previousIcons = ToolIconAssetSnapshot(layout: layout)
         let backup = try ToolVersionBackupClient.live.stageCurrentVersion(
             layout.packageRootURL,
             tool.contentViewSourcePath,
@@ -554,6 +558,10 @@ final class StoreWindowStore {
             )
             try IronsmithStoreClient.verifySourceHash(version)
             try writeStoreVersion(version, app: app, isOwnApp: isOwnApp, to: tool)
+            try await StoreToolImportClient.cacheIconIfAvailable(
+                app: app,
+                layout: tool.packageLayout
+            )
             try modelContext.save()
             try await buildClient.buildTool(tool)
             try ToolVersionBackupClient.live.promoteStagedVersion(backup)
@@ -569,6 +577,7 @@ final class StoreWindowStore {
                 settings: previousSettings
             )
             try? ToolVersionBackupClient.live.discardStagedVersion(backup)
+            previousIcons.restore()
             previousLinkage.apply(to: tool)
             tool.applyGenerationSettings(previousSettings)
             tool.generationState = previousState
@@ -752,6 +761,35 @@ final class StoreWindowStore {
         errorMessage =
             IronsmithErrorPresentation.message(for: error)
             ?? error.localizedDescription
+    }
+}
+
+private struct ToolIconAssetSnapshot {
+    private let files: [(url: URL, data: Data?)]
+
+    init(layout: ToolPackageLayout) {
+        files = [
+            layout.cachedAppIconICNSURL,
+            layout.cachedAppIconMasterJPEGURL,
+            layout.cachedAppIconThumbnailJPEGURL,
+            layout.cachedAppIconPNGURL,
+        ].map { url in
+            (url, try? Data(contentsOf: url))
+        }
+    }
+
+    func restore(fileManager: FileManager = .default) {
+        for file in files {
+            if let data = file.data {
+                try? fileManager.createDirectory(
+                    at: file.url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try? data.write(to: file.url, options: .atomic)
+            } else {
+                try? fileManager.removeItem(at: file.url)
+            }
+        }
     }
 }
 

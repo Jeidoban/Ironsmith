@@ -21,10 +21,11 @@ struct StoreToolImportResult {
 }
 
 struct StoreToolImportClient {
-    var importTool: @MainActor (
-        _ request: StoreToolImportRequest,
-        _ modelContext: ModelContext
-    ) async throws -> StoreToolImportResult
+    var importTool:
+        @MainActor (
+            _ request: StoreToolImportRequest,
+            _ modelContext: ModelContext
+        ) async throws -> StoreToolImportResult
 }
 
 extension StoreToolImportClient {
@@ -34,20 +35,26 @@ extension StoreToolImportClient {
 
     static func live(
         toolsDirectoryURL: URL,
-        packageMaterializer: ToolPackageMaterializer = .live
+        packageMaterializer: ToolPackageMaterializer = .live,
+        iconDataLoader: @escaping @Sendable (URL) async throws -> Data = {
+            try await downloadImage(from: $0)
+        }
     ) -> Self {
         StoreToolImportClient { request, modelContext in
             try IronsmithStoreClient.verifySourceHash(request.version)
 
-            let displayName = request.displayName ?? (request.mode == .remix
-                ? "\(request.app.name) Remix"
-                : request.app.name)
+            let displayName =
+                request.displayName
+                ?? (request.mode == .remix
+                    ? "\(request.app.name) Remix"
+                    : request.app.name)
             let packageRootURL = try packageMaterializer.makeUniquePackageRoot(
                 displayName: displayName,
                 toolsDirectoryURL: toolsDirectoryURL
             )
             let executableName = ToolNameSanitizer.executableName(from: displayName)
-            let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
+            let layout = ToolPackageLayout(
+                packageRootURL: packageRootURL, executableName: executableName)
             let settings = request.version.generationSettings.toolSettings
 
             try packageMaterializer.materializePackage(
@@ -56,10 +63,15 @@ extension StoreToolImportClient {
                 settings: settings,
                 contentViewSource: request.version.sourceCode
             )
-            try await cacheIconIfAvailable(app: request.app, layout: layout)
+            try await cacheIconIfAvailable(
+                app: request.app,
+                layout: layout,
+                dataLoader: iconDataLoader
+            )
 
             let now = Date()
-            let generationPhase: ToolGenerationPhase = request.initialGenerationState == .generating
+            let generationPhase: ToolGenerationPhase =
+                request.initialGenerationState == .generating
                 ? .packaging
                 : .completed
             let tool = Tool(
@@ -96,27 +108,56 @@ extension StoreToolImportClient {
         }
     }
 
-    private static func cacheIconIfAvailable(app: StoreAppDetail, layout: ToolPackageLayout) async throws {
-        guard let url = app.iconAsset?.url else { return }
+    static func cacheIconIfAvailable(
+        app: StoreAppDetail,
+        layout: ToolPackageLayout,
+        dataLoader: @escaping @Sendable (URL) async throws -> Data = {
+            try await downloadImage(from: $0)
+        }
+    ) async throws {
+        guard let thumbnailURL = app.iconAsset?.url else { return }
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode),
-                  !data.isEmpty
-            else {
-                return
+            if let masterURL = app.iconMaster?.url {
+                async let masterData = dataLoader(masterURL)
+                async let thumbnailData = dataLoader(thumbnailURL)
+                let (master, thumbnail) = try await (masterData, thumbnailData)
+                try ToolIconClient.installDownloadedIconAssets(
+                    masterJPEG: master,
+                    thumbnailJPEG: thumbnail,
+                    request: ToolIconRequest(displayName: app.name, layout: layout)
+                )
+            } else {
+                let data = try await dataLoader(thumbnailURL)
+                try FileManager.default.createDirectory(
+                    at: layout.packageMetadataDirectoryURL,
+                    withIntermediateDirectories: true
+                )
+                try data.write(to: layout.cachedAppIconPNGURL, options: .atomic)
+                _ = try await ToolIconClient.cachedOnly().ensureIconAssets(
+                    ToolIconRequest(displayName: app.name, layout: layout)
+                )
             }
-            try data.write(to: layout.cachedAppIconPNGURL, options: .atomic)
         } catch {
             AgentDiagnosticsLog.append(
                 """
                 Store app icon download failed.
                 app: \(app.id)
-                url: \(url.absoluteString)
+                thumbnailURL: \(thumbnailURL.absoluteString)
                 error:
                 \(AgentDiagnosticsLog.renderError(error, limit: 500))
                 """
             )
         }
+    }
+
+    private static func downloadImage(from url: URL) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse,
+            (200...299).contains(httpResponse.statusCode),
+            !data.isEmpty
+        else {
+            throw IronsmithStoreClientError.invalidResponse
+        }
+        return data
     }
 }
