@@ -90,7 +90,8 @@ struct StoreWindowView: View {
         .frame(minWidth: 600, minHeight: 400)
         .onChange(of: store.searchText) { _, _ in
             searchTask?.cancel()
-            store.searchResultsNextCursor = nil
+            store.searchResultsNextOffset = 0
+            store.searchResultsHasMore = false
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
@@ -421,9 +422,11 @@ private struct StoreSectionAppsView: View {
     let onOpen: (StoreAppSummary) -> Void
     let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
     @State private var apps: [StoreAppSummary] = []
-    @State private var nextCursor: String?
+    @State private var nextOffset = 0
+    @State private var hasMore = false
     @State private var isLoading = true
     @State private var isLoadingMore = false
+    @State private var paginationRevision = 0
 
     var body: some View {
         ScrollView {
@@ -467,6 +470,8 @@ private struct StoreSectionAppsView: View {
     }
 
     private func reload() async {
+        paginationRevision += 1
+        let revision = paginationRevision
         let showsLoadingIndicator = apps.isEmpty
         if showsLoadingIndicator {
             isLoading = true
@@ -484,31 +489,38 @@ private struct StoreSectionAppsView: View {
         else {
             return
         }
+        guard paginationRevision == revision else {
+            return
+        }
         apps = page.apps
-        nextCursor = page.nextCursor
+        nextOffset = page.apps.count
+        hasMore = page.hasMore
     }
 
     private func loadMore() async {
-        guard let nextCursor, !isLoadingMore else {
+        guard hasMore, !isLoadingMore else {
             return
         }
+        let offset = nextOffset
+        let revision = paginationRevision
         isLoadingMore = true
         defer { isLoadingMore = false }
         guard
             let page = await store.loadSectionApps(
                 sort: section.sort,
                 category: section.category,
-                cursor: nextCursor
+                offset: offset
             )
         else {
             return
         }
-        guard self.nextCursor == nextCursor else {
+        guard paginationRevision == revision, nextOffset == offset else {
             return
         }
         let existingIDs = Set(apps.map(\.id))
         apps.append(contentsOf: page.apps.filter { !existingIDs.contains($0.id) })
-        self.nextCursor = page.nextCursor
+        nextOffset += page.apps.count
+        hasMore = page.hasMore
     }
 }
 

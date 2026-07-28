@@ -31,9 +31,11 @@ final class StoreWindowStore {
     var selectedStoreId = IronsmithStoreConstants.communityStoreId
     var homeSections: [StoreHomeSection] = []
     var searchResults: [StoreAppSummary] = []
-    var searchResultsNextCursor: String?
+    var searchResultsNextOffset = 0
+    var searchResultsHasMore = false
     var publishedApps: [StoreAppSummary] = []
-    var publishedAppsNextCursor: String?
+    var publishedAppsNextOffset = 0
+    var publishedAppsHasMore = false
     var selectedAppID: String?
     var selectedAppDetail: StoreAppDetail?
     var searchText = ""
@@ -52,6 +54,8 @@ final class StoreWindowStore {
     @ObservationIgnored private let importClient: StoreToolImportClient
     @ObservationIgnored private let buildClient: ToolBuildClient
     @ObservationIgnored private let packageMaterializer: ToolPackageMaterializer
+    @ObservationIgnored private var searchPaginationRevision = 0
+    @ObservationIgnored private var publishedPaginationRevision = 0
 
     init() {
         self.client = .live
@@ -111,10 +115,12 @@ final class StoreWindowStore {
     }
 
     func refreshHome(showLoadingIndicator: Bool = true) async {
+        searchPaginationRevision += 1
         if showLoadingIndicator {
             isLoadingDiscover = true
         }
-        searchResultsNextCursor = nil
+        searchResultsNextOffset = 0
+        searchResultsHasMore = false
         defer {
             if showLoadingIndicator {
                 isLoadingDiscover = false
@@ -124,7 +130,8 @@ final class StoreWindowStore {
             homeSections = try await client.listHomeSections(selectedStoreId)
             if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 searchResults = []
-                searchResultsNextCursor = nil
+                searchResultsNextOffset = 0
+                searchResultsHasMore = false
             }
             reconcileSelection()
         } catch {
@@ -138,10 +145,14 @@ final class StoreWindowStore {
             await refreshHome(showLoadingIndicator: showLoadingIndicator)
             return
         }
+        searchPaginationRevision += 1
+        let revision = searchPaginationRevision
+        let storeId = selectedStoreId
         if showLoadingIndicator {
             isLoadingDiscover = true
         }
-        searchResultsNextCursor = nil
+        searchResultsNextOffset = 0
+        searchResultsHasMore = false
         defer {
             if showLoadingIndicator {
                 isLoadingDiscover = false
@@ -149,18 +160,22 @@ final class StoreWindowStore {
         }
         do {
             let page = try await client.listApps(
-                selectedStoreId,
+                storeId,
                 .discover,
                 trimmedSearch,
-                nil,
+                0,
                 .recent,
                 nil
             )
-            guard searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch else {
+            guard searchPaginationRevision == revision,
+                selectedStoreId == storeId,
+                searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch
+            else {
                 return
             }
             searchResults = page.apps
-            searchResultsNextCursor = page.nextCursor
+            searchResultsNextOffset = page.apps.count
+            searchResultsHasMore = page.hasMore
             reconcileSelection()
         } catch {
             present(error)
@@ -170,31 +185,38 @@ final class StoreWindowStore {
     func loadMoreSearchResults() async {
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedSearch.isEmpty,
-            let cursor = searchResultsNextCursor,
+            searchResultsHasMore,
             !isLoadingMoreSearchResults
         else {
             return
         }
+        let offset = searchResultsNextOffset
+        let revision = searchPaginationRevision
+        let storeId = selectedStoreId
 
         isLoadingMoreSearchResults = true
         defer { isLoadingMoreSearchResults = false }
         do {
             let page = try await client.listApps(
-                selectedStoreId,
+                storeId,
                 .discover,
                 trimmedSearch,
-                cursor,
+                offset,
                 .recent,
                 nil
             )
-            guard searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch else {
+            guard searchPaginationRevision == revision,
+                selectedStoreId == storeId,
+                searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch
+            else {
                 return
             }
-            guard searchResultsNextCursor == cursor else {
+            guard searchResultsNextOffset == offset else {
                 return
             }
             appendUnique(page.apps, to: &searchResults)
-            searchResultsNextCursor = page.nextCursor
+            searchResultsNextOffset += page.apps.count
+            searchResultsHasMore = page.hasMore
             reconcileSelection()
         } catch {
             present(error)
@@ -204,14 +226,14 @@ final class StoreWindowStore {
     func loadSectionApps(
         sort: StoreAppListSort,
         category: StoreAppCategory?,
-        cursor: String? = nil
+        offset: Int = 0
     ) async -> StoreAppPage? {
         do {
             return try await client.listApps(
                 selectedStoreId,
                 .discover,
                 nil,
-                cursor,
+                offset,
                 sort,
                 category
             )
@@ -254,10 +276,14 @@ final class StoreWindowStore {
     }
 
     func refreshPublished(showLoadingIndicator: Bool = true) async {
+        publishedPaginationRevision += 1
+        let revision = publishedPaginationRevision
+        let storeId = selectedStoreId
         if showLoadingIndicator {
             isLoadingPublished = true
         }
-        publishedAppsNextCursor = nil
+        publishedAppsNextOffset = 0
+        publishedAppsHasMore = false
         defer {
             if showLoadingIndicator {
                 isLoadingPublished = false
@@ -265,15 +291,19 @@ final class StoreWindowStore {
         }
         do {
             let page = try await client.listApps(
-                selectedStoreId,
+                storeId,
                 .mine,
                 nil,
-                nil,
+                0,
                 .recent,
                 nil
             )
+            guard publishedPaginationRevision == revision, selectedStoreId == storeId else {
+                return
+            }
             publishedApps = page.apps
-            publishedAppsNextCursor = page.nextCursor
+            publishedAppsNextOffset = page.apps.count
+            publishedAppsHasMore = page.hasMore
             reconcileSelection()
         } catch {
             present(error)
@@ -281,26 +311,33 @@ final class StoreWindowStore {
     }
 
     func loadMorePublishedApps() async {
-        guard let cursor = publishedAppsNextCursor, !isLoadingMorePublishedApps else {
+        guard publishedAppsHasMore, !isLoadingMorePublishedApps else {
             return
         }
+        let offset = publishedAppsNextOffset
+        let revision = publishedPaginationRevision
+        let storeId = selectedStoreId
 
         isLoadingMorePublishedApps = true
         defer { isLoadingMorePublishedApps = false }
         do {
             let page = try await client.listApps(
-                selectedStoreId,
+                storeId,
                 .mine,
                 nil,
-                cursor,
+                offset,
                 .recent,
                 nil
             )
-            guard publishedAppsNextCursor == cursor else {
+            guard publishedPaginationRevision == revision,
+                selectedStoreId == storeId,
+                publishedAppsNextOffset == offset
+            else {
                 return
             }
             appendUnique(page.apps, to: &publishedApps)
-            publishedAppsNextCursor = page.nextCursor
+            publishedAppsNextOffset += page.apps.count
+            publishedAppsHasMore = page.hasMore
             reconcileSelection()
         } catch {
             present(error)

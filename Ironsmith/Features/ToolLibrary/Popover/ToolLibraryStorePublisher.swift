@@ -62,13 +62,14 @@ final class ToolLibraryStorePublisher {
             let linkedAppIDs = Set(tools.compactMap(\.storeAppId))
             var ownedAppsByID: [String: StoreAppSummary] = [:]
             for storeID in storeIDs {
-                var cursor: String?
+                var offset = 0
+                var hasMore: Bool
                 repeat {
                     let page = try await storeClient.listApps(
                         storeID,
                         .mine,
                         nil,
-                        cursor,
+                        offset,
                         .recent,
                         nil
                     )
@@ -76,8 +77,9 @@ final class ToolLibraryStorePublisher {
                         guard linkedAppIDs.contains(app.id) else { continue }
                         ownedAppsByID[app.id] = app
                     }
-                    cursor = page.nextCursor
-                } while cursor != nil
+                    offset += page.apps.count
+                    hasMore = page.hasMore
+                } while hasMore
             }
             publishedStoreAppsByID = ownedAppsByID
         } catch {

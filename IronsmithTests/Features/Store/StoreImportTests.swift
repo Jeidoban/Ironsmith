@@ -448,23 +448,23 @@ struct StoreImportTests {
 
     @MainActor
     @Test
-    func searchPaginationAppendsUniqueResultsAndAdvancesCursor() async {
+    func searchPaginationAppendsUniqueResultsAndAdvancesOffset() async {
         let first = Self.appSummary(id: "app-one")
         let second = Self.appSummary(id: "app-two")
         let recorder = StoreListRequestRecorder()
         var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, scope, search, cursor, sort, category in
+        client.listApps = { _, scope, search, offset, sort, category in
             await recorder.record(
                 scope: scope,
                 search: search,
-                cursor: cursor,
+                offset: offset,
                 sort: sort,
                 category: category
             )
-            if cursor == nil {
-                return StoreAppPage(apps: [first], nextCursor: "page-two")
+            if offset == 0 {
+                return StoreAppPage(apps: [first], hasMore: true)
             }
-            return StoreAppPage(apps: [first, second], nextCursor: nil)
+            return StoreAppPage(apps: [first, second], hasMore: false)
         }
         let store = StoreWindowStore(
             client: client,
@@ -479,30 +479,68 @@ struct StoreImportTests {
         await store.loadMoreSearchResults()
 
         #expect(store.searchResults.map(\.id) == [first.id, second.id])
-        #expect(store.searchResultsNextCursor == nil)
+        #expect(store.searchResultsNextOffset == 3)
+        #expect(!store.searchResultsHasMore)
         let requests = await recorder.requests
-        #expect(requests.map(\.cursor) == [nil, "page-two"])
+        #expect(requests.map(\.offset) == [0, 1])
         #expect(requests.allSatisfy { $0.scope == .discover })
         #expect(requests.allSatisfy { $0.search == "calculator" })
     }
 
     @MainActor
     @Test
-    func sectionPaginationForwardsCategorySortAndCursor() async {
+    func staleSearchPageDoesNotReplaceNewQueryResults() async {
+        let stale = Self.appSummary(id: "stale-app")
+        let current = Self.appSummary(id: "current-app")
+        let gate = StorePageGate()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, _, search, _, _, _ in
+            if search == "first" {
+                return await gate.waitForPage()
+            }
+            return StoreAppPage(apps: [current], hasMore: false)
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        store.searchText = "first"
+        let staleRequest = Task { @MainActor in
+            await store.refreshDiscover()
+        }
+        await gate.waitUntilRequested()
+
+        store.searchText = "second"
+        await store.refreshDiscover()
+        await gate.resume(with: StoreAppPage(apps: [stale], hasMore: true))
+        await staleRequest.value
+
+        #expect(store.searchResults.map(\.id) == [current.id])
+        #expect(store.searchResultsNextOffset == 1)
+        #expect(!store.searchResultsHasMore)
+    }
+
+    @MainActor
+    @Test
+    func sectionPaginationForwardsCategorySortAndOffset() async {
         let app = Self.appSummary(id: "section-app")
         let recorder = StoreListRequestRecorder()
         var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, scope, search, cursor, sort, category in
+        client.listApps = { _, scope, search, offset, sort, category in
             await recorder.record(
                 scope: scope,
                 search: search,
-                cursor: cursor,
+                offset: offset,
                 sort: sort,
                 category: category
             )
             return StoreAppPage(
                 apps: [app],
-                nextCursor: cursor == nil ? "next-section-page" : nil
+                hasMore: offset == 0
             )
         }
         let store = StoreWindowStore(
@@ -520,13 +558,13 @@ struct StoreImportTests {
         let secondPage = await store.loadSectionApps(
             sort: .trending,
             category: .games,
-            cursor: firstPage?.nextCursor
+            offset: firstPage?.apps.count ?? 0
         )
 
-        #expect(firstPage?.nextCursor == "next-section-page")
-        #expect(secondPage?.nextCursor == nil)
+        #expect(firstPage?.hasMore == true)
+        #expect(secondPage?.hasMore == false)
         let requests = await recorder.requests
-        #expect(requests.map(\.cursor) == [nil, "next-section-page"])
+        #expect(requests.map(\.offset) == [0, 1])
         #expect(requests.allSatisfy { $0.scope == .discover })
         #expect(requests.allSatisfy { $0.search == nil })
         #expect(requests.allSatisfy { $0.sort == .trending })
@@ -535,23 +573,23 @@ struct StoreImportTests {
 
     @MainActor
     @Test
-    func publishedPaginationAppendsUniqueResultsAndAdvancesCursor() async {
+    func publishedPaginationAppendsUniqueResultsAndAdvancesOffset() async {
         let first = Self.appSummary(id: "published-one")
         let second = Self.appSummary(id: "published-two")
         let recorder = StoreListRequestRecorder()
         var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, scope, search, cursor, sort, category in
+        client.listApps = { _, scope, search, offset, sort, category in
             await recorder.record(
                 scope: scope,
                 search: search,
-                cursor: cursor,
+                offset: offset,
                 sort: sort,
                 category: category
             )
-            if cursor == nil {
-                return StoreAppPage(apps: [first], nextCursor: "published-page-two")
+            if offset == 0 {
+                return StoreAppPage(apps: [first], hasMore: true)
             }
-            return StoreAppPage(apps: [first, second], nextCursor: nil)
+            return StoreAppPage(apps: [first, second], hasMore: false)
         }
         let store = StoreWindowStore(
             client: client,
@@ -565,9 +603,10 @@ struct StoreImportTests {
         await store.loadMorePublishedApps()
 
         #expect(store.publishedApps.map(\.id) == [first.id, second.id])
-        #expect(store.publishedAppsNextCursor == nil)
+        #expect(store.publishedAppsNextOffset == 3)
+        #expect(!store.publishedAppsHasMore)
         let requests = await recorder.requests
-        #expect(requests.map(\.cursor) == [nil, "published-page-two"])
+        #expect(requests.map(\.offset) == [0, 1])
         #expect(requests.allSatisfy { $0.scope == .mine })
         #expect(requests.allSatisfy { $0.search == nil })
     }
@@ -975,7 +1014,7 @@ private actor StoreListRequestRecorder {
     struct Request: Sendable {
         let scope: StoreAppListScope
         let search: String?
-        let cursor: String?
+        let offset: Int
         let sort: StoreAppListSort
         let category: StoreAppCategory?
     }
@@ -985,7 +1024,7 @@ private actor StoreListRequestRecorder {
     func record(
         scope: StoreAppListScope,
         search: String?,
-        cursor: String?,
+        offset: Int,
         sort: StoreAppListSort,
         category: StoreAppCategory?
     ) {
@@ -993,10 +1032,35 @@ private actor StoreListRequestRecorder {
             Request(
                 scope: scope,
                 search: search,
-                cursor: cursor,
+                offset: offset,
                 sort: sort,
                 category: category
             )
         )
+    }
+}
+
+private actor StorePageGate {
+    private var pageContinuation: CheckedContinuation<StoreAppPage, Never>?
+    private var requestContinuation: CheckedContinuation<Void, Never>?
+
+    func waitForPage() async -> StoreAppPage {
+        await withCheckedContinuation { continuation in
+            pageContinuation = continuation
+            requestContinuation?.resume()
+            requestContinuation = nil
+        }
+    }
+
+    func waitUntilRequested() async {
+        guard pageContinuation == nil else { return }
+        await withCheckedContinuation { continuation in
+            requestContinuation = continuation
+        }
+    }
+
+    func resume(with page: StoreAppPage) {
+        pageContinuation?.resume(returning: page)
+        pageContinuation = nil
     }
 }

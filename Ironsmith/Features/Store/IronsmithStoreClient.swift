@@ -274,7 +274,7 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
 
 nonisolated struct StoreAppPage: Equatable, Sendable {
     let apps: [StoreAppSummary]
-    let nextCursor: String?
+    let hasMore: Bool
 }
 
 nonisolated struct StoreHomeSection: Decodable, Identifiable, Equatable, Sendable {
@@ -350,7 +350,7 @@ nonisolated struct IronsmithStoreClient {
             _ storeId: String,
             _ scope: StoreAppListScope,
             _ search: String?,
-            _ cursor: String?,
+            _ offset: Int,
             _ sort: StoreAppListSort,
             _ category: StoreAppCategory?
         ) async throws
@@ -396,10 +396,11 @@ extension IronsmithStoreClient {
                 )
                 return response.data
             },
-            listApps: { storeId, scope, search, cursor, sort, category in
+            listApps: { storeId, scope, search, offset, sort, category in
                 var queryItems = [
                     URLQueryItem(name: "scope", value: scope.rawValue),
                     URLQueryItem(name: "sort", value: sort.rawValue),
+                    URLQueryItem(name: "offset", value: String(offset)),
                     URLQueryItem(
                         name: "limit",
                         value: String(IronsmithStoreConstants.appListPageSize)
@@ -411,16 +412,13 @@ extension IronsmithStoreClient {
                 if let category {
                     queryItems.append(URLQueryItem(name: "category", value: category.rawValue))
                 }
-                if let cursor {
-                    queryItems.append(URLQueryItem(name: "cursor", value: cursor))
-                }
                 let response: StorePageEnvelope<StoreAppSummary> = try await api.request(
                     "api/v1/stores/\(storeId)/apps",
                     method: "GET",
                     queryItems: queryItems,
                     authentication: scope == .mine ? .required : .optional
                 )
-                return StoreAppPage(apps: response.data, nextCursor: response.nextCursor)
+                return StoreAppPage(apps: response.data, hasMore: response.hasMore)
             },
             fetchApp: { storeId, appId in
                 let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
@@ -679,7 +677,7 @@ nonisolated private struct StoreDataEnvelope<DataValue: Decodable>: Decodable {
 
 nonisolated private struct StorePageEnvelope<DataValue: Decodable>: Decodable {
     let data: [DataValue]
-    let nextCursor: String?
+    let hasMore: Bool
 }
 
 nonisolated private struct StoreBackendErrorEnvelope: Decodable {
