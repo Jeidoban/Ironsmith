@@ -3,6 +3,7 @@ import Foundation
 
 nonisolated enum IronsmithStoreConstants {
     static let communityStoreId = "00000000-0000-4000-8000-000000000011"
+    static let appListPageSize = 30
 
     static var runtimeVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
@@ -25,35 +26,57 @@ nonisolated enum StoreAppStatus: String, Codable, Equatable, Sendable {
 
 nonisolated enum StoreAssetKind: String, Codable, Equatable, Sendable {
     case icon
+    case iconMaster
     case screenshot
 }
 
 nonisolated enum StoreAppCategory: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
+    case business
+    case developerTools
+    case education
+    case entertainment
+    case finance
+    case games
+    case graphicsDesign
+    case healthFitness
+    case lifestyle
+    case music
     case productivity
     case utilities
-    case developerTools
-    case creativity
-    case education
-    case finance
-    case lifestyle
-    case entertainment
-    case reference
-    case other
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .business: "Business"
+        case .developerTools: "Developer Tools"
+        case .education: "Education"
+        case .entertainment: "Entertainment"
+        case .finance: "Finance"
+        case .games: "Games"
+        case .graphicsDesign: "Graphics & Design"
+        case .healthFitness: "Health & Fitness"
+        case .lifestyle: "Lifestyle"
+        case .music: "Music"
         case .productivity: "Productivity"
         case .utilities: "Utilities"
-        case .developerTools: "Developer Tools"
-        case .creativity: "Creativity"
-        case .education: "Education"
-        case .finance: "Finance"
-        case .lifestyle: "Lifestyle"
-        case .entertainment: "Entertainment"
-        case .reference: "Reference"
-        case .other: "Other"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .business: "briefcase"
+        case .developerTools: "hammer"
+        case .education: "graduationcap"
+        case .entertainment: "play.rectangle"
+        case .finance: "dollarsign.circle"
+        case .games: "gamecontroller"
+        case .graphicsDesign: "paintbrush"
+        case .healthFitness: "heart"
+        case .lifestyle: "leaf"
+        case .music: "music.note"
+        case .productivity: "checkmark.circle"
+        case .utilities: "wrench.and.screwdriver"
         }
     }
 }
@@ -238,20 +261,20 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
     let createdAt: String
     let updatedAt: String
     let icon: StoreAsset?
+    let iconMaster: StoreAsset?
     let screenshots: [StoreAsset]
     let currentVersion: StoreVersionMetadata
-    let recentVersions: [StoreVersionMetadata]
+    let versions: [StoreVersionMetadata]
     let remix: StoreRemixMetadata?
 
     var iconAsset: StoreAsset? {
         icon
     }
-
 }
 
 nonisolated struct StoreAppPage: Equatable, Sendable {
     let apps: [StoreAppSummary]
-    let nextCursor: String?
+    let hasMore: Bool
 }
 
 nonisolated struct StoreHomeSection: Decodable, Identifiable, Equatable, Sendable {
@@ -270,8 +293,9 @@ nonisolated struct StorePublicationRequest: Sendable {
     let category: StoreAppCategory
     let sourceCode: String
     let generationSettings: ToolGenerationSettings
-    let iconPNG: Data
-    let screenshotPNGs: [Data]
+    let iconMasterJPEG: Data
+    let iconThumbnailJPEG: Data
+    let screenshotJPEGs: [Data]
     let remixedFromVersionId: String?
 }
 
@@ -280,8 +304,9 @@ nonisolated struct StoreVersionPublicationRequest: Sendable {
     let appId: String
     let sourceCode: String
     let generationSettings: ToolGenerationSettings
-    let iconPNG: Data?
-    let screenshotPNGs: [Data]
+    let iconMasterJPEG: Data?
+    let iconThumbnailJPEG: Data?
+    let screenshotJPEGs: [Data]
     let replaceScreenshots: Bool
     let remixedFromVersionId: String?
 }
@@ -306,11 +331,11 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
         case .notConfigured:
             return "Ironsmith service is not configured."
         case .missingSession:
-            return "Sign in with Ironsmith before using the App Store."
+            return "Sign in with Ironsmith before using the Ironsmith Store."
         case .invalidResponse:
-            return "The App Store returned an invalid response."
+            return "The Ironsmith Store returned an invalid response."
         case .requestFailed(let statusCode, let message):
-            return "The App Store returned HTTP \(statusCode): \(message)"
+            return "The Ironsmith Store returned HTTP \(statusCode): \(message)"
         case .sourceHashMismatch:
             return "The downloaded source did not match the scanned source hash."
         }
@@ -325,7 +350,7 @@ nonisolated struct IronsmithStoreClient {
             _ storeId: String,
             _ scope: StoreAppListScope,
             _ search: String?,
-            _ cursor: String?,
+            _ offset: Int,
             _ sort: StoreAppListSort,
             _ category: StoreAppCategory?
         ) async throws
@@ -371,10 +396,15 @@ extension IronsmithStoreClient {
                 )
                 return response.data
             },
-            listApps: { storeId, scope, search, cursor, sort, category in
+            listApps: { storeId, scope, search, offset, sort, category in
                 var queryItems = [
                     URLQueryItem(name: "scope", value: scope.rawValue),
                     URLQueryItem(name: "sort", value: sort.rawValue),
+                    URLQueryItem(name: "offset", value: String(offset)),
+                    URLQueryItem(
+                        name: "limit",
+                        value: String(IronsmithStoreConstants.appListPageSize)
+                    ),
                 ]
                 if let search, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     queryItems.append(URLQueryItem(name: "q", value: search))
@@ -382,16 +412,13 @@ extension IronsmithStoreClient {
                 if let category {
                     queryItems.append(URLQueryItem(name: "category", value: category.rawValue))
                 }
-                if let cursor {
-                    queryItems.append(URLQueryItem(name: "cursor", value: cursor))
-                }
                 let response: StorePageEnvelope<StoreAppSummary> = try await api.request(
                     "api/v1/stores/\(storeId)/apps",
                     method: "GET",
                     queryItems: queryItems,
                     authentication: scope == .mine ? .required : .optional
                 )
-                return StoreAppPage(apps: response.data, nextCursor: response.nextCursor)
+                return StoreAppPage(apps: response.data, hasMore: response.hasMore)
             },
             fetchApp: { storeId, appId in
                 let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
@@ -429,10 +456,18 @@ extension IronsmithStoreClient {
                         data: Data(request.sourceCode.utf8)
                     )
                     .addingFile(
-                        name: "icon", filename: "icon.png", contentType: "image/png",
-                        data: request.iconPNG
+                        name: "iconMaster",
+                        filename: "icon-master.jpg",
+                        contentType: "image/jpeg",
+                        data: request.iconMasterJPEG
                     )
-                    .addingScreenshotFiles(request.screenshotPNGs)
+                    .addingFile(
+                        name: "iconThumbnail",
+                        filename: "icon-thumbnail.jpg",
+                        contentType: "image/jpeg",
+                        data: request.iconThumbnailJPEG
+                    )
+                    .addingScreenshotFiles(request.screenshotJPEGs)
                 let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(request.storeId)/apps",
                     method: "POST",
@@ -443,6 +478,12 @@ extension IronsmithStoreClient {
                 return response.data
             },
             publishVersion: { request in
+                guard
+                    (request.iconMasterJPEG == nil)
+                        == (request.iconThumbnailJPEG == nil)
+                else {
+                    throw IronsmithStoreClientError.invalidResponse
+                }
                 let metadata = StoreVersionMetadataPayload(
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
                     generationSettings: StoreGenerationSettingsDTO(
@@ -458,11 +499,23 @@ extension IronsmithStoreClient {
                         contentType: "text/x-swift",
                         data: Data(request.sourceCode.utf8)
                     )
-                if let iconPNG = request.iconPNG {
+                if let iconMasterJPEG = request.iconMasterJPEG,
+                    let iconThumbnailJPEG = request.iconThumbnailJPEG
+                {
                     body = body.addingFile(
-                        name: "icon", filename: "icon.png", contentType: "image/png", data: iconPNG)
+                        name: "iconMaster",
+                        filename: "icon-master.jpg",
+                        contentType: "image/jpeg",
+                        data: iconMasterJPEG
+                    )
+                    body = body.addingFile(
+                        name: "iconThumbnail",
+                        filename: "icon-thumbnail.jpg",
+                        contentType: "image/jpeg",
+                        data: iconThumbnailJPEG
+                    )
                 }
-                body = body.addingScreenshotFiles(request.screenshotPNGs)
+                body = body.addingScreenshotFiles(request.screenshotJPEGs)
                 let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(request.storeId)/apps/\(request.appId)/versions",
                     method: "POST",
@@ -624,7 +677,7 @@ nonisolated private struct StoreDataEnvelope<DataValue: Decodable>: Decodable {
 
 nonisolated private struct StorePageEnvelope<DataValue: Decodable>: Decodable {
     let data: [DataValue]
-    let nextCursor: String?
+    let hasMore: Bool
 }
 
 nonisolated private struct StoreBackendErrorEnvelope: Decodable {
@@ -653,7 +706,7 @@ nonisolated private struct StoreVersionMetadataPayload: Encodable {
     let replaceScreenshots: Bool
 }
 
-nonisolated private struct StoreMultipartBody {
+nonisolated struct StoreMultipartBody {
     let boundary: String
     private(set) var data = Data()
 
@@ -699,8 +752,8 @@ nonisolated private struct StoreMultipartBody {
         for (index, screenshot) in screenshots.enumerated() {
             copy = copy.addingFile(
                 name: "screenshots",
-                filename: "screenshot-\(index + 1).png",
-                contentType: "image/png",
+                filename: "screenshot-\(index + 1).jpg",
+                contentType: "image/jpeg",
                 data: screenshot
             )
         }

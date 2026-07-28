@@ -36,18 +36,6 @@ struct ToolLibraryPopoverHeaderView: View {
                 .accessibilityIdentifier("app-update-button")
             }
 
-            if isStoreEnabled {
-                Button(action: onOpenStore) {
-                    Image(systemName: "shippingbox")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("App Store")
-                .accessibilityLabel("App Store")
-                .accessibilityIdentifier("app-store-button")
-            }
-
             Button(action: toggleSearch) {
                 Image(systemName: isSearchPresented ? "xmark" : "magnifyingglass")
                     .font(.system(size: 15, weight: .semibold))
@@ -57,6 +45,18 @@ struct ToolLibraryPopoverHeaderView: View {
             .help(isSearchPresented ? "Close Search" : "Search Apps")
             .accessibilityLabel(isSearchPresented ? "Close app search" : "Search apps")
             .accessibilityIdentifier("tool-search-button")
+
+            if isStoreEnabled {
+                Button(action: onOpenStore) {
+                    Image(systemName: "storefront")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Ironsmith Store")
+                .accessibilityLabel("Ironsmith Store")
+                .accessibilityIdentifier("app-store-button")
+            }
 
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape")
@@ -102,7 +102,7 @@ struct ToolLibraryPopoverHeaderView: View {
                 Divider()
 
                 if isStoreEnabled {
-                    Button("Browse App Store...") {
+                    Button("Browse Ironsmith Store...") {
                         onOpenStore()
                     }
 

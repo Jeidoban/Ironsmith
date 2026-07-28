@@ -1,3 +1,5 @@
+import AppKit
+import CoreGraphics
 import Foundation
 import SwiftData
 import Testing
@@ -5,6 +7,43 @@ import Testing
 @testable import Ironsmith
 
 struct StoreImportTests {
+    @Test
+    func storeMultipartUsesJPEGAssetContract() throws {
+        let body = StoreMultipartBody(boundary: "JPEG-Test-Boundary")
+            .addingFile(
+                name: "iconMaster",
+                filename: "icon-master.jpg",
+                contentType: "image/jpeg",
+                data: Data("master-bytes".utf8)
+            )
+            .addingFile(
+                name: "iconThumbnail",
+                filename: "icon-thumbnail.jpg",
+                contentType: "image/jpeg",
+                data: Data("thumbnail-bytes".utf8)
+            )
+            .addingScreenshotFiles([Data("screenshot-bytes".utf8)])
+        let encoded = String(decoding: body.data, as: UTF8.self)
+
+        #expect(
+            encoded.contains(
+                #"name="iconMaster"; filename="icon-master.jpg""#
+            )
+        )
+        #expect(
+            encoded.contains(
+                #"name="iconThumbnail"; filename="icon-thumbnail.jpg""#
+            )
+        )
+        #expect(
+            encoded.contains(
+                #"name="screenshots"; filename="screenshot-1.jpg""#
+            )
+        )
+        #expect(encoded.components(separatedBy: "Content-Type: image/jpeg").count == 4)
+        #expect(encoded.hasSuffix("--JPEG-Test-Boundary--\r\n"))
+    }
+
     @MainActor
     @Test
     func storeSourceHashVerificationRejectsTamperedDownloads() throws {
@@ -59,6 +98,82 @@ struct StoreImportTests {
         #expect(tool.storeSourceSha256 == version.sourceSha256)
         #expect(tool.storeImportedAt != nil)
         #expect(tool.storeRemixedFromVersionId == version.id)
+    }
+
+    @MainActor
+    @Test
+    func storeImportPersistsJPEGsAndBuildsICNSFromMaster() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let source = Self.sourceCode("downloaded icon")
+        let iconImage = try Self.transparentIconImage()
+        let iconAssets = try ToolImageAssetEncoder.iconAssets(from: iconImage)
+        let masterURL = URL(string: "https://assets.example.test/master.jpg")!
+        let thumbnailURL = URL(string: "https://assets.example.test/thumbnail.jpg")!
+        let app = Self.appListing(
+            sourceCode: source,
+            icon: StoreAsset(
+                id: UUID().uuidString,
+                kind: .icon,
+                sortOrder: 0,
+                width: 256,
+                height: 256,
+                byteSize: iconAssets.thumbnailData.count,
+                url: thumbnailURL
+            ),
+            iconMaster: StoreAsset(
+                id: UUID().uuidString,
+                kind: .iconMaster,
+                sortOrder: 0,
+                width: 1024,
+                height: 1024,
+                byteSize: iconAssets.masterData.count,
+                url: masterURL
+            )
+        )
+        let version = Self.versionDownload(
+            appId: app.id,
+            sourceCode: source,
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: source)
+        )
+        let client = StoreToolImportClient.live(
+            toolsDirectoryURL: root,
+            iconDataLoader: { url in
+                switch url {
+                case masterURL:
+                    return iconAssets.masterData
+                case thumbnailURL:
+                    return iconAssets.thumbnailData
+                default:
+                    throw IronsmithStoreClientError.invalidResponse
+                }
+            }
+        )
+
+        let result = try await client.importTool(
+            StoreToolImportRequest(app: app, version: version, mode: .get),
+            context
+        )
+        let layout = result.tool.packageLayout
+
+        #expect(
+            try Data(contentsOf: layout.cachedAppIconMasterJPEGURL)
+                == iconAssets.masterData
+        )
+        #expect(
+            try Data(contentsOf: layout.cachedAppIconThumbnailJPEGURL)
+                == iconAssets.thumbnailData
+        )
+        #expect(FileManager.default.fileExists(atPath: layout.cachedAppIconICNSURL.path))
+        let importedICNS = try ToolImageAssetEncoder.largestImage(
+            at: layout.cachedAppIconICNSURL
+        )
+        let corner = try #require(
+            NSBitmapImageRep(cgImage: importedICNS).colorAt(x: 0, y: 0)
+        )
+        #expect(corner.alphaComponent > 0.99)
     }
 
     @MainActor
@@ -216,6 +331,534 @@ struct StoreImportTests {
         }
     }
 
+    @MainActor
+    @Test
+    func storeSummaryInstallDispositionUsesVersionLinkageAndProtectsEditedTools() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let store = StoreWindowStore(
+            client: .unconfigured,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+        let oldSource = Self.sourceCode("old")
+        let currentSource = Self.sourceCode("current")
+        let oldMetadata = Self.versionMetadata(versionNumber: 1, sourceCode: oldSource)
+        let currentMetadata = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000202",
+            versionNumber: 2,
+            sourceCode: currentSource
+        )
+        let app = Self.appListing(
+            sourceCode: currentSource,
+            versions: [currentMetadata, oldMetadata]
+        )
+        let summary = StoreAppSummary(detail: app)
+        let client = StoreToolImportClient.live(toolsDirectoryURL: root)
+        let oldImport = try await client.importTool(
+            StoreToolImportRequest(
+                app: app,
+                version: Self.versionDownload(
+                    versionNumber: 1,
+                    appId: app.id,
+                    sourceCode: oldSource,
+                    sourceSha256: oldMetadata.sourceSha256
+                ),
+                mode: .get
+            ),
+            context
+        )
+
+        guard
+            case .updateExisting(let tool) = store.installDisposition(
+                for: summary,
+                tools: [oldImport.tool]
+            )
+        else {
+            Issue.record("Expected the listing row to show Update for an unchanged older version.")
+            return
+        }
+        #expect(tool.id == oldImport.tool.id)
+
+        let currentImport = try await client.importTool(
+            StoreToolImportRequest(
+                app: app,
+                version: Self.versionDownload(
+                    id: currentMetadata.id,
+                    versionNumber: 2,
+                    appId: app.id,
+                    sourceCode: currentSource,
+                    sourceSha256: currentMetadata.sourceSha256
+                ),
+                mode: .get
+            ),
+            context
+        )
+        guard
+            case .openExisting(let tool) = store.installDisposition(
+                for: summary,
+                tools: [currentImport.tool]
+            )
+        else {
+            Issue.record("Expected the listing row to show Open for an unchanged current version.")
+            return
+        }
+        #expect(tool.id == currentImport.tool.id)
+
+        try Self.sourceCode("edited").write(
+            to: try currentImport.tool.packageLayout.packageFileURL(
+                for: currentImport.tool.contentViewSourcePath
+            ),
+            atomically: true,
+            encoding: .utf8
+        )
+        guard
+            case .createCopy = store.installDisposition(
+                for: summary,
+                tools: [currentImport.tool]
+            )
+        else {
+            Issue.record("Expected an edited current copy to show Get.")
+            return
+        }
+    }
+
+    @MainActor
+    @Test
+    func successfulStoreMutationRequestsImplicitContentRefresh() async {
+        let app = Self.appListing(sourceCode: Self.sourceCode("published"))
+        var client = IronsmithStoreClient.unconfigured
+        client.patchListing = { _, _, _ in app }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        await store.setStatus(StoreAppSummary(detail: app), status: .unlisted)
+
+        #expect(store.contentRevision == 1)
+    }
+
+    @MainActor
+    @Test
+    func searchPaginationAppendsUniqueResultsAndAdvancesOffset() async {
+        let first = Self.appSummary(id: "app-one")
+        let second = Self.appSummary(id: "app-two")
+        let recorder = StoreListRequestRecorder()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, scope, search, offset, sort, category in
+            await recorder.record(
+                scope: scope,
+                search: search,
+                offset: offset,
+                sort: sort,
+                category: category
+            )
+            if offset == 0 {
+                return StoreAppPage(apps: [first], hasMore: true)
+            }
+            return StoreAppPage(apps: [first, second], hasMore: false)
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+        store.searchText = "calculator"
+
+        await store.refreshDiscover()
+        await store.loadMoreSearchResults()
+
+        #expect(store.searchResults.map(\.id) == [first.id, second.id])
+        #expect(store.searchResultsNextOffset == 3)
+        #expect(!store.searchResultsHasMore)
+        let requests = await recorder.requests
+        #expect(requests.map(\.offset) == [0, 1])
+        #expect(requests.allSatisfy { $0.scope == .discover })
+        #expect(requests.allSatisfy { $0.search == "calculator" })
+    }
+
+    @MainActor
+    @Test
+    func staleSearchPageDoesNotReplaceNewQueryResults() async {
+        let stale = Self.appSummary(id: "stale-app")
+        let current = Self.appSummary(id: "current-app")
+        let gate = StorePageGate()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, _, search, _, _, _ in
+            if search == "first" {
+                return await gate.waitForPage()
+            }
+            return StoreAppPage(apps: [current], hasMore: false)
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        store.searchText = "first"
+        let staleRequest = Task { @MainActor in
+            await store.refreshDiscover()
+        }
+        await gate.waitUntilRequested()
+
+        store.searchText = "second"
+        await store.refreshDiscover()
+        await gate.resume(with: StoreAppPage(apps: [stale], hasMore: true))
+        await staleRequest.value
+
+        #expect(store.searchResults.map(\.id) == [current.id])
+        #expect(store.searchResultsNextOffset == 1)
+        #expect(!store.searchResultsHasMore)
+    }
+
+    @MainActor
+    @Test
+    func sectionPaginationForwardsCategorySortAndOffset() async {
+        let app = Self.appSummary(id: "section-app")
+        let recorder = StoreListRequestRecorder()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, scope, search, offset, sort, category in
+            await recorder.record(
+                scope: scope,
+                search: search,
+                offset: offset,
+                sort: sort,
+                category: category
+            )
+            return StoreAppPage(
+                apps: [app],
+                hasMore: offset == 0
+            )
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        let firstPage = await store.loadSectionApps(
+            sort: .trending,
+            category: .games
+        )
+        let secondPage = await store.loadSectionApps(
+            sort: .trending,
+            category: .games,
+            offset: firstPage?.apps.count ?? 0
+        )
+
+        #expect(firstPage?.hasMore == true)
+        #expect(secondPage?.hasMore == false)
+        let requests = await recorder.requests
+        #expect(requests.map(\.offset) == [0, 1])
+        #expect(requests.allSatisfy { $0.scope == .discover })
+        #expect(requests.allSatisfy { $0.search == nil })
+        #expect(requests.allSatisfy { $0.sort == .trending })
+        #expect(requests.allSatisfy { $0.category == .games })
+    }
+
+    @MainActor
+    @Test
+    func publishedPaginationAppendsUniqueResultsAndAdvancesOffset() async {
+        let first = Self.appSummary(id: "published-one")
+        let second = Self.appSummary(id: "published-two")
+        let recorder = StoreListRequestRecorder()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, scope, search, offset, sort, category in
+            await recorder.record(
+                scope: scope,
+                search: search,
+                offset: offset,
+                sort: sort,
+                category: category
+            )
+            if offset == 0 {
+                return StoreAppPage(apps: [first], hasMore: true)
+            }
+            return StoreAppPage(apps: [first, second], hasMore: false)
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        await store.refreshPublished()
+        await store.loadMorePublishedApps()
+
+        #expect(store.publishedApps.map(\.id) == [first.id, second.id])
+        #expect(store.publishedAppsNextOffset == 3)
+        #expect(!store.publishedAppsHasMore)
+        let requests = await recorder.requests
+        #expect(requests.map(\.offset) == [0, 1])
+        #expect(requests.allSatisfy { $0.scope == .mine })
+        #expect(requests.allSatisfy { $0.search == nil })
+    }
+
+    @MainActor
+    @Test
+    func historicalVersionWithSharedSourceCreatesAttributedSeparateCopyWithoutMutatingExistingTool()
+        async throws
+    {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let historicalSource = Self.sourceCode("shared")
+        let currentSource = historicalSource
+        let historicalMetadata = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000201",
+            versionNumber: 1,
+            sourceCode: historicalSource,
+            publishedAt: "2026-06-27T00:00:00.000Z"
+        )
+        let currentMetadata = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000202",
+            versionNumber: 2,
+            sourceCode: currentSource,
+            publishedAt: "2026-06-28T00:00:00.000Z"
+        )
+        let app = Self.appListing(
+            sourceCode: currentSource,
+            versions: [currentMetadata, historicalMetadata]
+        )
+        let currentDownload = Self.versionDownload(
+            id: currentMetadata.id,
+            versionNumber: 2,
+            appId: app.id,
+            sourceCode: currentSource,
+            sourceSha256: currentMetadata.sourceSha256
+        )
+        let historicalDownload = Self.versionDownload(
+            id: historicalMetadata.id,
+            versionNumber: 1,
+            appId: app.id,
+            sourceCode: historicalSource,
+            sourceSha256: historicalMetadata.sourceSha256
+        )
+        let importer = StoreToolImportClient.live(toolsDirectoryURL: root)
+        let existing = try await importer.importTool(
+            StoreToolImportRequest(app: app, version: currentDownload, mode: .get),
+            context
+        ).tool
+        var client = IronsmithStoreClient.unconfigured
+        client.fetchVersion = { _, _, versionNumber in
+            #expect(versionNumber == 1)
+            return historicalDownload
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: importer,
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        await store.installVersion(
+            historicalMetadata,
+            of: app,
+            tools: [existing],
+            modelContext: context,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {}),
+            inferenceStore: InferenceStore()
+        )
+
+        let tools = try context.fetch(FetchDescriptor<Tool>())
+        let installed = try #require(tools.first { $0.id != existing.id })
+        let existingSource = try String(
+            contentsOf: try existing.packageLayout.packageFileURL(
+                for: existing.contentViewSourcePath),
+            encoding: .utf8
+        )
+        #expect(tools.count == 2)
+        #expect(existingSource == currentSource)
+        #expect(existing.storeVersionId == currentMetadata.id)
+        #expect(installed.name == "\(app.name) v1")
+        #expect(installed.generationState == .ready)
+        #expect(installed.storeVersionId == historicalMetadata.id)
+        #expect(installed.storeVersionNumber == 1)
+        #expect(installed.storeSourceSha256 == historicalMetadata.sourceSha256)
+        #expect(installed.storeRemixedFromVersionId == historicalMetadata.id)
+        #expect(store.workingVersionID == nil)
+
+        guard
+            case .openExisting(let matchingTool) = store.installDisposition(
+                for: historicalMetadata,
+                of: app,
+                tools: tools
+            )
+        else {
+            Issue.record("Expected the exact installed historical version to open.")
+            return
+        }
+        #expect(matchingTool.id == installed.id)
+    }
+
+    @MainActor
+    @Test
+    func historicalVersionHashMismatchDoesNotCreateOrChangeTools() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let historicalSource = Self.sourceCode("historical")
+        let currentSource = Self.sourceCode("current")
+        let historicalMetadata = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000201",
+            versionNumber: 1,
+            sourceCode: historicalSource
+        )
+        let currentMetadata = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000202",
+            versionNumber: 2,
+            sourceCode: currentSource
+        )
+        let app = Self.appListing(
+            sourceCode: currentSource,
+            versions: [currentMetadata, historicalMetadata]
+        )
+        let mismatchedSource = Self.sourceCode("wrong version")
+        let mismatchedDownload = Self.versionDownload(
+            id: historicalMetadata.id,
+            versionNumber: 1,
+            appId: app.id,
+            sourceCode: mismatchedSource,
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: mismatchedSource)
+        )
+        var client = IronsmithStoreClient.unconfigured
+        client.fetchVersion = { _, _, _ in mismatchedDownload }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient.live(toolsDirectoryURL: root),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        await store.installVersion(
+            historicalMetadata,
+            of: app,
+            tools: [],
+            modelContext: context,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {}),
+            inferenceStore: InferenceStore()
+        )
+
+        #expect(try context.fetch(FetchDescriptor<Tool>()).isEmpty)
+        #expect(store.errorMessage != nil)
+        #expect(store.workingVersionID == nil)
+    }
+
+    @MainActor
+    @Test
+    func historicalVersionBuildFailureLeavesFailedCopyAndNoOtherToolChanges() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let source = Self.sourceCode("historical")
+        let metadata = Self.versionMetadata(versionNumber: 1, sourceCode: source)
+        let app = Self.appListing(sourceCode: source, versions: [metadata])
+        let download = Self.versionDownload(
+            id: metadata.id,
+            versionNumber: 1,
+            appId: app.id,
+            sourceCode: source,
+            sourceSha256: metadata.sourceSha256
+        )
+        var client = IronsmithStoreClient.unconfigured
+        client.fetchVersion = { _, _, _ in download }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient.live(toolsDirectoryURL: root),
+            buildClient: ToolBuildClient(buildTool: { _ in throw TestFailure.build })
+        )
+
+        await store.installVersion(
+            metadata,
+            of: app,
+            tools: [],
+            modelContext: context,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {}),
+            inferenceStore: InferenceStore()
+        )
+
+        let failedTool = try #require(context.fetch(FetchDescriptor<Tool>()).first)
+        #expect(failedTool.generationState == .failed)
+        #expect(failedTool.storeVersionId == metadata.id)
+        #expect(failedTool.storeRemixedFromVersionId == metadata.id)
+        #expect(store.errorMessage != nil)
+    }
+
+    @Test
+    func storePermissionPresentationUsesFriendlyLabelsAndSupportsEmptyState() {
+        let source = Self.sourceCode("permissions")
+        let permissionVersion = Self.versionMetadata(
+            versionNumber: 1,
+            sourceCode: source,
+            settings: ToolGenerationSettings(
+                sandboxEnabled: true,
+                sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+                resourcePermissions: GeneratedAppResourcePermissions([.microphone])
+            )
+        )
+        let items = StorePermissionPresentation.items(for: permissionVersion)
+
+        #expect(items.map(\.title) == ["Internet", "Microphone"])
+        #expect(
+            items.map(\.explanation) == [
+                "Access to network connections",
+                "Access to audio input",
+            ]
+        )
+
+        let emptyVersion = Self.versionMetadata(
+            versionNumber: 1,
+            sourceCode: source,
+            settings: ToolGenerationSettings(
+                sandboxEnabled: false,
+                sandboxPermissions: .none,
+                resourcePermissions: .none
+            )
+        )
+        #expect(StorePermissionPresentation.items(for: emptyVersion).isEmpty)
+        #expect(StoreVersionPresentation.permissionsSummary(emptyVersion) == "None")
+    }
+
+    @Test
+    func storeVersionPresentationOrdersNewestFirstAndDesignatesCurrentVersion() {
+        let first = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000201",
+            versionNumber: 1,
+            sourceCode: Self.sourceCode("one"),
+            publishedAt: "2026-06-27T00:00:00.000Z"
+        )
+        let second = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000202",
+            versionNumber: 2,
+            sourceCode: Self.sourceCode("two"),
+            publishedAt: "2026-06-28T00:00:00.000Z"
+        )
+        let app = Self.appListing(sourceCode: Self.sourceCode("two"), versions: [first, second])
+
+        #expect(StoreVersionPresentation.newestFirst(app.versions).map(\.versionNumber) == [2, 1])
+        #expect(StoreVersionPresentation.isCurrent(second, in: app))
+        #expect(!StoreVersionPresentation.isCurrent(first, in: app))
+        #expect(StoreVersionPresentation.formattedDate(second.publishedAt).contains("2026"))
+    }
+
     private static func sourceCode(_ text: String) -> String {
         """
         import SwiftUI
@@ -228,7 +871,28 @@ struct StoreImportTests {
         """
     }
 
-    private static func appListing(sourceCode: String) -> StoreAppDetail {
+    private static func appSummary(id: String) -> StoreAppSummary {
+        StoreAppSummary(
+            id: id,
+            storeId: "00000000-0000-4000-8000-000000000011",
+            authorDisplayName: "Jade",
+            name: id,
+            shortDescription: "A Store app",
+            category: .utilities,
+            status: .published,
+            latestVersionNumber: 1,
+            publishedAt: "2026-06-27T00:00:00.000Z",
+            updatedAt: "2026-06-27T00:00:00.000Z",
+            icon: nil
+        )
+    }
+
+    private static func appListing(
+        sourceCode: String,
+        versions suppliedVersions: [StoreVersionMetadata]? = nil,
+        icon: StoreAsset? = nil,
+        iconMaster: StoreAsset? = nil
+    ) -> StoreAppDetail {
         let storeId = "00000000-0000-4000-8000-000000000011"
         let appId = "00000000-0000-4000-8000-000000000101"
         let version = StoreVersionMetadata(
@@ -243,6 +907,8 @@ struct StoreImportTests {
             remixedFromVersionId: nil,
             publishedAt: "2026-06-27T00:00:00.000Z"
         )
+        let versions = suppliedVersions ?? [version]
+        let currentVersion = versions.max { $0.versionNumber < $1.versionNumber } ?? version
         return StoreAppDetail(
             id: appId,
             storeId: storeId,
@@ -256,25 +922,70 @@ struct StoreImportTests {
             publishedAt: "2026-06-27T00:00:00.000Z",
             createdAt: "2026-06-27T00:00:00.000Z",
             updatedAt: "2026-06-27T00:00:00.000Z",
-            icon: nil,
+            icon: icon,
+            iconMaster: iconMaster,
             screenshots: [],
-            currentVersion: version,
-            recentVersions: [version],
+            currentVersion: currentVersion,
+            versions: versions,
             remix: nil
         )
     }
 
+    private static func versionMetadata(
+        id: String = "00000000-0000-4000-8000-000000000201",
+        versionNumber: Int,
+        sourceCode: String,
+        settings: ToolGenerationSettings = .default,
+        publishedAt: String = "2026-06-27T00:00:00.000Z"
+    ) -> StoreVersionMetadata {
+        StoreVersionMetadata(
+            id: id,
+            appId: "00000000-0000-4000-8000-000000000101",
+            versionNumber: versionNumber,
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: sourceCode),
+            generationSettings: StoreGenerationSettingsDTO(settings: settings),
+            runtimeVersion: "ironsmith-macos-v1",
+            license: "MIT",
+            scannerVersion: "swift-execution-blocklist-v1",
+            remixedFromVersionId: nil,
+            publishedAt: publishedAt
+        )
+    }
+
+    private static func transparentIconImage() throws -> CGImage {
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        guard
+            let context = CGContext(
+                data: nil,
+                width: 1024,
+                height: 1024,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else {
+            throw ToolImageAssetEncodingError.couldNotCreateImage
+        }
+        context.clear(CGRect(x: 0, y: 0, width: 1024, height: 1024))
+        context.setFillColor(CGColor(red: 0.8, green: 0.2, blue: 0.1, alpha: 1))
+        context.fillEllipse(in: CGRect(x: 128, y: 128, width: 768, height: 768))
+        return try #require(context.makeImage())
+    }
+
     private static func versionDownload(
+        id: String = "00000000-0000-4000-8000-000000000201",
+        versionNumber: Int = 1,
         appId: String = "00000000-0000-4000-8000-000000000101",
         sourceCode: String,
         sourceSha256: String
     ) -> StoreVersionDownload {
         StoreVersionDownload(
-            id: "00000000-0000-4000-8000-000000000201",
+            id: id,
             storeId: "00000000-0000-4000-8000-000000000011",
             storeVisibility: "public",
             appId: appId,
-            versionNumber: 1,
+            versionNumber: versionNumber,
             sourceSha256: sourceSha256,
             generationSettings: StoreGenerationSettingsDTO(settings: .default),
             runtimeVersion: "ironsmith-macos-v1",
@@ -286,11 +997,70 @@ struct StoreImportTests {
         )
     }
 
+    private enum TestFailure: Error {
+        case build
+    }
+
     private static func makeTemporaryDirectory() throws -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "ironsmith-store-import-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
+    }
+}
+
+private actor StoreListRequestRecorder {
+    struct Request: Sendable {
+        let scope: StoreAppListScope
+        let search: String?
+        let offset: Int
+        let sort: StoreAppListSort
+        let category: StoreAppCategory?
+    }
+
+    private(set) var requests: [Request] = []
+
+    func record(
+        scope: StoreAppListScope,
+        search: String?,
+        offset: Int,
+        sort: StoreAppListSort,
+        category: StoreAppCategory?
+    ) {
+        requests.append(
+            Request(
+                scope: scope,
+                search: search,
+                offset: offset,
+                sort: sort,
+                category: category
+            )
+        )
+    }
+}
+
+private actor StorePageGate {
+    private var pageContinuation: CheckedContinuation<StoreAppPage, Never>?
+    private var requestContinuation: CheckedContinuation<Void, Never>?
+
+    func waitForPage() async -> StoreAppPage {
+        await withCheckedContinuation { continuation in
+            pageContinuation = continuation
+            requestContinuation?.resume()
+            requestContinuation = nil
+        }
+    }
+
+    func waitUntilRequested() async {
+        guard pageContinuation == nil else { return }
+        await withCheckedContinuation { continuation in
+            requestContinuation = continuation
+        }
+    }
+
+    func resume(with page: StoreAppPage) {
+        pageContinuation?.resume(returning: page)
+        pageContinuation = nil
     }
 }

@@ -204,7 +204,7 @@ private struct AgentOutputToolIconView: View {
 
     private var loadKey: AgentOutputToolIconLoadKey {
         AgentOutputToolIconLoadKey(
-            path: tool.packageLayout.cachedAppIconPNGURL.path,
+            path: tool.packageLayout.cachedAppIconPreviewURL.path,
             updatedAt: tool.updatedAt
         )
     }

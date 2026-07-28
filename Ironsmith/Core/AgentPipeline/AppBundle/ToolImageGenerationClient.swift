@@ -50,13 +50,18 @@ nonisolated struct ToolImageGenerationClient: Sendable {
 
     @MainActor
     static func live() -> Self {
+        live(imagePlayground: .shared)
+    }
+
+    @MainActor
+    static func live(imagePlayground: ImagePlaygroundSheetCoordinator) -> Self {
         make(
             httpClient: .live,
             credentialClient: .live,
             codexAuthClient: .live(),
             accountClient: .live,
             backendConfiguration: .live,
-            imagePlayground: .shared
+            imagePlayground: imagePlayground
         )
     }
 

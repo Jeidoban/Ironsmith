@@ -234,7 +234,7 @@ struct ToolLibraryPopoverView: View {
             Text(inferenceStore.presentedErrorMessage ?? "")
         }
         .alert(
-            "App Store",
+            "Ironsmith Store",
             isPresented: storeErrorPresentedBinding
         ) {
             Button("OK", role: .cancel) {}

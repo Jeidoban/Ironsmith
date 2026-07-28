@@ -4,26 +4,41 @@ import SwiftUI
 
 @MainActor
 final class IronsmithStoreWindowController: NSWindowController {
+    private static let initialContentSize = NSSize(width: 1000, height: 660)
+    private static let minimumContentSize = NSSize(width: 600, height: 400)
+
     private var hasCenteredWindow = false
-    private let modelContainer: ModelContainer
-    private let inferenceStore: InferenceStore
-    private let routeStore: IronsmithRouteStore
 
     init(
         modelContainer: ModelContainer,
         inferenceStore: InferenceStore,
         routeStore: IronsmithRouteStore
     ) {
-        self.modelContainer = modelContainer
-        self.inferenceStore = inferenceStore
-        self.routeStore = routeStore
-
+        let hostingController = NSHostingController(
+            rootView: AnyView(
+                StoreWindowView()
+                    .modelContainer(modelContainer)
+                    .environment(inferenceStore)
+                    .environment(routeStore)
+            )
+        )
+        hostingController.sceneBridgingOptions = [.toolbars]
         let window = NSWindow()
-        window.title = "App Store"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.title = "Ironsmith Store"
+        window.styleMask = [
+            .titled,
+            .closable,
+            .miniaturizable,
+            .resizable,
+            .fullSizeContentView,
+        ]
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 980, height: 680)
-        window.setContentSize(NSSize(width: 1200, height: 800))
+        window.contentViewController = hostingController
+        window.minSize = Self.minimumContentSize
+        window.setContentSize(Self.initialContentSize)
 
         super.init(window: window)
     }
@@ -35,17 +50,6 @@ final class IronsmithStoreWindowController: NSWindowController {
 
     func show() {
         guard let window else { return }
-        if window.contentViewController == nil {
-            window.contentViewController = NSHostingController(
-                rootView: AnyView(
-                    StoreWindowView()
-                        .modelContainer(modelContainer)
-                        .environment(inferenceStore)
-                        .environment(routeStore)
-                )
-            )
-        }
-
         if !hasCenteredWindow {
             window.center()
             hasCenteredWindow = true

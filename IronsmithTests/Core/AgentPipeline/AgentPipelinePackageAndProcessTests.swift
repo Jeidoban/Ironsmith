@@ -4,6 +4,7 @@ import Foundation
 import ImageIO
 import SwiftData
 import Testing
+
 @testable import Ironsmith
 
 extension AgentPipelineTests {
@@ -44,14 +45,14 @@ extension AgentPipelineTests {
         )
         let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: executableName)
         let source = """
-        import SwiftUI
+            import SwiftUI
 
-        struct ContentView: View {
-            var body: some View {
-                Text("materialized")
+            struct ContentView: View {
+                var body: some View {
+                    Text("materialized")
+                }
             }
-        }
-        """
+            """
         let settings = ToolGenerationSettings(appKind: .menuBar, menuBarSystemImage: "hammer")
 
         try materializer.materializePackage(
@@ -116,20 +117,23 @@ extension AgentPipelineTests {
 
         #expect(!FileManager.default.fileExists(atPath: placeholderRoot.path))
         #expect(FileManager.default.fileExists(atPath: finalLayout.packageManifestURL.path))
-        #expect(FileManager.default.fileExists(
-            atPath: finalLayout.currentRunAttachmentsDirectoryURL
-                .appendingPathComponent("1-reference.txt").path
-        ))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: finalLayout.currentRunAttachmentsDirectoryURL
+                    .appendingPathComponent("1-reference.txt").path
+            ))
 
         try materializer.restorePlaceholderPackage(from: finalLayout, to: placeholderRoot)
         #expect(!FileManager.default.fileExists(atPath: finalRoot.path))
-        #expect(!FileManager.default.fileExists(
-            atPath: placeholderRoot.appendingPathComponent("Package.swift").path
-        ))
-        #expect(FileManager.default.fileExists(
-            atPath: placeholderLayout.currentRunAttachmentsDirectoryURL
-                .appendingPathComponent("1-reference.txt").path
-        ))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: placeholderRoot.appendingPathComponent("Package.swift").path
+            ))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: placeholderLayout.currentRunAttachmentsDirectoryURL
+                    .appendingPathComponent("1-reference.txt").path
+            ))
     }
 
     @MainActor
@@ -189,7 +193,8 @@ extension AgentPipelineTests {
         let packageRoot = root.appendingPathComponent("VersionedTool", isDirectory: true)
         let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "VersionedTool")
         let contentViewURL = try layout.packageFileURL(for: layout.contentViewSourcePath)
-        try FileManager.default.createDirectory(at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try #"Text("current")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
 
         let settings = ToolGenerationSettings(
@@ -224,12 +229,17 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let packageRoot = root.appendingPathComponent("LegacyVersionedTool", isDirectory: true)
-        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "LegacyVersionedTool")
+        let layout = ToolPackageLayout(
+            packageRootURL: packageRoot, executableName: "LegacyVersionedTool")
         let contentViewURL = try layout.packageFileURL(for: layout.contentViewSourcePath)
-        try FileManager.default.createDirectory(at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: layout.previousContentViewVersionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: contentViewURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: layout.previousContentViewVersionURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
         try #"Text("current")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
-        try #"Text("previous")"#.write(to: layout.previousContentViewVersionURL, atomically: true, encoding: .utf8)
+        try #"Text("previous")"#.write(
+            to: layout.previousContentViewVersionURL, atomically: true, encoding: .utf8)
         try """
         {
           "appKindRawValue": "menu_bar",
@@ -305,7 +315,8 @@ extension AgentPipelineTests {
         let languageModelContext = AgentLanguageModelContext(
             languageModel: EmptyLanguageModel(),
             generationOptions: GenerationOptions(),
-            pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1))
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1))
         )
         let dependencies = ToolGenerationRuntimeDependencies(
             toolsDirectoryURL: root,
@@ -322,7 +333,9 @@ extension AgentPipelineTests {
             for: "Sources/Demo/main.swift",
             packageRootURL: root
         )
-        #expect(resolved.path == root.appendingPathComponent("Sources/Demo/main.swift").standardizedFileURL.path)
+        #expect(
+            resolved.path
+                == root.appendingPathComponent("Sources/Demo/main.swift").standardizedFileURL.path)
 
         #expect(throws: AgentFileError.self) {
             try context.packageFileURL(for: "../outside.swift", packageRootURL: root)
@@ -333,34 +346,37 @@ extension AgentPipelineTests {
     func processHelpersFindCompilerFilesAndTrimOutput() {
         let root = URL(fileURLWithPath: "/tmp/GeneratedTool", isDirectory: true)
         let output = """
-        /tmp/GeneratedTool/Sources/GeneratedTool/main.swift:4:12: error: cannot find 'x' in scope
-        lots of detail
-        """
+            /tmp/GeneratedTool/Sources/GeneratedTool/main.swift:4:12: error: cannot find 'x' in scope
+            lots of detail
+            """
 
         #expect(
             SwiftPackageProcessClient.firstActionableSwiftFile(in: output, packageRootURL: root)
-            == "Sources/GeneratedTool/main.swift"
+                == "Sources/GeneratedTool/main.swift"
         )
-        #expect(SwiftPackageProcessClient.compilerExcerpt(from: String(repeating: "a", count: 20), limit: 8) == "aaaaaaaa")
+        #expect(
+            SwiftPackageProcessClient.compilerExcerpt(
+                from: String(repeating: "a", count: 20), limit: 8)
+                == "aaaaaaaa")
     }
 
     @Test
     func processHelpersFilterDiagnosticsToOneFile() {
         let root = URL(fileURLWithPath: "/tmp/GeneratedTool", isDirectory: true)
         let output = """
-        [4/9] Compiling GeneratedTool main.swift
-        /tmp/GeneratedTool/Sources/GeneratedTool/ContentView.swift:16:27: error: extra argument 'onDecrement' in call
-        14 | Stepper(...)
-        15 | ...
-        16 | ...
+            [4/9] Compiling GeneratedTool main.swift
+            /tmp/GeneratedTool/Sources/GeneratedTool/ContentView.swift:16:27: error: extra argument 'onDecrement' in call
+            14 | Stepper(...)
+            15 | ...
+            16 | ...
 
-        /tmp/GeneratedTool/Sources/GeneratedTool/OtherView.swift:8:10: error: cannot find 'x' in scope
-        6 | ...
-        7 | ...
-        8 | ...
+            /tmp/GeneratedTool/Sources/GeneratedTool/OtherView.swift:8:10: error: cannot find 'x' in scope
+            6 | ...
+            7 | ...
+            8 | ...
 
-        [5/9] Emitting module GeneratedTool
-        """
+            [5/9] Emitting module GeneratedTool
+            """
 
         let diagnostics = SwiftPackageProcessClient.diagnostics(
             for: "Sources/GeneratedTool/ContentView.swift",
@@ -375,7 +391,8 @@ extension AgentPipelineTests {
 
     @Test
     func adHocGeneratedAppSigningUsesHardenedRuntime() {
-        let appURL = URL(fileURLWithPath: "/tmp/GeneratedTool/Generated Tool.app", isDirectory: true)
+        let appURL = URL(
+            fileURLWithPath: "/tmp/GeneratedTool/Generated Tool.app", isDirectory: true)
         let entitlementsURL = URL(fileURLWithPath: "/tmp/GeneratedTool/sandbox.entitlements")
 
         #expect(
@@ -415,23 +432,30 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let packageRoot = root.appendingPathComponent("SandboxedTool", isDirectory: true)
-        let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
-        let cachedIconURL = packageRoot
+        let releaseBinDirectory = packageRoot.appendingPathComponent(
+            ".build/release", isDirectory: true)
+        let cachedIconURL =
+            packageRoot
             .appendingPathComponent(".ironsmith", isDirectory: true)
             .appendingPathComponent("AppIcon.icns")
-        try FileManager.default.createDirectory(at: cachedIconURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: cachedIconURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("icon".utf8).write(to: cachedIconURL)
 
         let capture = BundleProcessCapture()
         let processClient = SwiftPackageProcessClient(
             build: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             buildRelease: { packageRoot in
                 await capture.recordReleaseBuild(packageRoot)
-                try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
-                try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent("SandboxedTool"))
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                try FileManager.default.createDirectory(
+                    at: releaseBinDirectory, withIntermediateDirectories: true)
+                try Data("binary".utf8).write(
+                    to: releaseBinDirectory.appendingPathComponent("SandboxedTool"))
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             showBinPath: { _ in releaseBinDirectory },
             showReleaseBinPath: { _ in releaseBinDirectory },
@@ -442,11 +466,13 @@ extension AgentPipelineTests {
             },
             signAdHoc: { appURL, entitlementsURL in
                 await capture.recordSign(appURL: appURL, entitlementsURL: entitlementsURL)
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             verifyCodeSignature: { appURL in
                 await capture.recordVerify(appURL)
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
         let client = ToolAppBundleClient.live(
@@ -459,13 +485,15 @@ extension AgentPipelineTests {
             bundleIdentifier: "com.ironsmith.tests.sandboxed-tool",
             packageRootURL: packageRoot,
             settings: ToolGenerationSettings(
-                resourcePermissions: GeneratedAppResourcePermissions(GeneratedAppResourcePermission.allCases)
+                resourcePermissions: GeneratedAppResourcePermissions(
+                    GeneratedAppResourcePermission.allCases)
             )
         )
 
         let appURL = try await client.buildInternalApp(request)
 
-        let plist = try Self.plistDictionary(at: appURL.appendingPathComponent("Contents/Info.plist"))
+        let plist = try Self.plistDictionary(
+            at: appURL.appendingPathComponent("Contents/Info.plist"))
         let entitlements = try Self.plistDictionary(at: request.layout.sandboxEntitlementsURL)
         #expect(appURL == request.internalAppBundleURL)
         #expect(appURL.lastPathComponent == "Sandboxed Tool.app")
@@ -496,21 +524,23 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let packageRoot = root.appendingPathComponent("ExistingWindowTool", isDirectory: true)
-        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "ExistingWindowTool")
+        let layout = ToolPackageLayout(
+            packageRootURL: packageRoot, executableName: "ExistingWindowTool")
         let appEntryURL = packageRoot.appendingPathComponent(layout.appEntrySourcePath)
-        let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
+        let releaseBinDirectory = packageRoot.appendingPathComponent(
+            ".build/release", isDirectory: true)
         let originalAppEntrySource = """
-        import SwiftUI
+            import SwiftUI
 
-        @main
-        struct ExistingWindowTool: App {
-            var body: some Scene {
-                WindowGroup {
-                    ContentView()
+            @main
+            struct ExistingWindowTool: App {
+                var body: some Scene {
+                    WindowGroup {
+                        ContentView()
+                    }
                 }
             }
-        }
-        """
+            """
         try FileManager.default.createDirectory(
             at: appEntryURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -519,12 +549,16 @@ extension AgentPipelineTests {
 
         let processClient = SwiftPackageProcessClient(
             build: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             buildRelease: { _ in
-                try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
-                try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent("ExistingWindowTool"))
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                try FileManager.default.createDirectory(
+                    at: releaseBinDirectory, withIntermediateDirectories: true)
+                try Data("binary".utf8).write(
+                    to: releaseBinDirectory.appendingPathComponent("ExistingWindowTool"))
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             showBinPath: { _ in releaseBinDirectory },
             showReleaseBinPath: { _ in releaseBinDirectory },
@@ -532,10 +566,12 @@ extension AgentPipelineTests {
             launchApp: { _ in },
             stripQuarantine: { _ in },
             signAdHoc: { _, _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             verifyCodeSignature: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
         let client = ToolAppBundleClient.live(
@@ -556,7 +592,8 @@ extension AgentPipelineTests {
 
         let currentAppEntrySource = try String(contentsOf: appEntryURL, encoding: .utf8)
         #expect(currentAppEntrySource != originalAppEntrySource)
-        #expect(currentAppEntrySource.contains("MenuBarExtra(\"Existing Window Tool\", systemImage:"))
+        #expect(
+            currentAppEntrySource.contains("MenuBarExtra(\"Existing Window Tool\", systemImage:"))
         #expect(!(currentAppEntrySource.contains("WindowGroup")))
     }
 
@@ -571,15 +608,20 @@ extension AgentPipelineTests {
             sandboxPermissions: GeneratedAppSandboxPermissions
         ) async throws -> [String: Any] {
             let packageRoot = root.appendingPathComponent(executableName, isDirectory: true)
-            let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
+            let releaseBinDirectory = packageRoot.appendingPathComponent(
+                ".build/release", isDirectory: true)
             let processClient = SwiftPackageProcessClient(
                 build: { _ in
-                    SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                    SwiftPackageBuildResult(
+                        succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
                 },
                 buildRelease: { _ in
-                    try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
-                    try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent(executableName))
-                    return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                    try FileManager.default.createDirectory(
+                        at: releaseBinDirectory, withIntermediateDirectories: true)
+                    try Data("binary".utf8).write(
+                        to: releaseBinDirectory.appendingPathComponent(executableName))
+                    return SwiftPackageBuildResult(
+                        succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
                 },
                 showBinPath: { _ in releaseBinDirectory },
                 showReleaseBinPath: { _ in releaseBinDirectory },
@@ -587,10 +629,12 @@ extension AgentPipelineTests {
                 launchApp: { _ in },
                 stripQuarantine: { _ in },
                 signAdHoc: { _, _ in
-                    SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                    SwiftPackageBuildResult(
+                        succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
                 },
                 verifyCodeSignature: { _ in
-                    SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                    SwiftPackageBuildResult(
+                        succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
                 }
             )
             let request = ToolAppBundleRequest(
@@ -617,7 +661,8 @@ extension AgentPipelineTests {
         )
         #expect(withoutInternet["com.apple.security.app-sandbox"] as? Bool == true)
         #expect(withoutInternet["com.apple.security.network.client"] == nil)
-        #expect(withoutInternet["com.apple.security.files.user-selected.read-write"] as? Bool == true)
+        #expect(
+            withoutInternet["com.apple.security.files.user-selected.read-write"] as? Bool == true)
 
         let withoutUserSelectedFiles = try await buildEntitlements(
             executableName: "NoFilesTool",
@@ -625,7 +670,8 @@ extension AgentPipelineTests {
         )
         #expect(withoutUserSelectedFiles["com.apple.security.app-sandbox"] as? Bool == true)
         #expect(withoutUserSelectedFiles["com.apple.security.network.client"] as? Bool == true)
-        #expect(withoutUserSelectedFiles["com.apple.security.files.user-selected.read-write"] == nil)
+        #expect(
+            withoutUserSelectedFiles["com.apple.security.files.user-selected.read-write"] == nil)
     }
 
     @MainActor
@@ -681,7 +727,8 @@ extension AgentPipelineTests {
                 .appendingPathComponent("Info.plist")
         )
 
-        let storedRequest = ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(storedTool)
+        let storedRequest = ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(
+            storedTool)
 
         #expect(storedRequest.sandboxPermissions.enabled == [.userSelectedFiles])
         #expect(storedRequest.resourcePermissions.enabled == [.camera])
@@ -695,7 +742,10 @@ extension AgentPipelineTests {
             packageRootPath: legacyPackageRoot.path
         )
 
-        #expect(ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(legacyTool).sandboxPermissions == .default)
+        #expect(
+            ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(legacyTool)
+                .sandboxPermissions
+                == .default)
 
         let unsandboxedTool = StoredTool(
             name: "Unsandboxed",
@@ -705,7 +755,9 @@ extension AgentPipelineTests {
             packageRootPath: root.appendingPathComponent("UnsandboxedTool", isDirectory: true).path
         )
 
-        #expect(ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(unsandboxedTool).sandboxPermissions == .none)
+        #expect(
+            ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(unsandboxedTool)
+                .sandboxPermissions == .none)
     }
 
     @MainActor
@@ -715,23 +767,30 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let packageRoot = root.appendingPathComponent("ExportedTool", isDirectory: true)
-        let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
+        let releaseBinDirectory = packageRoot.appendingPathComponent(
+            ".build/release", isDirectory: true)
         let applicationsDirectory = root.appendingPathComponent("Applications", isDirectory: true)
-        let cachedIconURL = packageRoot
+        let cachedIconURL =
+            packageRoot
             .appendingPathComponent(".ironsmith", isDirectory: true)
             .appendingPathComponent("AppIcon.icns")
-        try FileManager.default.createDirectory(at: cachedIconURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: cachedIconURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("icon".utf8).write(to: cachedIconURL)
 
         let capture = BundleProcessCapture()
         let processClient = SwiftPackageProcessClient(
             build: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             buildRelease: { _ in
-                try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
-                try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent("ExportedTool"))
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                try FileManager.default.createDirectory(
+                    at: releaseBinDirectory, withIntermediateDirectories: true)
+                try Data("binary".utf8).write(
+                    to: releaseBinDirectory.appendingPathComponent("ExportedTool"))
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             showBinPath: { _ in releaseBinDirectory },
             showReleaseBinPath: { _ in releaseBinDirectory },
@@ -740,10 +799,12 @@ extension AgentPipelineTests {
             stripQuarantine: { _ in },
             signAdHoc: { appURL, entitlementsURL in
                 await capture.recordSign(appURL: appURL, entitlementsURL: entitlementsURL)
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             verifyCodeSignature: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
         let client = ToolAppBundleClient.live(
@@ -757,21 +818,36 @@ extension AgentPipelineTests {
             packageRootURL: packageRoot,
             settings: ToolGenerationSettings(
                 sandboxEnabled: false,
-                resourcePermissions: GeneratedAppResourcePermissions([.contacts, .photoLibrary, .appleEvents])
+                resourcePermissions: GeneratedAppResourcePermissions([
+                    .contacts, .photoLibrary, .appleEvents,
+                ])
             )
         )
 
         let appURL = try await client.exportApp(request, applicationsDirectory)
 
-        let plist = try Self.plistDictionary(at: appURL.appendingPathComponent("Contents/Info.plist"))
-        #expect(appURL == applicationsDirectory.appendingPathComponent("Exported Tool.app", isDirectory: true))
+        let plist = try Self.plistDictionary(
+            at: appURL.appendingPathComponent("Contents/Info.plist"))
+        #expect(
+            appURL
+                == applicationsDirectory.appendingPathComponent(
+                    "Exported Tool.app", isDirectory: true)
+        )
         #expect(plist["CFBundleIdentifier"] as? String == request.bundleIdentifier)
         #expect(plist["LSUIElement"] == nil)
         #expect(plist["IronsmithQuitOnLastWindowClose"] == nil)
-        #expect(plist["NSContactsUsageDescription"] as? String == GeneratedAppResourcePermission.contacts.usageDescription)
-        #expect(plist["NSPhotoLibraryUsageDescription"] as? String == GeneratedAppResourcePermission.photoLibrary.usageDescription)
-        #expect(plist["NSPhotoLibraryAddUsageDescription"] as? String == GeneratedAppResourcePermission.photoLibrary.usageDescription)
-        #expect(plist["NSAppleEventsUsageDescription"] as? String == GeneratedAppResourcePermission.appleEvents.usageDescription)
+        #expect(
+            plist["NSContactsUsageDescription"] as? String
+                == GeneratedAppResourcePermission.contacts.usageDescription)
+        #expect(
+            plist["NSPhotoLibraryUsageDescription"] as? String
+                == GeneratedAppResourcePermission.photoLibrary.usageDescription)
+        #expect(
+            plist["NSPhotoLibraryAddUsageDescription"] as? String
+                == GeneratedAppResourcePermission.photoLibrary.usageDescription)
+        #expect(
+            plist["NSAppleEventsUsageDescription"] as? String
+                == GeneratedAppResourcePermission.appleEvents.usageDescription)
         let recordedSignedAppURL = await capture.signedAppURL
         let signedAppURL = try #require(recordedSignedAppURL)
         #expect(signedAppURL != appURL)
@@ -786,16 +862,21 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let packageRoot = root.appendingPathComponent("MenuBarTool", isDirectory: true)
-        let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
+        let releaseBinDirectory = packageRoot.appendingPathComponent(
+            ".build/release", isDirectory: true)
         let applicationsDirectory = root.appendingPathComponent("Applications", isDirectory: true)
         let processClient = SwiftPackageProcessClient(
             build: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             buildRelease: { _ in
-                try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
-                try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent("MenuBarTool"))
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                try FileManager.default.createDirectory(
+                    at: releaseBinDirectory, withIntermediateDirectories: true)
+                try Data("binary".utf8).write(
+                    to: releaseBinDirectory.appendingPathComponent("MenuBarTool"))
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             showBinPath: { _ in releaseBinDirectory },
             showReleaseBinPath: { _ in releaseBinDirectory },
@@ -803,10 +884,12 @@ extension AgentPipelineTests {
             launchApp: { _ in },
             stripQuarantine: { _ in },
             signAdHoc: { _, _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             verifyCodeSignature: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
         let client = ToolAppBundleClient.live(
@@ -825,7 +908,8 @@ extension AgentPipelineTests {
 
         let appURL = try await client.exportApp(request, applicationsDirectory)
 
-        let plist = try Self.plistDictionary(at: appURL.appendingPathComponent("Contents/Info.plist"))
+        let plist = try Self.plistDictionary(
+            at: appURL.appendingPathComponent("Contents/Info.plist"))
         #expect(plist["LSUIElement"] as? Bool == true)
         #expect(plist["IronsmithQuitOnLastWindowClose"] == nil)
     }
@@ -837,9 +921,12 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let packageRoot = root.appendingPathComponent("RestoredTool", isDirectory: true)
-        let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
-        let existingAppURL = packageRoot.appendingPathComponent("Restored Tool.app", isDirectory: true)
-        let existingMarkerURL = existingAppURL
+        let releaseBinDirectory = packageRoot.appendingPathComponent(
+            ".build/release", isDirectory: true)
+        let existingAppURL = packageRoot.appendingPathComponent(
+            "Restored Tool.app", isDirectory: true)
+        let existingMarkerURL =
+            existingAppURL
             .appendingPathComponent("Contents", isDirectory: true)
             .appendingPathComponent("Resources", isDirectory: true)
             .appendingPathComponent("old-marker.txt")
@@ -851,12 +938,16 @@ extension AgentPipelineTests {
 
         let processClient = SwiftPackageProcessClient(
             build: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             buildRelease: { _ in
-                try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
-                try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent("RestoredTool"))
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                try FileManager.default.createDirectory(
+                    at: releaseBinDirectory, withIntermediateDirectories: true)
+                try Data("binary".utf8).write(
+                    to: releaseBinDirectory.appendingPathComponent("RestoredTool"))
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             showBinPath: { _ in releaseBinDirectory },
             showReleaseBinPath: { _ in releaseBinDirectory },
@@ -864,7 +955,8 @@ extension AgentPipelineTests {
             launchApp: { _ in },
             stripQuarantine: { _ in },
             signAdHoc: { _, _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             verifyCodeSignature: { appURL in
                 if appURL == existingAppURL {
@@ -875,7 +967,8 @@ extension AgentPipelineTests {
                         terminationStatus: 1
                     )
                 }
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
         let client = ToolAppBundleClient.live(
@@ -903,7 +996,9 @@ extension AgentPipelineTests {
         }
 
         #expect(try String(contentsOf: existingMarkerURL, encoding: .utf8) == "previous bundle")
-        #expect(!(FileManager.default.fileExists(atPath: existingAppURL.appendingPathComponent("Contents/MacOS/RestoredTool").path)))
+        #expect(
+            !(FileManager.default.fileExists(
+                atPath: existingAppURL.appendingPathComponent("Contents/MacOS/RestoredTool").path)))
     }
 
     @MainActor
@@ -913,17 +1008,22 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let packageRoot = root.appendingPathComponent("NoIconTool", isDirectory: true)
-        let releaseBinDirectory = packageRoot.appendingPathComponent(".build/release", isDirectory: true)
+        let releaseBinDirectory = packageRoot.appendingPathComponent(
+            ".build/release", isDirectory: true)
 
         let capture = BundleProcessCapture()
         let processClient = SwiftPackageProcessClient(
             build: { _ in
-                SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             buildRelease: { _ in
-                try FileManager.default.createDirectory(at: releaseBinDirectory, withIntermediateDirectories: true)
-                try Data("binary".utf8).write(to: releaseBinDirectory.appendingPathComponent("NoIconTool"))
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                try FileManager.default.createDirectory(
+                    at: releaseBinDirectory, withIntermediateDirectories: true)
+                try Data("binary".utf8).write(
+                    to: releaseBinDirectory.appendingPathComponent("NoIconTool"))
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             showBinPath: { _ in releaseBinDirectory },
             showReleaseBinPath: { _ in releaseBinDirectory },
@@ -932,11 +1032,13 @@ extension AgentPipelineTests {
             stripQuarantine: { _ in },
             signAdHoc: { appURL, entitlementsURL in
                 await capture.recordSign(appURL: appURL, entitlementsURL: entitlementsURL)
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             },
             verifyCodeSignature: { appURL in
                 await capture.recordVerify(appURL)
-                return SwiftPackageBuildResult(succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
+                return SwiftPackageBuildResult(
+                    succeeded: true, stdout: "", stderr: "", terminationStatus: 0)
             }
         )
         let client = ToolAppBundleClient.live(
@@ -955,10 +1057,15 @@ extension AgentPipelineTests {
 
         let appURL = try await client.buildInternalApp(request)
 
-        let plist = try Self.plistDictionary(at: appURL.appendingPathComponent("Contents/Info.plist"))
+        let plist = try Self.plistDictionary(
+            at: appURL.appendingPathComponent("Contents/Info.plist"))
         let entitlements = try Self.plistDictionary(at: request.layout.sandboxEntitlementsURL)
-        #expect(FileManager.default.fileExists(atPath: appURL.appendingPathComponent("Contents/MacOS/NoIconTool").path))
-        #expect(FileManager.default.fileExists(atPath: appURL.appendingPathComponent("Contents/Resources").path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: appURL.appendingPathComponent("Contents/MacOS/NoIconTool").path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: appURL.appendingPathComponent("Contents/Resources").path))
         #expect(plist["CFBundleIdentifier"] as? String == request.bundleIdentifier)
         #expect(plist["CFBundleIconFile"] == nil)
         #expect(plist["LSUIElement"] as? Bool == true)
@@ -985,7 +1092,8 @@ extension AgentPipelineTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let packageRoot = root.appendingPathComponent("FallbackIconTool", isDirectory: true)
-        let layout = ToolPackageLayout(packageRootURL: packageRoot, executableName: "FallbackIconTool")
+        let layout = ToolPackageLayout(
+            packageRootURL: packageRoot, executableName: "FallbackIconTool")
         let iconPrompt = "Silver hammer"
         let client = ToolIconClient.live(
             imageGenerator: { _ in
@@ -1002,14 +1110,21 @@ extension AgentPipelineTests {
         )
 
         let icnsData = try Data(contentsOf: layout.cachedAppIconICNSURL)
-        let pngData = try Data(contentsOf: layout.cachedAppIconPNGURL)
+        let masterData = try Data(contentsOf: layout.cachedAppIconMasterJPEGURL)
+        let thumbnailData = try Data(contentsOf: layout.cachedAppIconThumbnailJPEGURL)
         #expect(iconURL == layout.cachedAppIconICNSURL)
         #expect(!(icnsData.isEmpty))
-        #expect(!(pngData.isEmpty))
-        let pngSize = try Self.imagePixelSize(at: layout.cachedAppIconPNGURL)
-        #expect(max(pngSize.width, pngSize.height) <= 256)
+        #expect(masterData.count <= ToolImageAssetEncoder.iconMasterMaximumBytes)
+        #expect(thumbnailData.count <= ToolImageAssetEncoder.iconThumbnailMaximumBytes)
+        let masterSize = try Self.imagePixelSize(at: layout.cachedAppIconMasterJPEGURL)
+        let thumbnailSize = try Self.imagePixelSize(at: layout.cachedAppIconThumbnailJPEGURL)
+        #expect(masterSize.width == 1024)
+        #expect(masterSize.height == 1024)
+        #expect(thumbnailSize.width == 256)
+        #expect(thumbnailSize.height == 256)
+        #expect(!FileManager.default.fileExists(atPath: layout.cachedAppIconPNGURL.path))
 
-        let imageRep = try #require(NSBitmapImageRep(data: pngData))
+        let imageRep = try #require(NSBitmapImageRep(data: thumbnailData))
         let corners = [
             NSPoint(x: 0, y: 0),
             NSPoint(x: imageRep.pixelsWide - 1, y: 0),
@@ -1059,9 +1174,9 @@ extension AgentPipelineTests {
             )
         )
 
-        let amberPNG = try Data(contentsOf: amberLayout.cachedAppIconPNGURL)
-        let azurePNG = try Data(contentsOf: azureLayout.cachedAppIconPNGURL)
-        #expect(amberPNG != azurePNG)
+        let amberJPEG = try Data(contentsOf: amberLayout.cachedAppIconThumbnailJPEGURL)
+        let azureJPEG = try Data(contentsOf: azureLayout.cachedAppIconThumbnailJPEGURL)
+        #expect(amberJPEG != azureJPEG)
     }
 
     @MainActor
@@ -1076,7 +1191,7 @@ extension AgentPipelineTests {
             hostedIconPaletteStore: ToolHostedIconPaletteStore(userDefaults: userDefaults)
         )
 
-        var generatedPNGs: [Data] = []
+        var generatedJPEGs: [Data] = []
         for index in 0...ToolHostedIconPaletteStore.recentPaletteLimit {
             let executableName = "RepeatedName\(index)"
             let layout = ToolPackageLayout(
@@ -1090,13 +1205,16 @@ extension AgentPipelineTests {
                     imageProvider: .disabled
                 )
             )
-            generatedPNGs.append(try Data(contentsOf: layout.cachedAppIconPNGURL))
+            generatedJPEGs.append(
+                try Data(contentsOf: layout.cachedAppIconThumbnailJPEGURL)
+            )
         }
 
-        #expect(Set(generatedPNGs.prefix(10)).count == 10)
-        #expect(Set(generatedPNGs.suffix(10)).count == 10)
+        #expect(Set(generatedJPEGs.prefix(10)).count == 10)
+        #expect(Set(generatedJPEGs.suffix(10)).count == 10)
         #expect(
-            userDefaults.array(forKey: IronsmithPreferenceKeys.recentHostedIconPaletteIndices)?.count
+            userDefaults.array(forKey: IronsmithPreferenceKeys.recentHostedIconPaletteIndices)?
+                .count
                 == ToolHostedIconPaletteStore.recentPaletteLimit
         )
     }
@@ -1105,11 +1223,11 @@ extension AgentPipelineTests {
     func processHelpersParseStructuredDiagnostics() {
         let root = URL(fileURLWithPath: "/tmp/GeneratedTool", isDirectory: true)
         let output = """
-        /tmp/GeneratedTool/Sources/GeneratedTool/ContentView.swift:16:27: error: extra argument 'onDecrement' in call
-        14 | Stepper(...)
-        15 | ...
-        16 | ...
-        """
+            /tmp/GeneratedTool/Sources/GeneratedTool/ContentView.swift:16:27: error: extra argument 'onDecrement' in call
+            14 | Stepper(...)
+            15 | ...
+            16 | ...
+            """
 
         let diagnostics = SwiftPackageProcessClient.parseDiagnostics(
             in: output,
@@ -1135,7 +1253,7 @@ extension AgentPipelineTests {
                 message: "extra argument 'onDecrement' in call",
                 supportingLines: [
                     "14 | Stepper(...)",
-                    "   | `- error: extra argument 'onDecrement' in call"
+                    "   | `- error: extra argument 'onDecrement' in call",
                 ]
             ),
             SwiftCompilerDiagnostic(
@@ -1153,12 +1271,15 @@ extension AgentPipelineTests {
                 severity: .error,
                 message: "cannot find 'payment' in scope",
                 supportingLines: []
-            )
+            ),
         ]
 
         let rendered = AgentDiagnosticsLog.renderDiagnostics(diagnostics, limit: 1)
 
-        #expect(rendered.contains("Sources/GeneratedTool/ContentView.swift:16:27: error: extra argument 'onDecrement' in call"))
+        #expect(
+            rendered.contains(
+                "Sources/GeneratedTool/ContentView.swift:16:27: error: extra argument 'onDecrement' in call"
+            ))
         #expect(!(rendered.contains("14 | Stepper")))
         #expect(rendered.contains("... 1 more diagnostics omitted"))
         #expect(rendered.contains("... 1 duplicate diagnostics omitted"))
@@ -1170,7 +1291,7 @@ extension AgentPipelineTests {
             ContentViewRepairSnippet(startLine: 1, endLine: 3, text: "Text(\"A\")\nText(\"B\")"),
             ContentViewRepairSnippet(startLine: 1, endLine: 3, text: "Text(\"A\")\nText(\"B\")"),
             ContentViewRepairSnippet(startLine: 10, endLine: 12, text: "Text(\"C\")"),
-            ContentViewRepairSnippet(startLine: 20, endLine: 22, text: "Text(\"D\")")
+            ContentViewRepairSnippet(startLine: 20, endLine: 22, text: "Text(\"D\")"),
         ]
 
         let rendered = AgentDiagnosticsLog.renderRepairSnippets(snippets, limit: 500)

@@ -62,13 +62,14 @@ final class ToolLibraryStorePublisher {
             let linkedAppIDs = Set(tools.compactMap(\.storeAppId))
             var ownedAppsByID: [String: StoreAppSummary] = [:]
             for storeID in storeIDs {
-                var cursor: String?
+                var offset = 0
+                var hasMore: Bool
                 repeat {
                     let page = try await storeClient.listApps(
                         storeID,
                         .mine,
                         nil,
-                        cursor,
+                        offset,
                         .recent,
                         nil
                     )
@@ -76,8 +77,9 @@ final class ToolLibraryStorePublisher {
                         guard linkedAppIDs.contains(app.id) else { continue }
                         ownedAppsByID[app.id] = app
                     }
-                    cursor = page.nextCursor
-                } while cursor != nil
+                    offset += page.apps.count
+                    hasMore = page.hasMore
+                } while hasMore
             }
             publishedStoreAppsByID = ownedAppsByID
         } catch {
@@ -98,7 +100,7 @@ final class ToolLibraryStorePublisher {
     ) async {
         await inferenceStore.refreshIronsmithAccountSummary()
         guard inferenceStore.ironsmithSession != nil else {
-            errorMessage = "Sign in with Ironsmith before publishing to the App Store."
+            errorMessage = "Sign in with Ironsmith before publishing to the Ironsmith Store."
             return
         }
         await refreshPublishedStoreApps(
@@ -107,10 +109,8 @@ final class ToolLibraryStorePublisher {
         )
         publishingToolID = tool.id
         publishName = tool.name
-        publishShortDescription =
-            linkedPublishedApp(for: tool)?.shortDescription
-            ?? Self.defaultShortDescription(for: tool)
-        publishDescription = "Created with Ironsmith."
+        publishShortDescription = ""
+        publishDescription = ""
         publishCategory = linkedPublishedApp(for: tool)?.category ?? .utilities
         publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
         publishScreenshotData = nil
@@ -157,6 +157,15 @@ final class ToolLibraryStorePublisher {
                 encoding: .utf8
             )
             let settings = tool.generationSettings(defaults: defaultSettings)
+            _ = try await iconClient.ensureIconAssets(
+                ToolIconRequest(displayName: tool.name, layout: tool.packageLayout)
+            )
+            let iconMasterJPEG = try Data(
+                contentsOf: tool.packageLayout.cachedAppIconMasterJPEGURL
+            )
+            let iconThumbnailJPEG = try Data(
+                contentsOf: tool.packageLayout.cachedAppIconThumbnailJPEGURL
+            )
             let app: StoreAppDetail
             if let linkedApp = linkedPublishedApp(for: tool) {
                 app = try await storeClient.publishVersion(
@@ -165,17 +174,14 @@ final class ToolLibraryStorePublisher {
                         appId: linkedApp.id,
                         sourceCode: source,
                         generationSettings: settings,
-                        iconPNG: nil,
-                        screenshotPNGs: publishScreenshotData.map { [$0] } ?? [],
+                        iconMasterJPEG: iconMasterJPEG,
+                        iconThumbnailJPEG: iconThumbnailJPEG,
+                        screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         replaceScreenshots: publishScreenshotData != nil,
                         remixedFromVersionId: tool.storeRemixedFromVersionId
                     )
                 )
             } else {
-                _ = try await iconClient.ensureIconAssets(
-                    ToolIconRequest(displayName: tool.name, layout: tool.packageLayout)
-                )
-                let iconPNG = try Data(contentsOf: tool.packageLayout.cachedAppIconPNGURL)
                 app = try await storeClient.publishApp(
                     StorePublicationRequest(
                         storeId: tool.storeId ?? IronsmithStoreConstants.communityStoreId,
@@ -187,8 +193,9 @@ final class ToolLibraryStorePublisher {
                         category: publishCategory,
                         sourceCode: source,
                         generationSettings: settings,
-                        iconPNG: iconPNG,
-                        screenshotPNGs: publishScreenshotData.map { [$0] } ?? [],
+                        iconMasterJPEG: iconMasterJPEG,
+                        iconThumbnailJPEG: iconThumbnailJPEG,
+                        screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         remixedFromVersionId: tool.storeRemixedFromVersionId
                     )
                 )
@@ -213,8 +220,11 @@ final class ToolLibraryStorePublisher {
             }
         }
         do {
-            publishScreenshotData = try Data(contentsOf: url)
-            publishScreenshotName = url.lastPathComponent
+            let source = try Data(contentsOf: url)
+            let screenshot = try ToolImageAssetEncoder.screenshot(from: source)
+            publishScreenshotData = screenshot.data
+            publishScreenshotName =
+                url.deletingPathExtension().lastPathComponent + ".jpg"
         } catch {
             present(error)
         }
@@ -223,14 +233,6 @@ final class ToolLibraryStorePublisher {
     private func linkedPublishedApp(for tool: Tool) -> StoreAppSummary? {
         guard let storeAppId = tool.storeAppId else { return nil }
         return publishedStoreAppsByID[storeAppId]
-    }
-
-    private static func defaultShortDescription(for tool: Tool) -> String {
-        let trimmedName = tool.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedName.isEmpty {
-            return String(trimmedName.prefix(40))
-        }
-        return "Created with Ironsmith."
     }
 
     private func applyPublishedStoreLinkage(_ app: StoreAppDetail, to tool: Tool) {
