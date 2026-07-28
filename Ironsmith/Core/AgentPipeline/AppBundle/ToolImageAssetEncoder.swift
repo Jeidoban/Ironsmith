@@ -82,7 +82,11 @@ nonisolated enum ToolImageAssetEncoder {
     }
 
     static func screenshot(from data: Data) throws -> ToolJPEGImageAsset {
-        let image = try decodeImage(data, applyingOrientation: true)
+        let image = try decodeImage(
+            data,
+            applyingOrientation: true,
+            maximumPixelSize: max(screenshotMaximumWidth, screenshotMaximumHeight)
+        )
         return try screenshot(from: image)
     }
 
@@ -144,7 +148,11 @@ nonisolated enum ToolImageAssetEncoder {
         )
     }
 
-    static func decodeImage(_ data: Data, applyingOrientation: Bool = false) throws -> CGImage {
+    static func decodeImage(
+        _ data: Data,
+        applyingOrientation: Bool = false,
+        maximumPixelSize: Int? = nil
+    ) throws -> CGImage {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
             CGImageSourceGetCount(source) == 1
         else {
@@ -156,7 +164,11 @@ nonisolated enum ToolImageAssetEncoder {
                 as? [CFString: Any]
             let width = properties?[kCGImagePropertyPixelWidth] as? Int ?? 0
             let height = properties?[kCGImagePropertyPixelHeight] as? Int ?? 0
-            let maximumDimension = max(width, height)
+            let sourceMaximumDimension = max(width, height)
+            let maximumDimension = min(
+                sourceMaximumDimension,
+                maximumPixelSize ?? sourceMaximumDimension
+            )
             guard maximumDimension > 0,
                 let image = CGImageSourceCreateThumbnailAtIndex(
                     source,

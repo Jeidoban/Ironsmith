@@ -574,15 +574,15 @@ struct StoreImportTests {
 
     @MainActor
     @Test
-    func historicalVersionInstallCreatesAttributedSeparateCopyWithoutMutatingExistingTool()
+    func historicalVersionWithSharedSourceCreatesAttributedSeparateCopyWithoutMutatingExistingTool()
         async throws
     {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
-        let historicalSource = Self.sourceCode("historical")
-        let currentSource = Self.sourceCode("current")
+        let historicalSource = Self.sourceCode("shared")
+        let currentSource = historicalSource
         let historicalMetadata = Self.versionMetadata(
             id: "00000000-0000-4000-8000-000000000201",
             versionNumber: 1,

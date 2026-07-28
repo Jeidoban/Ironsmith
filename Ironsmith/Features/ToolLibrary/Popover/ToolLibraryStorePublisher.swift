@@ -219,11 +219,7 @@ final class ToolLibraryStorePublisher {
         }
         do {
             let source = try Data(contentsOf: url)
-            let decoded = try ToolImageAssetEncoder.decodeImage(
-                source,
-                applyingOrientation: true
-            )
-            let screenshot = try ToolImageAssetEncoder.screenshot(from: decoded)
+            let screenshot = try ToolImageAssetEncoder.screenshot(from: source)
             publishScreenshotData = screenshot.data
             publishScreenshotName =
                 url.deletingPathExtension().lastPathComponent + ".jpg"

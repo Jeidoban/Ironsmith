@@ -201,6 +201,27 @@ struct ToolImageAssetEncoderTests {
         #expect(asset.height >= ToolImageAssetEncoder.screenshotMinimumDimension)
     }
 
+    @Test
+    func screenshotDecodeDownsamplesLargeSourceBeforeEncoding() throws {
+        let source = try Self.solidImage(width: 4000, height: 2000)
+        let sourceData = try Self.pngData(from: source)
+
+        let decoded = try ToolImageAssetEncoder.decodeImage(
+            sourceData,
+            applyingOrientation: true,
+            maximumPixelSize: max(
+                ToolImageAssetEncoder.screenshotMaximumWidth,
+                ToolImageAssetEncoder.screenshotMaximumHeight
+            )
+        )
+        let asset = try ToolImageAssetEncoder.screenshot(from: sourceData)
+
+        #expect(decoded.width <= ToolImageAssetEncoder.screenshotMaximumWidth)
+        #expect(decoded.height <= ToolImageAssetEncoder.screenshotMaximumHeight)
+        #expect(asset.width == 1920)
+        #expect(asset.height == 960)
+    }
+
     private static func transparentIconImage() throws -> CGImage {
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         guard

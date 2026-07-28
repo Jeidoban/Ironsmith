@@ -371,6 +371,7 @@ final class StoreWindowStore {
         guard
             let matchingTool = tools.first(where: {
                 $0.storeAppId == app.id
+                    && $0.storeVersionId == version.id
                     && localSourceHash(for: $0) == version.sourceSha256.lowercased()
             })
         else {
