@@ -35,14 +35,16 @@ struct ToolLibraryStorePublishSheetView: View {
 
             if !isUpdatingPublishedListing {
                 TextField("Name", text: $publishName)
-                TextField("Short Description", text: $publishShortDescription)
-                    .onChange(of: publishShortDescription) { _, value in
-                        if value.count > 40 {
-                            publishShortDescription = String(value.prefix(40))
-                        }
+            }
+            TextField("Short Description", text: $publishShortDescription)
+                .onChange(of: publishShortDescription) { _, value in
+                    if value.count > 40 {
+                        publishShortDescription = String(value.prefix(40))
                     }
-                TextField("Description", text: $publishDescription, axis: .vertical)
-                    .lineLimit(3...5)
+                }
+            TextField("Description", text: $publishDescription, axis: .vertical)
+                .lineLimit(3...5)
+            if !isUpdatingPublishedListing {
                 Picker("Category", selection: $publishCategory) {
                     ForEach(StoreAppCategory.allCases) { category in
                         Text(category.title).tag(category)
@@ -87,7 +89,7 @@ struct ToolLibraryStorePublishSheetView: View {
     }
 
     private var canPublish: Bool {
-        (isUpdatingPublishedListing || listingFieldsAreValid)
+        listingFieldsAreValid
             && (!needsDisplayName
                 || !publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             && !tool.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

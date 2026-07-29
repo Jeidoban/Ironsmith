@@ -20,6 +20,7 @@ final class ToolLibraryStorePublisher {
 
     @ObservationIgnored private let storeClient: IronsmithStoreClient
     @ObservationIgnored private let iconClient: ToolIconClient
+    @ObservationIgnored private var currentPublishedSourceSha256: String?
 
     init() {
         self.storeClient = .live
@@ -107,11 +108,34 @@ final class ToolLibraryStorePublisher {
             isSignedIn: true,
             tools: tools
         )
+        let linkedApp = linkedPublishedApp(for: tool)
+        if let linkedApp {
+            do {
+                // May consider adding the latest source hash to the StoreAppSummary so we don't have to fetch the detail here, but this is fine for now.
+                let detail = try await storeClient.fetchApp(linkedApp.storeId, linkedApp.id)
+                let source = try sourceCode(for: tool)
+                if IronsmithStoreClient.sha256Hex(for: source)
+                    == detail.currentVersion.sourceSha256.lowercased()
+                {
+                    throw IronsmithStoreClientError.unchangedStoreVersion
+                }
+                publishName = detail.name
+                publishShortDescription = detail.shortDescription
+                publishDescription = detail.description
+                publishCategory = detail.category
+                currentPublishedSourceSha256 = detail.currentVersion.sourceSha256.lowercased()
+            } catch {
+                present(error)
+                return
+            }
+        } else {
+            publishName = tool.name
+            publishShortDescription = ""
+            publishDescription = ""
+            publishCategory = .utilities
+            currentPublishedSourceSha256 = nil
+        }
         publishingToolID = tool.id
-        publishName = tool.name
-        publishShortDescription = ""
-        publishDescription = ""
-        publishCategory = linkedPublishedApp(for: tool)?.category ?? .utilities
         publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
         publishScreenshotData = nil
         publishScreenshotName = nil
@@ -152,10 +176,13 @@ final class ToolLibraryStorePublisher {
                 )
             }
 
-            let source = try String(
-                contentsOf: try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath),
-                encoding: .utf8
-            )
+            let source = try sourceCode(for: tool)
+            if linkedPublishedApp(for: tool) != nil,
+                let currentPublishedSourceSha256,
+                IronsmithStoreClient.sha256Hex(for: source) == currentPublishedSourceSha256
+            {
+                throw IronsmithStoreClientError.unchangedStoreVersion
+            }
             let settings = tool.generationSettings(defaults: defaultSettings)
             _ = try await iconClient.ensureIconAssets(
                 ToolIconRequest(displayName: tool.name, layout: tool.packageLayout)
@@ -172,6 +199,10 @@ final class ToolLibraryStorePublisher {
                     StoreVersionPublicationRequest(
                         storeId: linkedApp.storeId,
                         appId: linkedApp.id,
+                        shortDescription: publishShortDescription.trimmingCharacters(
+                            in: .whitespacesAndNewlines),
+                        description: publishDescription.trimmingCharacters(
+                            in: .whitespacesAndNewlines),
                         sourceCode: source,
                         generationSettings: settings,
                         iconMasterJPEG: iconMasterJPEG,
@@ -233,6 +264,13 @@ final class ToolLibraryStorePublisher {
     private func linkedPublishedApp(for tool: Tool) -> StoreAppSummary? {
         guard let storeAppId = tool.storeAppId else { return nil }
         return publishedStoreAppsByID[storeAppId]
+    }
+
+    private func sourceCode(for tool: Tool) throws -> String {
+        try String(
+            contentsOf: try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath),
+            encoding: .utf8
+        )
     }
 
     private func applyPublishedStoreLinkage(_ app: StoreAppDetail, to tool: Tool) {

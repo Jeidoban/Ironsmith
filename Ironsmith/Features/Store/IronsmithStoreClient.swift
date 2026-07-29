@@ -302,6 +302,8 @@ nonisolated struct StorePublicationRequest: Sendable {
 nonisolated struct StoreVersionPublicationRequest: Sendable {
     let storeId: String
     let appId: String
+    let shortDescription: String
+    let description: String
     let sourceCode: String
     let generationSettings: ToolGenerationSettings
     let iconMasterJPEG: Data?
@@ -325,6 +327,7 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
     case invalidResponse
     case requestFailed(statusCode: Int, message: String)
     case sourceHashMismatch(expected: String, actual: String)
+    case unchangedStoreVersion
 
     var errorDescription: String? {
         switch self {
@@ -338,6 +341,8 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
             return "The Ironsmith Store returned HTTP \(statusCode): \(message)"
         case .sourceHashMismatch:
             return "The downloaded source did not match the scanned source hash."
+        case .unchangedStoreVersion:
+            return "The source matches the currently published version. Make a source change before publishing a new version."
         }
     }
 }
@@ -489,7 +494,9 @@ extension IronsmithStoreClient {
                     generationSettings: StoreGenerationSettingsDTO(
                         settings: request.generationSettings),
                     remixedFromVersionId: request.remixedFromVersionId,
-                    replaceScreenshots: request.replaceScreenshots
+                    replaceScreenshots: request.replaceScreenshots,
+                    shortDescription: request.shortDescription,
+                    description: request.description
                 )
                 var body = try StoreMultipartBody()
                     .addingJSONField(name: "metadata", value: metadata)
@@ -704,6 +711,8 @@ nonisolated private struct StoreVersionMetadataPayload: Encodable {
     let generationSettings: StoreGenerationSettingsDTO
     let remixedFromVersionId: String?
     let replaceScreenshots: Bool
+    let shortDescription: String
+    let description: String
 }
 
 nonisolated struct StoreMultipartBody {
