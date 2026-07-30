@@ -28,10 +28,8 @@ struct ToolLibraryPopoverView: View {
     private let welcomeOnboardingStore: WelcomeOnboardingStore
     @State private var toolLibraryStore = ToolLibraryStore()
     @State private var storePublisher: ToolLibraryStorePublisher
-    @State private var iconEditor: ToolIconEditorStore
+    @State private var detailsEditor: ToolAppDetailsEditorStore
     @State private var toolPendingDeletion: Tool?
-    @State private var toolPendingRename: Tool?
-    @State private var pendingRenameName = ""
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
     @State private var isShowingModelPicker = false
@@ -46,7 +44,7 @@ struct ToolLibraryPopoverView: View {
         appUpdateStore = AppUpdateStore()
         welcomeOnboardingStore = WelcomeOnboardingStore()
         _storePublisher = State(initialValue: ToolLibraryStorePublisher())
-        _iconEditor = State(initialValue: ToolIconEditorStore())
+        _detailsEditor = State(initialValue: ToolAppDetailsEditorStore())
     }
 
     @MainActor
@@ -66,8 +64,8 @@ struct ToolLibraryPopoverView: View {
                 iconClient: iconClient
             )
         )
-        _iconEditor = State(
-            initialValue: ToolIconEditorStore(
+        _detailsEditor = State(
+            initialValue: ToolAppDetailsEditorStore(
                 iconClient: iconEditingClient,
                 buildClient: iconBuildClient
             )
@@ -207,26 +205,11 @@ struct ToolLibraryPopoverView: View {
                 toolPendingDeletion.map { "Delete \($0.name)? This can't be undone." }
                     ?? "Delete this app? This can't be undone.")
         }
-        .alert(
-            "Rename App",
-            isPresented: renameAlertBinding
-        ) {
-            TextField("App Name", text: $pendingRenameName)
-            Button("Cancel", role: .cancel) {
-                clearPendingRename()
-            }
-            Button("Save") {
-                commitPendingRename()
-            }
-            .disabled(pendingRenameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        } message: {
-            Text("Enter a new display name for this app.")
-        }
     }
 
     private var sheetContent: some View {
         @Bindable var storePublisher = storePublisher
-        @Bindable var iconEditor = iconEditor
+        @Bindable var detailsEditor = detailsEditor
 
         return alertContent
         .sheet(
@@ -240,8 +223,8 @@ struct ToolLibraryPopoverView: View {
         .sheet(isPresented: $storePublisher.isShowingPublishSheet) {
             storePublishSheet
         }
-        .sheet(isPresented: $iconEditor.isShowingSheet) {
-            iconEditorSheet
+        .sheet(isPresented: $detailsEditor.isShowingSheet) {
+            detailsEditorSheet
         }
         .sheet(isPresented: $isShowingModelPicker) {
             ModelPickerSheetView()
@@ -428,7 +411,7 @@ struct ToolLibraryPopoverView: View {
             isExporting: toolLibraryStore.exportingToolID == tool.id,
             isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
             isRestoring: toolLibraryStore.restoringToolID == tool.id,
-            isChangingIcon: iconEditor.isWorking && iconEditor.editingToolID == tool.id,
+            isEditingDetails: detailsEditor.isWorking && detailsEditor.editingToolID == tool.id,
             canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
             showsStoreActions: isStoreFeatureEnabled,
             canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
@@ -458,11 +441,8 @@ struct ToolLibraryPopoverView: View {
                     await toolLibraryStore.quit(tool)
                 }
             },
-            onRename: {
-                beginRenaming(tool)
-            },
-            onChangeIcon: {
-                iconEditor.beginEditing(tool)
+            onEditDetails: {
+                detailsEditor.beginEditing(tool)
             },
             onRebuild: {
                 Task {
@@ -515,26 +495,26 @@ struct ToolLibraryPopoverView: View {
     }
 
     @ViewBuilder
-    private var iconEditorSheet: some View {
-        @Bindable var iconEditor = iconEditor
+    private var detailsEditorSheet: some View {
+        @Bindable var detailsEditor = detailsEditor
 
-        if let tool = tools.first(where: { $0.id == iconEditor.editingToolID }) {
-            ToolIconEditorSheetView(
-                appName: tool.name,
-                previewData: iconEditor.previewData,
-                prompt: $iconEditor.prompt,
+        if let tool = tools.first(where: { $0.id == detailsEditor.editingToolID }) {
+            ToolAppDetailsEditorSheetView(
+                previewData: detailsEditor.previewData,
+                name: $detailsEditor.name,
+                prompt: $detailsEditor.prompt,
                 imageProvider: inferenceStore.effectiveImageGenerationProvider,
-                hasCandidate: iconEditor.hasCandidate,
-                isGenerating: iconEditor.isGenerating,
-                isSaving: iconEditor.isSaving,
-                errorMessage: iconEditor.errorMessage,
+                canSave: detailsEditor.canSave(tool),
+                isGenerating: detailsEditor.isGenerating,
+                isSaving: detailsEditor.isSaving,
+                errorMessage: detailsEditor.errorMessage,
                 onChooseImage: { url in
-                    iconEditor.importIcon(from: url)
+                    detailsEditor.importIcon(from: url)
                 },
                 onGenerate: {
                     let provider = inferenceStore.effectiveImageGenerationProvider
                     Task {
-                        await iconEditor.generate(for: tool, provider: provider)
+                        await detailsEditor.generate(for: tool, provider: provider)
                         if provider == .ironsmith {
                             await inferenceStore.refreshIronsmithAccountSummary()
                         }
@@ -544,11 +524,28 @@ struct ToolLibraryPopoverView: View {
                     routeStore.open(.settings(.root))
                 },
                 onCancel: {
-                    iconEditor.cancel()
+                    detailsEditor.cancel()
                 },
                 onSave: {
                     Task {
-                        await iconEditor.save(tool, in: modelContext)
+                        await detailsEditor.save(
+                            tool,
+                            in: modelContext,
+                            rename: { proposedName in
+                                guard toolLibraryStore.rename(
+                                    tool,
+                                    to: proposedName,
+                                    in: modelContext
+                                ) else {
+                                    let message =
+                                        toolLibraryStore.presentedErrorMessage
+                                        ?? "Ironsmith could not rename this app."
+                                    toolLibraryStore.clearPresentedError()
+                                    return message
+                                }
+                                return nil
+                            }
+                        )
                     }
                 }
             )
@@ -563,7 +560,6 @@ struct ToolLibraryPopoverView: View {
             ToolLibraryStorePublishSheetView(
                 tool: tool,
                 isUpdatingPublishedListing: canUpdateStoreVersion(for: tool),
-                publishName: $storePublisher.publishName,
                 publishShortDescription: $storePublisher.publishShortDescription,
                 publishDescription: $storePublisher.publishDescription,
                 publishCategory: $storePublisher.publishCategory,
@@ -880,22 +876,6 @@ struct ToolLibraryPopoverView: View {
         }
     }
 
-    private func beginRenaming(_ tool: Tool) {
-        toolPendingRename = tool
-        pendingRenameName = tool.name
-    }
-
-    private func commitPendingRename() {
-        guard let toolPendingRename else { return }
-        toolLibraryStore.rename(toolPendingRename, to: pendingRenameName, in: modelContext)
-        clearPendingRename()
-    }
-
-    private func clearPendingRename() {
-        toolPendingRename = nil
-        pendingRenameName = ""
-    }
-
     private var shouldShowEmptyState: Bool {
         shouldForceNoApps || tools.isEmpty
     }
@@ -1032,16 +1012,6 @@ struct ToolLibraryPopoverView: View {
         )
     }
 
-    private var renameAlertBinding: Binding<Bool> {
-        Binding(
-            get: { toolPendingRename != nil },
-            set: { isPresented in
-                if !isPresented {
-                    clearPendingRename()
-                }
-            }
-        )
-    }
 }
 #Preview("Tool Library") {
     let container = try! IronsmithModelContainerFactory.make(isRunningTests: true)

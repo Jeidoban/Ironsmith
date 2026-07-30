@@ -7,7 +7,6 @@ import SwiftData
 final class ToolLibraryStorePublisher {
     var publishedStoreAppsByID: [String: StoreAppSummary] = [:]
     var publishingToolID: UUID?
-    var publishName = ""
     var publishShortDescription = ""
     var publishDescription = ""
     var publishCategory: StoreAppCategory = .utilities
@@ -122,7 +121,6 @@ final class ToolLibraryStorePublisher {
                 {
                     throw IronsmithStoreClientError.unchangedStoreVersion
                 }
-                publishName = detail.name
                 publishShortDescription = detail.shortDescription
                 publishDescription = detail.description
                 publishCategory = detail.category
@@ -132,7 +130,6 @@ final class ToolLibraryStorePublisher {
                 return
             }
         } else {
-            publishName = tool.name
             publishShortDescription = ""
             publishDescription = ""
             publishCategory = .utilities
@@ -211,7 +208,7 @@ final class ToolLibraryStorePublisher {
                 app = try await storeClient.publishApp(
                     StorePublicationRequest(
                         storeId: tool.storeId ?? IronsmithStoreConstants.communityStoreId,
-                        name: publishName.trimmingCharacters(in: .whitespacesAndNewlines),
+                        name: tool.name,
                         shortDescription: publishShortDescription.trimmingCharacters(
                             in: .whitespacesAndNewlines),
                         description: publishDescription.trimmingCharacters(

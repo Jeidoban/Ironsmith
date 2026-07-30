@@ -320,7 +320,7 @@ struct ToolImageAssetEncoderTests {
         let context = container.mainContext
         context.insert(tool)
         try context.save()
-        let store = ToolIconEditorStore(
+        let store = ToolAppDetailsEditorStore(
             iconClient: .live(),
             buildClient: ToolBuildClient { _ in
                 throw IconEditorTestError.buildFailed
@@ -331,7 +331,7 @@ struct ToolImageAssetEncoderTests {
             data: Self.pngData(from: try Self.solidImage(width: 1024, height: 1024))
         )
 
-        let saved = await store.save(tool, in: context)
+        let saved = await store.save(tool, in: context, rename: { _ in nil })
 
         #expect(!saved)
         #expect(store.isShowingSheet)
@@ -346,6 +346,47 @@ struct ToolImageAssetEncoderTests {
                 == originalThumbnail
         )
         #expect(try Data(contentsOf: tool.packageLayout.cachedAppIconICNSURL) == originalICNS)
+    }
+
+    @MainActor
+    @Test
+    func appDetailsEditorCanSaveANameWithoutReplacingTheIcon() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tool = Tool(
+            name: "Original Name",
+            executableName: "OriginalName",
+            packageRootPath: root.appendingPathComponent("OriginalName").path
+        )
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+        var renamedTo: String?
+        let store = ToolAppDetailsEditorStore(
+            buildClient: ToolBuildClient { _ in
+                Issue.record("A name-only edit should not rebuild the app")
+            }
+        )
+        store.beginEditing(tool)
+        #expect(store.prompt.isEmpty)
+        store.name = "Updated Name"
+
+        let saved = await store.save(
+            tool,
+            in: context,
+            rename: { proposedName in
+                renamedTo = proposedName
+                tool.name = proposedName
+                return nil
+            }
+        )
+
+        #expect(saved)
+        #expect(renamedTo == "Updated Name")
+        #expect(tool.name == "Updated Name")
+        #expect(!store.isShowingSheet)
+        #expect(store.editingToolID == nil)
     }
 
     @MainActor

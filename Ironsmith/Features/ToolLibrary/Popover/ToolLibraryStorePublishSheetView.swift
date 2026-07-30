@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 struct ToolLibraryStorePublishSheetView: View {
     let tool: Tool
     let isUpdatingPublishedListing: Bool
-    @Binding var publishName: String
     @Binding var publishShortDescription: String
     @Binding var publishDescription: String
     @Binding var publishCategory: StoreAppCategory
@@ -19,46 +18,66 @@ struct ToolLibraryStorePublishSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(isUpdatingPublishedListing ? "Update Store Version" : "Publish to Ironsmith Store")
+            Text(
+                isUpdatingPublishedListing
+                    ? "Update \(tool.name) on Ironsmith Store"
+                    : "Publish \(tool.name) to Ironsmith Store"
+            )
                 .font(.headline)
 
             if needsDisplayName {
-                TextField("Display Name", text: $publishDisplayName)
-                    .onChange(of: publishDisplayName) { _, value in
-                        if value.count > 80 {
-                            publishDisplayName = String(value.prefix(80))
+                field("Creator Name") {
+                    TextField(
+                        "The public name shown next to your apps",
+                        text: $publishDisplayName
+                    )
+                        .onChange(of: publishDisplayName) { _, value in
+                            if value.count > 80 {
+                                publishDisplayName = String(value.prefix(80))
+                            }
+                        }
+                }
+            }
+
+            field("Short Description") {
+                TextField(
+                    "Summarize your app in a few words",
+                    text: $publishShortDescription
+                )
+                    .onChange(of: publishShortDescription) { _, value in
+                        if value.count > 40 {
+                            publishShortDescription = String(value.prefix(40))
                         }
                     }
             }
-
-            if !isUpdatingPublishedListing {
-                TextField("Name", text: $publishName)
+            field("Description") {
+                TextField(
+                    "Describe what your app does and how people can use it",
+                    text: $publishDescription,
+                    axis: .vertical
+                )
+                    .lineLimit(3...5)
             }
-            TextField("Short Description", text: $publishShortDescription)
-                .onChange(of: publishShortDescription) { _, value in
-                    if value.count > 40 {
-                        publishShortDescription = String(value.prefix(40))
-                    }
-                }
-            TextField("Description", text: $publishDescription, axis: .vertical)
-                .lineLimit(3...5)
             if !isUpdatingPublishedListing {
-                Picker("Category", selection: $publishCategory) {
-                    ForEach(StoreAppCategory.allCases) { category in
-                        Text(category.title).tag(category)
+                field("Category") {
+                    Picker("Category", selection: $publishCategory) {
+                        ForEach(StoreAppCategory.allCases) { category in
+                            Text(category.title).tag(category)
+                        }
                     }
+                    .labelsHidden()
                 }
             }
 
-            HStack {
-                Button {
-                    isChoosingScreenshot = true
-                } label: {
-                    Label("Screenshot", systemImage: "photo")
+            field("Screenshot") {
+                HStack {
+                    Button("Choose Screenshot…") {
+                        isChoosingScreenshot = true
+                    }
+                    Text(publishScreenshotName ?? "No screenshot selected")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Text(publishScreenshotName ?? "No screenshot selected")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
 
             HStack {
@@ -74,7 +93,7 @@ struct ToolLibraryStorePublishSheetView: View {
             }
         }
         .padding(18)
-        .frame(width: 340)
+        .frame(width: 390)
         .fileImporter(
             isPresented: $isChoosingScreenshot,
             allowedContentTypes: [.image],
@@ -83,6 +102,17 @@ struct ToolLibraryStorePublishSheetView: View {
             if case .success(let urls) = result, let url = urls.first {
                 onChooseScreenshot(url)
             }
+        }
+    }
+
+    private func field<Content: View>(
+        _ label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.subheadline.weight(.medium))
+            content()
         }
     }
 
@@ -98,8 +128,7 @@ struct ToolLibraryStorePublishSheetView: View {
     }
 
     private var listingFieldsAreValid: Bool {
-        !publishName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !publishShortDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !publishShortDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !publishDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }

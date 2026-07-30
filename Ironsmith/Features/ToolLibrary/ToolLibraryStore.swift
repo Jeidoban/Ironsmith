@@ -212,14 +212,16 @@ final class ToolLibraryStore {
         }
     }
 
-    func rename(_ tool: Tool, to proposedName: String, in modelContext: ModelContext) {
+    @discardableResult
+    func rename(_ tool: Tool, to proposedName: String, in modelContext: ModelContext) -> Bool {
         guard rebuildingToolID != tool.id,
               restoringToolID != tool.id,
               !(isGenerating && tool.generationState == .generating)
-        else { return }
+        else { return false }
 
         let trimmedName = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty, trimmedName != tool.name else { return }
+        guard !trimmedName.isEmpty else { return false }
+        guard trimmedName != tool.name else { return true }
 
         let originalName = tool.name
         var movedAppBundle: (oldURL: URL, newURL: URL)?
@@ -232,6 +234,7 @@ final class ToolLibraryStore {
                 selectedToolName = trimmedName
             }
             try modelContext.save()
+            return true
         } catch {
             modelContext.rollback()
             if let movedAppBundle {
@@ -241,6 +244,7 @@ final class ToolLibraryStore {
                 selectedToolName = originalName
             }
             presentError(error.localizedDescription)
+            return false
         }
     }
 

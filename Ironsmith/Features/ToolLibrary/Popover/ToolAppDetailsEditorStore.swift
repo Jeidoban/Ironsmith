@@ -4,8 +4,9 @@ import SwiftData
 
 @MainActor
 @Observable
-final class ToolIconEditorStore {
+final class ToolAppDetailsEditorStore {
     var editingToolID: UUID?
+    var name = ""
     var prompt = ""
     var currentPreviewData: Data?
     var candidate: ToolIconCandidate?
@@ -33,14 +34,18 @@ final class ToolIconEditorStore {
         isGenerating || isSaving
     }
 
-    var hasCandidate: Bool {
-        candidate != nil
+    func canSave(_ tool: Tool) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedName.isEmpty
+            && !isWorking
+            && (candidate != nil || trimmedName != tool.name)
     }
 
     func beginEditing(_ tool: Tool) {
         guard tool.isGenerationReady, !isWorking else { return }
         editingToolID = tool.id
-        prompt = tool.name
+        name = tool.name
+        prompt = ""
         candidate = nil
         errorMessage = nil
         currentPreviewData = currentPreviewData(for: tool.packageLayout)
@@ -86,9 +91,10 @@ final class ToolIconEditorStore {
         errorMessage = nil
         defer { isGenerating = false }
         do {
+            let stagedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             candidate = try await iconClient.generate(
                 ToolIconRequest(
-                    displayName: tool.name,
+                    displayName: stagedName.isEmpty ? tool.name : stagedName,
                     iconPrompt: concept,
                     layout: tool.packageLayout,
                     imageProvider: provider
@@ -102,11 +108,13 @@ final class ToolIconEditorStore {
     }
 
     @discardableResult
-    func save(_ tool: Tool, in modelContext: ModelContext) async -> Bool {
-        guard editingToolID == tool.id,
-            let candidate,
-            !isWorking
-        else {
+    func save(
+        _ tool: Tool,
+        in modelContext: ModelContext,
+        rename: (String) -> String?
+    ) async -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard editingToolID == tool.id, canSave(tool) else {
             return false
         }
 
@@ -115,8 +123,18 @@ final class ToolIconEditorStore {
         defer { isSaving = false }
 
         let previousUpdatedAt = tool.updatedAt
+        let shouldRename = trimmedName != tool.name
+        guard let candidate else {
+            if let renameError = rename(trimmedName) {
+                errorMessage = renameError
+                return false
+            }
+            finish()
+            return true
+        }
+
         let request = ToolIconRequest(
-            displayName: tool.name,
+            displayName: trimmedName,
             iconPrompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
             layout: tool.packageLayout
         )
@@ -124,11 +142,20 @@ final class ToolIconEditorStore {
         var didBuildNewIcon = false
 
         do {
-            snapshot = try iconClient.install(candidate, request)
+            let installedSnapshot = try iconClient.install(candidate, request)
+            snapshot = installedSnapshot
             try await buildClient.buildTool(tool)
             didBuildNewIcon = true
             tool.updatedAt = .now
             try modelContext.save()
+            if shouldRename, let renameError = rename(trimmedName) {
+                iconClient.restore(installedSnapshot, tool.packageLayout)
+                try? await buildClient.buildTool(tool)
+                tool.updatedAt = previousUpdatedAt
+                try? modelContext.save()
+                errorMessage = renameError
+                return false
+            }
             finish()
             return true
         } catch {
@@ -153,6 +180,7 @@ final class ToolIconEditorStore {
     private func finish() {
         isShowingSheet = false
         editingToolID = nil
+        name = ""
         prompt = ""
         candidate = nil
         currentPreviewData = nil

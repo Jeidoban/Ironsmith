@@ -55,7 +55,6 @@ extension ToolLibraryTests {
             tools: [tool]
         )
 
-        #expect(publisher.publishName == tool.name)
         #expect(publisher.publishShortDescription.isEmpty)
         #expect(publisher.publishDescription.isEmpty)
         #expect(publisher.isShowingPublishSheet)
@@ -192,7 +191,6 @@ extension ToolLibraryTests {
             storeClient: storeClient,
             iconClient: .noOp
         )
-        publisher.publishName = "Clipboard Cleaner"
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
         publisher.publishDisplayName = "  Jade Westover  "
@@ -223,8 +221,10 @@ extension ToolLibraryTests {
 
         let updatedNames = await profileCapture.updatedNames
         let publicationCount = await publicationCapture.count
+        let publishedName = await publicationCapture.lastName
         #expect(updatedNames == ["Jade Westover"])
         #expect(publicationCount == 1)
+        #expect(publishedName == tool.name)
         #expect(publisher.errorMessage == nil)
     }
 
@@ -322,8 +322,10 @@ private actor PublisherProfileCapture {
 
 private actor PublisherPublicationCapture {
     private(set) var count = 0
+    private(set) var lastName: String?
 
     func record(_ request: StorePublicationRequest) {
         count += 1
+        lastName = request.name
     }
 }

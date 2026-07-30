@@ -109,8 +109,8 @@ struct ToolGridItemView: View {
         if state.isExporting {
             return "Exporting \(tool.name)"
         }
-        if state.isChangingIcon {
-            return "Changing icon for \(tool.name)"
+        if state.isEditingDetails {
+            return "Updating \(tool.name)"
         }
         return nil
     }
@@ -227,7 +227,7 @@ enum ToolGridIconAction: Equatable {
         isExporting: false,
         isRebuilding: false,
         isRestoring: false,
-        isChangingIcon: false,
+        isEditingDetails: false,
         canRevert: false,
         showsStoreActions: false,
         canUpdateStoreVersion: false,
