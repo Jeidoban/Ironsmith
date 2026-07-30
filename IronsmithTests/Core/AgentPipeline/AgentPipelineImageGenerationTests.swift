@@ -136,20 +136,46 @@ extension AgentPipelineTests {
 
         #expect(hostedPrompt.contains("native macOS application icon"))
         #expect(hostedPrompt.contains("exact Ironsmith house style"))
-        #expect(hostedPrompt.contains("subject matter only"))
+        #expect(hostedPrompt.contains("source of any explicit color"))
         #expect(hostedPrompt.contains("softly dimensional vector-like illustration"))
         #expect(hostedPrompt.contains("never photorealistic"))
         #expect(hostedPrompt.contains("Do not create a miniature scene, diorama"))
         #expect(hostedPrompt.contains("nearly front-facing orthographic view"))
         #expect(hostedPrompt.contains("one broad soft source from the upper left"))
         #expect(hostedPrompt.contains("full-bleed two-tone gradient background"))
-        #expect(hostedPrompt.contains("Mandatory palette:"))
+        #expect(hostedPrompt.contains("Default palette:"))
         #expect(hostedPrompt.contains(ToolIconClient.hostedIconPalette(for: "Mortgage Calc")))
-        #expect(hostedPrompt.contains("do not replace it with generic blue"))
+        #expect(hostedPrompt.contains("follow that preference instead of the default palette"))
+        #expect(hostedPrompt.contains("never override the locked rendering style"))
         #expect(hostedPrompt.contains("Do not draw a rounded-square or squircle icon boundary"))
         #expect(hostedPrompt.contains("Ironsmith applies the final app-icon shape separately"))
         #expect(hostedPrompt.contains("Visual concept: \(concept)"))
         #expect(playgroundPrompt == concept)
+    }
+
+    @Test
+    func hostedIconPromptPrioritizesExplicitColorAndBackgroundPreferences() {
+        let layout = ToolPackageLayout(
+            packageRootURL: URL(fileURLWithPath: "/tmp/IconPrompt", isDirectory: true),
+            executableName: "IconPrompt"
+        )
+        let concept = "A brass compass on a coral-to-apricot gradient background"
+
+        let prompt = ToolIconClient.iconPrompt(
+            for: ToolIconRequest(
+                displayName: "Compass",
+                iconPrompt: concept,
+                layout: layout,
+                imageProvider: .openAI
+            ),
+            hostedPalette: "an emerald background"
+        )
+
+        #expect(prompt.contains("Default palette: an emerald background"))
+        #expect(prompt.contains("follow that preference instead of the default palette"))
+        #expect(prompt.contains("Visual concept: \(concept)"))
+        #expect(prompt.contains("centered composition"))
+        #expect(prompt.contains("full-bleed canvas"))
     }
 
     @Test

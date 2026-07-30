@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
+import SwiftData
 import Testing
 
 @testable import Ironsmith
@@ -222,6 +223,174 @@ struct ToolImageAssetEncoderTests {
         #expect(asset.height == 960)
     }
 
+    @MainActor
+    @Test
+    func iconEditorAcceptsOnlySingleFrameOrientationCorrected1024Images() throws {
+        let client = ToolIconEditingClient.live()
+        let validData = try Self.pngData(from: Self.solidImage(width: 1024, height: 1024))
+        let invalidSizeData = try Self.pngData(from: Self.solidImage(width: 1024, height: 768))
+        let multipageData = try Self.multipageTIFFData()
+
+        let candidate = try client.prepareSelectedImage(validData)
+        #expect(candidate.image.width == 1024)
+        #expect(candidate.image.height == 1024)
+        #expect(
+            try ToolImageAssetEncoder.validateIconThumbnailJPEG(candidate.thumbnailJPEG).width
+                == 256
+        )
+        #expect(throws: ToolIconEditingError.invalidDimensions(width: 1024, height: 768)) {
+            try client.prepareSelectedImage(invalidSizeData)
+        }
+        #expect(throws: ToolImageAssetEncodingError.self) {
+            try client.prepareSelectedImage(multipageData)
+        }
+    }
+
+    @MainActor
+    @Test
+    func iconEditorInstallSnapshotRestoresEveryPreviousAsset() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = ToolPackageLayout(
+            packageRootURL: root.appendingPathComponent("EditedIcon", isDirectory: true),
+            executableName: "EditedIcon"
+        )
+        try FileManager.default.createDirectory(
+            at: layout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        let originalMaster = Data("old-master".utf8)
+        let originalThumbnail = Data("old-thumbnail".utf8)
+        let originalICNS = Data("old-icns".utf8)
+        let originalPNG = Data("old-png".utf8)
+        try originalMaster.write(to: layout.cachedAppIconMasterJPEGURL)
+        try originalThumbnail.write(to: layout.cachedAppIconThumbnailJPEGURL)
+        try originalICNS.write(to: layout.cachedAppIconICNSURL)
+        try originalPNG.write(to: layout.cachedAppIconPNGURL)
+
+        let client = ToolIconEditingClient.live()
+        let sourceData = try Self.pngData(from: Self.transparentIconImage())
+        let candidate = try client.prepareSelectedImage(sourceData)
+        let snapshot = try client.install(
+            candidate,
+            ToolIconRequest(displayName: "Edited Icon", layout: layout)
+        )
+
+        #expect(try Data(contentsOf: layout.cachedAppIconMasterJPEGURL) != originalMaster)
+        #expect(try Data(contentsOf: layout.cachedAppIconThumbnailJPEGURL) != originalThumbnail)
+        #expect(try Data(contentsOf: layout.cachedAppIconICNSURL) != originalICNS)
+
+        client.restore(snapshot, layout)
+
+        #expect(try Data(contentsOf: layout.cachedAppIconMasterJPEGURL) == originalMaster)
+        #expect(try Data(contentsOf: layout.cachedAppIconThumbnailJPEGURL) == originalThumbnail)
+        #expect(try Data(contentsOf: layout.cachedAppIconICNSURL) == originalICNS)
+        #expect(try Data(contentsOf: layout.cachedAppIconPNGURL) == originalPNG)
+    }
+
+    @MainActor
+    @Test
+    func iconEditorBuildFailureRestoresAssetsAndToolTimestamp() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tool = Tool(
+            name: "Edited Icon",
+            executableName: "EditedIcon",
+            packageRootPath: root.appendingPathComponent("EditedIcon").path
+        )
+        let oldTimestamp = Date(timeIntervalSinceReferenceDate: 10_000)
+        tool.updatedAt = oldTimestamp
+        let originalSource = try Self.transparentIconImage()
+        _ = try await ToolIconClient.live(imageGenerator: { _ in originalSource })
+            .ensureIconAssets(
+                ToolIconRequest(
+                    displayName: tool.name,
+                    layout: tool.packageLayout,
+                    imageProvider: .openAI
+                )
+            )
+        let originalMaster = try Data(
+            contentsOf: tool.packageLayout.cachedAppIconMasterJPEGURL
+        )
+        let originalThumbnail = try Data(
+            contentsOf: tool.packageLayout.cachedAppIconThumbnailJPEGURL
+        )
+        let originalICNS = try Data(contentsOf: tool.packageLayout.cachedAppIconICNSURL)
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+        let store = ToolIconEditorStore(
+            iconClient: .live(),
+            buildClient: ToolBuildClient { _ in
+                throw IconEditorTestError.buildFailed
+            }
+        )
+        store.beginEditing(tool)
+        try store.importIcon(
+            data: Self.pngData(from: try Self.solidImage(width: 1024, height: 1024))
+        )
+
+        let saved = await store.save(tool, in: context)
+
+        #expect(!saved)
+        #expect(store.isShowingSheet)
+        #expect(store.errorMessage?.contains("build failed") == true)
+        #expect(tool.updatedAt == oldTimestamp)
+        #expect(
+            try Data(contentsOf: tool.packageLayout.cachedAppIconMasterJPEGURL)
+                == originalMaster
+        )
+        #expect(
+            try Data(contentsOf: tool.packageLayout.cachedAppIconThumbnailJPEGURL)
+                == originalThumbnail
+        )
+        #expect(try Data(contentsOf: tool.packageLayout.cachedAppIconICNSURL) == originalICNS)
+    }
+
+    @MainActor
+    @Test
+    func iconEditorPassesUserConceptDirectlyThroughExistingPromptBuilder() async throws {
+        let capture = IconEditorPromptCapture()
+        let source = try Self.transparentIconImage()
+        let imageClient = ToolImageGenerationClient { provider, prompt in
+            await capture.record(provider: provider, prompt: prompt)
+            return source
+        }
+        let client = ToolIconEditingClient.live(imageClient: imageClient)
+        let layout = ToolPackageLayout(
+            packageRootURL: URL(fileURLWithPath: "/tmp/IconPrompt", isDirectory: true),
+            executableName: "IconPrompt"
+        )
+        let concept = "A silver compass on a coral gradient background"
+
+        _ = try await client.generate(
+            ToolIconRequest(
+                displayName: "Compass",
+                iconPrompt: concept,
+                layout: layout,
+                imageProvider: .openAI
+            )
+        )
+        let hosted = await capture.last
+        #expect(hosted?.provider == .openAI)
+        #expect(hosted?.prompt.contains("exact Ironsmith house style") == true)
+        #expect(hosted?.prompt.contains("Visual concept: \(concept)") == true)
+        #expect(hosted?.prompt.contains("follow that preference instead") == true)
+
+        _ = try await client.generate(
+            ToolIconRequest(
+                displayName: "Compass",
+                iconPrompt: concept,
+                layout: layout,
+                imageProvider: .imagePlayground
+            )
+        )
+        let playground = await capture.last
+        #expect(playground?.provider == .imagePlayground)
+        #expect(playground?.prompt == concept)
+    }
+
     private static func transparentIconImage() throws -> CGImage {
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         guard
@@ -314,6 +483,26 @@ struct ToolImageAssetEncoderTests {
         return data as Data
     }
 
+    private static func multipageTIFFData() throws -> Data {
+        let image = try solidImage(width: 1024, height: 1024)
+        guard let data = NSMutableData(capacity: 1_024),
+            let destination = CGImageDestinationCreateWithData(
+                data,
+                "public.tiff" as CFString,
+                2,
+                nil
+            )
+        else {
+            throw ToolImageAssetEncodingError.couldNotEncodeJPEG
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw ToolImageAssetEncodingError.couldNotEncodeJPEG
+        }
+        return data as Data
+    }
+
     private static func imageProperties(_ data: Data) throws -> (
         type: String?,
         width: Int,
@@ -341,5 +530,21 @@ struct ToolImageAssetEncoderTests {
             withIntermediateDirectories: true
         )
         return url
+    }
+
+    private enum IconEditorTestError: LocalizedError {
+        case buildFailed
+
+        var errorDescription: String? {
+            "build failed"
+        }
+    }
+}
+
+private actor IconEditorPromptCapture {
+    private(set) var last: (provider: ToolImageGenerationProvider, prompt: String)?
+
+    func record(provider: ToolImageGenerationProvider, prompt: String) {
+        last = (provider, prompt)
     }
 }

@@ -7,6 +7,7 @@ struct ToolItemPresentationState {
     let isExporting: Bool
     let isRebuilding: Bool
     let isRestoring: Bool
+    let isChangingIcon: Bool
     let canRevert: Bool
     let showsStoreActions: Bool
     let canUpdateStoreVersion: Bool
@@ -14,7 +15,7 @@ struct ToolItemPresentationState {
     let canShowAgentOutput: Bool
 
     var isBusy: Bool {
-        isLaunching || isExporting || isRebuilding || isRestoring
+        isLaunching || isExporting || isRebuilding || isRestoring || isChangingIcon
     }
 }
 
@@ -24,6 +25,7 @@ struct ToolItemActions {
     let onRun: () -> Void
     let onQuit: () -> Void
     let onRename: () -> Void
+    let onChangeIcon: () -> Void
     let onRebuild: () -> Void
     let onPublishToStore: () -> Void
     let onRevert: () -> Void
@@ -42,6 +44,7 @@ struct ToolItemActions {
         onRun: {},
         onQuit: {},
         onRename: {},
+        onChangeIcon: {},
         onRebuild: {},
         onPublishToStore: {},
         onRevert: {},
@@ -88,6 +91,8 @@ struct ToolItemActionsMenu: View {
         Divider()
         Button("Rename App...", action: actions.onRename)
             .disabled(isGenerating || state.isBusy)
+        Button("Change App Icon...", action: actions.onChangeIcon)
+            .disabled(!tool.isGenerationReady || state.isBusy || isGenerating)
         Button("Rebuild App", action: actions.onRebuild)
             .disabled(!tool.isGenerationReady || state.isBusy)
         if state.showsStoreActions {

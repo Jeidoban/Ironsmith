@@ -12,7 +12,6 @@ struct ToolLibraryStorePublishSheetView: View {
     let publishScreenshotName: String?
     let needsDisplayName: Bool
     let isPublishing: Bool
-    let onSaveDisplayName: () -> Void
     let onChooseScreenshot: (URL) -> Void
     let onCancel: () -> Void
     let onPublish: () -> Void
@@ -24,13 +23,12 @@ struct ToolLibraryStorePublishSheetView: View {
                 .font(.headline)
 
             if needsDisplayName {
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField("Display Name", text: $publishDisplayName)
-                    Button("Save Display Name", action: onSaveDisplayName)
-                        .disabled(
-                            publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .isEmpty)
-                }
+                TextField("Display Name", text: $publishDisplayName)
+                    .onChange(of: publishDisplayName) { _, value in
+                        if value.count > 80 {
+                            publishDisplayName = String(value.prefix(80))
+                        }
+                    }
             }
 
             if !isUpdatingPublishedListing {
@@ -90,9 +88,13 @@ struct ToolLibraryStorePublishSheetView: View {
 
     private var canPublish: Bool {
         listingFieldsAreValid
-            && (!needsDisplayName
-                || !publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && (!needsDisplayName || displayNameIsValid)
             && !tool.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var displayNameIsValid: Bool {
+        let trimmed = publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (1...80).contains(trimmed.count)
     }
 
     private var listingFieldsAreValid: Bool {

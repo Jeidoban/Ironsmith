@@ -1,9 +1,36 @@
 import Foundation
+import SwiftData
 import Testing
 
 @testable import Ironsmith
 
 extension ToolLibraryTests {
+    @MainActor
+    @Test
+    func storePublisherRequestsSignInWithoutShowingGenericError() async {
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies()
+        )
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: .unconfigured,
+            iconClient: .noOp
+        )
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            packageRootPath: "/tmp/ClipboardCleaner"
+        )
+
+        await publisher.beginPublishing(
+            tool,
+            inferenceStore: inferenceStore,
+            tools: [tool]
+        )
+
+        #expect(publisher.pendingSignInToolID == tool.id)
+        #expect(publisher.errorMessage == nil)
+        #expect(!publisher.isShowingPublishSheet)
+    }
+
     @MainActor
     @Test
     func storePublisherLeavesNewListingCopyEmpty() async {
@@ -120,6 +147,87 @@ extension ToolLibraryTests {
         #expect(!publisher.isShowingPublishSheet)
     }
 
+    @MainActor
+    @Test
+    func storePublisherSavesMissingDisplayNameOnceBeforePublishing() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profileCapture = PublisherProfileCapture()
+        let session = Self.ironsmithSession()
+        let accountClient = IronsmithAccountClient(
+            supabase: nil,
+            currentSession: { session },
+            validAccessToken: { "access-token" },
+            generationAccessToken: { "access-token" },
+            signInWithAppleOAuth: { _ in session },
+            signOut: {},
+            fetchAccountSummary: {
+                await profileCapture.summary()
+            },
+            updateProfile: { update in
+                await profileCapture.update(update)
+            },
+            fetchCreditPacks: { [] },
+            createCheckoutSession: { _ in
+                throw IronsmithAccountClientError.notConfigured
+            },
+            deleteAccount: {},
+            invokeAPIData: { _, _ in
+                throw IronsmithAccountClientError.notConfigured
+            }
+        )
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(accountClient: accountClient)
+        )
+        inferenceStore.ironsmithSession = session
+        await inferenceStore.refreshIronsmithAccountSummary()
+        let publicationCapture = PublisherPublicationCapture()
+        let publishedDetail = Self.publisherAppDetail()
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.publishApp = { request in
+            await publicationCapture.record(request)
+            return publishedDetail
+        }
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: storeClient,
+            iconClient: .noOp
+        )
+        publisher.publishName = "Clipboard Cleaner"
+        publisher.publishShortDescription = "Clean copied text"
+        publisher.publishDescription = "Cleans and reformats text."
+        publisher.publishDisplayName = "  Jade Westover  "
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            executableName: "ClipboardCleaner",
+            packageRootPath: root.appendingPathComponent("ClipboardCleaner").path
+        )
+        try Self.writeSource(Self.publisherSource, to: tool)
+        try FileManager.default.createDirectory(
+            at: tool.packageLayout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try Data([1]).write(to: tool.packageLayout.cachedAppIconMasterJPEGURL)
+        try Data([2]).write(to: tool.packageLayout.cachedAppIconThumbnailJPEGURL)
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+
+        await publisher.publish(
+            tool,
+            modelContext: context,
+            inferenceStore: inferenceStore,
+            defaultSettings: .default,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {})
+        )
+
+        let updatedNames = await profileCapture.updatedNames
+        let publicationCount = await publicationCapture.count
+        #expect(updatedNames == ["Jade Westover"])
+        #expect(publicationCount == 1)
+        #expect(publisher.errorMessage == nil)
+    }
+
     private static let publisherSource = """
         import SwiftUI
         struct ContentView: View {
@@ -170,5 +278,52 @@ extension ToolLibraryTests {
             versions: [version],
             remix: nil
         )
+    }
+}
+
+private actor PublisherProfileCapture {
+    private(set) var updatedNames: [String] = []
+    private var displayName: String?
+
+    func summary() -> IronsmithAccountSummary {
+        IronsmithAccountSummary(
+            user: IronsmithAccountUser(
+                id: "00000000-0000-4000-8000-000000000001",
+                email: "jade@example.com"
+            ),
+            profile: displayName.map {
+                IronsmithAccountProfile(
+                    id: "00000000-0000-4000-8000-000000000001",
+                    email: "jade@example.com",
+                    displayName: $0
+                )
+            },
+            credits: IronsmithCreditSummary(
+                userId: "00000000-0000-4000-8000-000000000001",
+                balanceCredits: 100
+            ),
+            recentLedger: []
+        )
+    }
+
+    func update(_ update: IronsmithAccountProfileUpdate) -> IronsmithAccountProfile {
+        let name = update.displayName
+        if let name {
+            updatedNames.append(name)
+        }
+        displayName = name
+        return IronsmithAccountProfile(
+            id: "00000000-0000-4000-8000-000000000001",
+            email: "jade@example.com",
+            displayName: name
+        )
+    }
+}
+
+private actor PublisherPublicationCapture {
+    private(set) var count = 0
+
+    func record(_ request: StorePublicationRequest) {
+        count += 1
     }
 }

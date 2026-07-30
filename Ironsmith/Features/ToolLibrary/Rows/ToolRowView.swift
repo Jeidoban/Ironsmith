@@ -93,6 +93,8 @@ struct ToolRowView: View {
                 iconProgressOverlay("Rebuilding \(tool.name)")
             } else if state.isExporting {
                 iconProgressOverlay("Exporting \(tool.name)")
+            } else if state.isChangingIcon {
+                iconProgressOverlay("Changing icon for \(tool.name)")
             } else if isHoveringRow && canContinue {
                 Button(action: actions.onContinue) {
                     Image(systemName: "play.fill")
@@ -180,6 +182,7 @@ struct ToolRowView: View {
             isExporting: false,
             isRebuilding: false,
             isRestoring: false,
+            isChangingIcon: false,
             canRevert: true,
             showsStoreActions: true,
             canUpdateStoreVersion: false,
@@ -192,6 +195,7 @@ struct ToolRowView: View {
             onRun: {},
             onQuit: {},
             onRename: {},
+            onChangeIcon: {},
             onRebuild: {},
             onPublishToStore: {},
             onRevert: {},

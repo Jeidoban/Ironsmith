@@ -17,6 +17,7 @@ final class ToolLibraryStorePublisher {
     var isShowingPublishSheet = false
     var isPublishing = false
     var errorMessage: String?
+    var pendingSignInToolID: UUID?
 
     @ObservationIgnored private let storeClient: IronsmithStoreClient
     @ObservationIgnored private let iconClient: ToolIconClient
@@ -99,11 +100,13 @@ final class ToolLibraryStorePublisher {
         inferenceStore: InferenceStore,
         tools: [Tool]
     ) async {
+        errorMessage = nil
         await inferenceStore.refreshIronsmithAccountSummary()
         guard inferenceStore.ironsmithSession != nil else {
-            errorMessage = "Sign in with Ironsmith before publishing to the Ironsmith Store."
+            pendingSignInToolID = tool.id
             return
         }
+        pendingSignInToolID = nil
         await refreshPublishedStoreApps(
             isSignedIn: true,
             tools: tools
@@ -142,19 +145,6 @@ final class ToolLibraryStorePublisher {
         isShowingPublishSheet = true
     }
 
-    func saveDisplayName(inferenceStore: InferenceStore) async {
-        let trimmed = publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        do {
-            let profile = try await inferenceStore.updateIronsmithAccountProfile(
-                IronsmithAccountProfileUpdate(displayName: trimmed)
-            )
-            publishDisplayName = profile.displayName ?? trimmed
-        } catch {
-            present(error)
-        }
-    }
-
     func publish(
         _ tool: Tool,
         modelContext: ModelContext,
@@ -168,10 +158,15 @@ final class ToolLibraryStorePublisher {
 
         do {
             if needsDisplayName(inferenceStore: inferenceStore) {
+                let displayName = publishDisplayName.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+                guard (1...80).contains(displayName.count) else {
+                    throw ToolLibraryStorePublishingError.invalidDisplayName
+                }
                 _ = try await inferenceStore.updateIronsmithAccountProfile(
                     IronsmithAccountProfileUpdate(
-                        displayName: publishDisplayName.trimmingCharacters(
-                            in: .whitespacesAndNewlines)
+                        displayName: displayName
                     )
                 )
             }
@@ -288,5 +283,13 @@ final class ToolLibraryStorePublisher {
         errorMessage =
             IronsmithErrorPresentation.message(for: error)
             ?? error.localizedDescription
+    }
+}
+
+private enum ToolLibraryStorePublishingError: LocalizedError {
+    case invalidDisplayName
+
+    var errorDescription: String? {
+        "Enter a display name between 1 and 80 characters."
     }
 }
