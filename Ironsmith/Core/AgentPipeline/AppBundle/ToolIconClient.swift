@@ -85,7 +85,9 @@ struct ToolIconClient: Sendable {
         request.layout.cachedAppIconICNSURL
     }
 
-    static func cachedOnly(fileManager: FileManager = .default) -> ToolIconClient {
+    nonisolated static func cachedOnly(
+        fileManager: FileManager = .default
+    ) -> ToolIconClient {
         let fileManagerBox = ToolIconFileManager(fileManager)
         return ToolIconClient { request in
             if let cached = try Self.prepareCachedIconAssets(

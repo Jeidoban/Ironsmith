@@ -6,6 +6,30 @@ import Testing
 @testable import Ironsmith
 
 extension InferenceTests {
+    @Test
+    func ironsmithAccountProfileResponseDecodesProfileEnvelope() throws {
+        let data = Data(
+            """
+            {
+              "profile": {
+                "id": "user-123",
+                "email": "jade@example.com",
+                "displayName": "Jade Westover"
+              }
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(
+            IronsmithAccountProfileResponse.self,
+            from: data
+        )
+
+        #expect(response.profile.id == "user-123")
+        #expect(response.profile.email == "jade@example.com")
+        #expect(response.profile.displayName == "Jade Westover")
+    }
+
     @MainActor
     @Test
     func ironsmithProviderUsesPlatformCreditsWithoutAPIKey() async throws {

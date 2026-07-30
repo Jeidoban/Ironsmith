@@ -52,7 +52,7 @@ struct ToolLibraryPopoverView: View {
         appUpdateStore: AppUpdateStore,
         welcomeOnboardingStore: WelcomeOnboardingStore? = nil,
         storeClient: IronsmithStoreClient? = nil,
-        iconClient: ToolIconClient = .noOp,
+        iconClient: ToolIconClient = .cachedOnly(),
         iconEditingClient: ToolIconEditingClient? = nil,
         iconBuildClient: ToolBuildClient? = nil
     ) {

@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import SwiftData
 import Testing
 
@@ -228,6 +230,87 @@ extension ToolLibraryTests {
         #expect(publisher.errorMessage == nil)
     }
 
+    @MainActor
+    @Test
+    func storePublisherUpgradesLegacyIconAssetsBeforePublishing() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let publishedDetail = Self.publisherAppDetail()
+        let publicationCapture = PublisherPublicationCapture()
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.publishApp = { request in
+            _ = try ToolImageAssetEncoder.validateIconMasterJPEG(request.iconMasterJPEG)
+            _ = try ToolImageAssetEncoder.validateIconThumbnailJPEG(
+                request.iconThumbnailJPEG
+            )
+            await publicationCapture.record(request)
+            return publishedDetail
+        }
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: storeClient,
+            iconClient: .cachedOnly()
+        )
+        publisher.publishDisplayName = "Jade Westover"
+        publisher.publishShortDescription = "Clean copied text"
+        publisher.publishDescription = "Cleans and reformats text."
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            executableName: "ClipboardCleaner",
+            packageRootPath: root.appendingPathComponent("ClipboardCleaner").path
+        )
+        try Self.writeSource(Self.publisherSource, to: tool)
+        try FileManager.default.createDirectory(
+            at: tool.packageLayout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try Self.publisherLegacyIconPNG().write(
+            to: tool.packageLayout.cachedAppIconPNGURL,
+            options: .atomic
+        )
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(
+                accountClient: Self.ironsmithAccountClient(balanceCredits: 100)
+            )
+        )
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
+
+        await publisher.publish(
+            tool,
+            modelContext: context,
+            inferenceStore: inferenceStore,
+            defaultSettings: .default,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {})
+        )
+
+        let publicationCount = await publicationCapture.count
+        #expect(publicationCount == 1)
+        #expect(publisher.errorMessage == nil)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: tool.packageLayout.cachedAppIconMasterJPEGURL.path
+            )
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: tool.packageLayout.cachedAppIconThumbnailJPEGURL.path
+            )
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: tool.packageLayout.cachedAppIconICNSURL.path
+            )
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: tool.packageLayout.cachedAppIconPNGURL.path
+            )
+        )
+    }
+
     private static let publisherSource = """
         import SwiftUI
         struct ContentView: View {
@@ -242,6 +325,36 @@ extension ToolLibraryTests {
             withIntermediateDirectories: true
         )
         try source.write(to: sourceURL, atomically: true, encoding: .utf8)
+    }
+
+    private static func publisherLegacyIconPNG() throws -> Data {
+        let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try #require(
+            CGContext(
+                data: nil,
+                width: 1024,
+                height: 1024,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        )
+        context.setFillColor(CGColor(red: 0.2, green: 0.6, blue: 0.8, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1024, height: 1024))
+        let image = try #require(context.makeImage())
+        let data = NSMutableData()
+        let destination = try #require(
+            CGImageDestinationCreateWithData(
+                data,
+                "public.png" as CFString,
+                1,
+                nil
+            )
+        )
+        CGImageDestinationAddImage(destination, image, nil)
+        try #require(CGImageDestinationFinalize(destination))
+        return data as Data
     }
 
     private static func publisherAppDetail() -> StoreAppDetail {
