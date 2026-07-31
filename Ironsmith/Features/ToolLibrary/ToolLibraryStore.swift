@@ -912,6 +912,7 @@ final class ToolLibraryStore {
                         tool.name = preparedTool.name
                         tool.executableName = preparedTool.executableName
                         tool.bundleIdentifier = preparedTool.bundleIdentifier
+                        tool.category = preparedTool.category
                         tool.applyGenerationSettings(preparedTool.settings)
                         tool.packageRootPath = preparedTool.packageRootURL.path
                         tool.generationState = .generating
@@ -926,6 +927,7 @@ final class ToolLibraryStore {
                             name: preparedTool.name,
                             executableName: preparedTool.executableName,
                             bundleIdentifier: preparedTool.bundleIdentifier,
+                            category: preparedTool.category,
                             sandboxEnabled: preparedTool.settings.sandboxEnabled,
                             appKind: preparedTool.settings.appKind,
                             menuBarSystemImage: preparedTool.settings.menuBarSystemImage,
@@ -1058,6 +1060,7 @@ final class ToolLibraryStore {
         tool.name = result.toolName
         tool.executableName = result.executableName
         tool.bundleIdentifier = result.bundleIdentifier
+        tool.category = result.category
         tool.applyGenerationSettings(result.settings)
         tool.packageRootPath = result.packageRootURL.path
         clearPendingGeneration(on: tool)

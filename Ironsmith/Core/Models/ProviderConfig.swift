@@ -44,7 +44,7 @@ enum OpenAICompatibleAPIVariant: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-typealias ProviderConfig = IronsmithSchemaV5.ProviderConfig
+typealias ProviderConfig = IronsmithSchemaV6.ProviderConfig
 
 extension ProviderConfig {
     static let localProviderIdentifier = "local"

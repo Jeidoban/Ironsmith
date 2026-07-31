@@ -8,13 +8,14 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
-    func generatedMetadataSchemaIncludesNameIconAndMenuBarSymbolOnly() throws {
+    func generatedMetadataSchemaIncludesNameIconMenuBarSymbolAndCategory() throws {
         let data = try JSONEncoder().encode(GeneratedToolMetadata.generationSchema)
         let schema = try #require(String(data: data, encoding: .utf8))
 
         #expect(schema.contains("displayName"))
         #expect(schema.contains("iconPrompt"))
         #expect(schema.contains("menuBarSystemImage"))
+        #expect(schema.contains("category"))
         #expect(!(schema.contains("refinedPrompt")))
     }
 
@@ -38,9 +39,12 @@ extension AgentPipelineTests {
         #expect(suggestion.displayName == "Recipe Board")
         #expect(suggestion.iconPrompt == "Recipe cards")
         #expect(suggestion.menuBarSystemImage == ToolMenuBarSymbol.fallback)
+        #expect(suggestion.category == .utilities)
         let prompt = try #require(await response.prompts.first)
         #expect(prompt.contains("User request:\nrecipes"))
         #expect(prompt.contains("Allowed menuBarSystemImage values:"))
+        #expect(prompt.contains("Allowed category values:"))
+        #expect(prompt.contains(StoreAppCategory.graphicsDesign.rawValue))
         #expect(!(prompt.contains("Planning budget:")))
         #expect(!(prompt.contains("Refined prompt:")))
         #expect(!(prompt.contains("backend")))
@@ -94,6 +98,52 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func metadataSuggestionUsesValidatedStoreCategory() async throws {
+        let response = StructuredMetadataResponse(
+            metadata: GeneratedToolMetadata(
+                displayName: "Budget Board",
+                iconPrompt: "Ledger with coins",
+                menuBarSystemImage: ToolMenuBarSymbol.fallback,
+                category: StoreAppCategory.finance.rawValue
+            )
+        )
+
+        let suggestion = await ToolMetadataClient.live().suggestMetadata(
+            userPrompt: "Build a budget planner",
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
+        )
+
+        #expect(suggestion.category == .finance)
+    }
+
+    @MainActor
+    @Test
+    func metadataSuggestionFallsBackForInvalidStoreCategory() async throws {
+        let response = StructuredMetadataResponse(
+            metadata: GeneratedToolMetadata(
+                displayName: "Budget Board",
+                iconPrompt: "Ledger with coins",
+                menuBarSystemImage: ToolMenuBarSymbol.fallback,
+                category: "not-a-category"
+            )
+        )
+
+        let suggestion = await ToolMetadataClient.live().suggestMetadata(
+            userPrompt: "Build a budget planner",
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
+        )
+
+        #expect(suggestion.category == .utilities)
+    }
+
+    @MainActor
+    @Test
     func liveMetadataClientFallsBackWhenStructuredGenerationFails() async throws {
         let response = StructuredMetadataResponse(error: FakeAgentError.expected)
 
@@ -107,6 +157,7 @@ extension AgentPipelineTests {
 
         #expect(suggestion.displayName == "Build A Pantry Tracker")
         #expect(suggestion.iconPrompt == "")
+        #expect(suggestion.category == .utilities)
     }
 
     @MainActor

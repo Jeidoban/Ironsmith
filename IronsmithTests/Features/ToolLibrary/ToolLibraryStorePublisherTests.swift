@@ -136,6 +136,7 @@ extension ToolLibraryTests {
         )
         tool.storeId = detail.storeId
         tool.storeAppId = detail.id
+        tool.storeVersionNumber = 1
         try Self.writeSource(Self.publisherSource, to: tool)
 
         await publisher.beginPublishing(
@@ -145,6 +146,7 @@ extension ToolLibraryTests {
         )
 
         #expect(publisher.errorMessage?.contains("currently published version") == true)
+        #expect(tool.storeVersionNumber == 1)
         #expect(!publisher.isShowingPublishSheet)
     }
 
@@ -189,9 +191,16 @@ extension ToolLibraryTests {
             await publicationCapture.record(request)
             return publishedDetail
         }
+        let buildCapture = PublisherBuildCapture()
         let publisher = ToolLibraryStorePublisher(
             storeClient: storeClient,
-            iconClient: .noOp
+            iconClient: .noOp,
+            buildClient: ToolBuildClient { tool in
+                await buildCapture.record(
+                    category: tool.category,
+                    versionNumber: tool.appVersionNumber
+                )
+            }
         )
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
@@ -227,6 +236,8 @@ extension ToolLibraryTests {
         #expect(updatedNames == ["Jade Westover"])
         #expect(publicationCount == 1)
         #expect(publishedName == tool.name)
+        #expect(tool.storeVersionNumber == 1)
+        #expect(await buildCapture.versionNumbers == [1])
         #expect(publisher.errorMessage == nil)
     }
 
@@ -248,7 +259,8 @@ extension ToolLibraryTests {
         }
         let publisher = ToolLibraryStorePublisher(
             storeClient: storeClient,
-            iconClient: .cachedOnly()
+            iconClient: .cachedOnly(),
+            buildClient: ToolBuildClient { _ in }
         )
         publisher.publishDisplayName = "Jade Westover"
         publisher.publishShortDescription = "Clean copied text"
@@ -311,6 +323,160 @@ extension ToolLibraryTests {
         )
     }
 
+    @MainActor
+    @Test
+    func successfulVersionPublicationPersistsReturnedCategoryAndRebuildsAtReturnedVersion()
+        async throws
+    {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let changedSource = Self.publisherSource.replacingOccurrences(
+            of: "Published",
+            with: "Version Two"
+        )
+        let previousDetail = Self.publisherAppDetail()
+        let publishedDetail = Self.publisherAppDetail(
+            versionNumber: 2,
+            category: .finance,
+            source: changedSource
+        )
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.publishVersion = { _ in publishedDetail }
+        let buildCapture = PublisherBuildCapture()
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: storeClient,
+            iconClient: .noOp,
+            buildClient: ToolBuildClient { tool in
+                await buildCapture.record(
+                    category: tool.category,
+                    versionNumber: tool.appVersionNumber
+                )
+            }
+        )
+        publisher.publishedStoreAppsByID[previousDetail.id] = StoreAppSummary(
+            detail: previousDetail
+        )
+        publisher.publishDisplayName = "Jade Westover"
+        publisher.publishShortDescription = "Clean copied text"
+        publisher.publishDescription = "Cleans and reformats text."
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            executableName: "ClipboardCleaner",
+            category: .utilities,
+            packageRootPath: root.appendingPathComponent("ClipboardCleaner").path,
+            storeId: previousDetail.storeId,
+            storeAppId: previousDetail.id,
+            storeVersionId: previousDetail.currentVersion.id,
+            storeVersionNumber: 1
+        )
+        try Self.writeSource(changedSource, to: tool)
+        try FileManager.default.createDirectory(
+            at: tool.packageLayout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try Data([1]).write(to: tool.packageLayout.cachedAppIconMasterJPEGURL)
+        try Data([2]).write(to: tool.packageLayout.cachedAppIconThumbnailJPEGURL)
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(
+                accountClient: Self.ironsmithAccountClient(balanceCredits: 100)
+            )
+        )
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
+
+        await publisher.publish(
+            tool,
+            modelContext: context,
+            inferenceStore: inferenceStore,
+            defaultSettings: .default,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {})
+        )
+
+        #expect(tool.category == .finance)
+        #expect(tool.storeVersionId == publishedDetail.currentVersion.id)
+        #expect(tool.storeVersionNumber == 2)
+        #expect(await buildCapture.categories == [.finance])
+        #expect(await buildCapture.versionNumbers == [2])
+        #expect(publisher.errorMessage == nil)
+        #expect(!publisher.isShowingPublishSheet)
+    }
+
+    @MainActor
+    @Test
+    func localRebuildFailurePreservesSuccessfulVersionPublicationAndShowsWarning() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let changedSource = Self.publisherSource.replacingOccurrences(
+            of: "Published",
+            with: "Version Two"
+        )
+        let previousDetail = Self.publisherAppDetail()
+        let publishedDetail = Self.publisherAppDetail(
+            versionNumber: 2,
+            category: .music,
+            source: changedSource
+        )
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.publishVersion = { _ in publishedDetail }
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: storeClient,
+            iconClient: .noOp,
+            buildClient: ToolBuildClient { _ in
+                throw PublisherBuildError.failed
+            }
+        )
+        publisher.publishedStoreAppsByID[previousDetail.id] = StoreAppSummary(
+            detail: previousDetail
+        )
+        publisher.publishDisplayName = "Jade Westover"
+        publisher.publishShortDescription = "Clean copied text"
+        publisher.publishDescription = "Cleans and reformats text."
+        publisher.isShowingPublishSheet = true
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            executableName: "ClipboardCleaner",
+            packageRootPath: root.appendingPathComponent("ClipboardCleaner").path,
+            storeId: previousDetail.storeId,
+            storeAppId: previousDetail.id,
+            storeVersionId: previousDetail.currentVersion.id,
+            storeVersionNumber: 1
+        )
+        try Self.writeSource(changedSource, to: tool)
+        try FileManager.default.createDirectory(
+            at: tool.packageLayout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try Data([1]).write(to: tool.packageLayout.cachedAppIconMasterJPEGURL)
+        try Data([2]).write(to: tool.packageLayout.cachedAppIconThumbnailJPEGURL)
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(
+                accountClient: Self.ironsmithAccountClient(balanceCredits: 100)
+            )
+        )
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
+
+        await publisher.publish(
+            tool,
+            modelContext: context,
+            inferenceStore: inferenceStore,
+            defaultSettings: .default,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {})
+        )
+
+        #expect(tool.category == .music)
+        #expect(tool.storeVersionId == publishedDetail.currentVersion.id)
+        #expect(tool.storeVersionNumber == 2)
+        #expect(publisher.errorMessage?.contains("published successfully") == true)
+        #expect(!publisher.isShowingPublishSheet)
+    }
+
     private static let publisherSource = """
         import SwiftUI
         struct ContentView: View {
@@ -357,13 +523,17 @@ extension ToolLibraryTests {
         return data as Data
     }
 
-    private static func publisherAppDetail() -> StoreAppDetail {
+    private static func publisherAppDetail(
+        versionNumber: Int = 1,
+        category: StoreAppCategory = .utilities,
+        source: String = publisherSource
+    ) -> StoreAppDetail {
         let appID = "00000000-0000-4000-8000-000000000101"
         let version = StoreVersionMetadata(
             id: "00000000-0000-4000-8000-000000000201",
             appId: appID,
-            versionNumber: 1,
-            sourceSha256: IronsmithStoreClient.sha256Hex(for: publisherSource),
+            versionNumber: versionNumber,
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: source),
             generationSettings: StoreGenerationSettingsDTO(settings: .default),
             runtimeVersion: "ironsmith-macos-v1",
             license: "MIT",
@@ -379,7 +549,7 @@ extension ToolLibraryTests {
             name: "Clipboard Cleaner",
             shortDescription: "Clean copied text",
             description: "Cleans and reformats text from the clipboard.",
-            category: .utilities,
+            category: category,
             status: .published,
             publishedAt: "2026-07-28T00:00:00.000Z",
             createdAt: "2026-07-28T00:00:00.000Z",
@@ -440,5 +610,23 @@ private actor PublisherPublicationCapture {
     func record(_ request: StorePublicationRequest) {
         count += 1
         lastName = request.name
+    }
+}
+
+private actor PublisherBuildCapture {
+    private(set) var categories: [StoreAppCategory] = []
+    private(set) var versionNumbers: [Int] = []
+
+    func record(category: StoreAppCategory, versionNumber: Int) {
+        categories.append(category)
+        versionNumbers.append(versionNumber)
+    }
+}
+
+private enum PublisherBuildError: LocalizedError {
+    case failed
+
+    var errorDescription: String? {
+        "The test bundle could not be rebuilt."
     }
 }

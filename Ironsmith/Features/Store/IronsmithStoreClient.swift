@@ -30,57 +30,6 @@ nonisolated enum StoreAssetKind: String, Codable, Equatable, Sendable {
     case screenshot
 }
 
-nonisolated enum StoreAppCategory: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
-    case business
-    case developerTools
-    case education
-    case entertainment
-    case finance
-    case games
-    case graphicsDesign
-    case healthFitness
-    case lifestyle
-    case music
-    case productivity
-    case utilities
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .business: "Business"
-        case .developerTools: "Developer Tools"
-        case .education: "Education"
-        case .entertainment: "Entertainment"
-        case .finance: "Finance"
-        case .games: "Games"
-        case .graphicsDesign: "Graphics & Design"
-        case .healthFitness: "Health & Fitness"
-        case .lifestyle: "Lifestyle"
-        case .music: "Music"
-        case .productivity: "Productivity"
-        case .utilities: "Utilities"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .business: "briefcase"
-        case .developerTools: "hammer"
-        case .education: "graduationcap"
-        case .entertainment: "play.rectangle"
-        case .finance: "dollarsign.circle"
-        case .games: "gamecontroller"
-        case .graphicsDesign: "paintbrush"
-        case .healthFitness: "heart"
-        case .lifestyle: "leaf"
-        case .music: "music.note"
-        case .productivity: "checkmark.circle"
-        case .utilities: "wrench.and.screwdriver"
-        }
-    }
-}
-
 nonisolated enum StoreAppListSort: String, Codable, Hashable, Sendable {
     case recent
     case trending

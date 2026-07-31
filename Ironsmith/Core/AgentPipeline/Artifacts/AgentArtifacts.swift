@@ -225,6 +225,7 @@ struct ToolGenerationResult: Equatable, Sendable {
     let toolName: String
     let executableName: String
     let bundleIdentifier: String
+    let category: StoreAppCategory
     let settings: ToolGenerationSettings
     let packageRootURL: URL
 
@@ -232,6 +233,7 @@ struct ToolGenerationResult: Equatable, Sendable {
         toolName: String,
         executableName: String,
         bundleIdentifier: String? = nil,
+        category: StoreAppCategory = .utilities,
         settings: ToolGenerationSettings,
         packageRootURL: URL
     ) {
@@ -239,6 +241,7 @@ struct ToolGenerationResult: Equatable, Sendable {
         self.executableName = executableName
         self.bundleIdentifier =
             bundleIdentifier ?? ToolBundleIdentifier.make(executableName: executableName)
+        self.category = category
         self.settings = settings
         self.packageRootURL = packageRootURL
     }

@@ -4,6 +4,7 @@ nonisolated struct ToolGenerationPreparedTool {
     let name: String
     let executableName: String
     let bundleIdentifier: String
+    let category: StoreAppCategory
     let settings: ToolGenerationSettings
     let packageRootURL: URL
 
@@ -11,12 +12,14 @@ nonisolated struct ToolGenerationPreparedTool {
         name: String,
         executableName: String,
         bundleIdentifier: String,
+        category: StoreAppCategory = .utilities,
         settings: ToolGenerationSettings,
         packageRootURL: URL
     ) {
         self.name = name
         self.executableName = executableName
         self.bundleIdentifier = bundleIdentifier
+        self.category = category
         self.settings = settings
         self.packageRootURL = packageRootURL
     }

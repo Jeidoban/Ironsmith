@@ -10,6 +10,7 @@ struct SingleFileToolGenerationRuntime {
         let displayName: String
         let executableName: String
         let bundleIdentifier: String
+        let category: StoreAppCategory
         let layout: ToolPackageLayout
         let contentViewPath: String
         let iconPrompt: String?
@@ -88,6 +89,7 @@ struct SingleFileToolGenerationRuntime {
             displayName: tool.name,
             executableName: tool.executableName,
             bundleIdentifier: tool.bundleIdentifier,
+            category: tool.category,
             layout: layout,
             contentViewPath: layout.contentViewSourcePath,
             iconPrompt: nil,
@@ -122,6 +124,7 @@ struct SingleFileToolGenerationRuntime {
                     name: displayName,
                     executableName: executableName,
                     bundleIdentifier: bundleIdentifier,
+                    category: metadata.category,
                     settings: resolvedSettings,
                     packageRootURL: packageRootURL
                 ),
@@ -139,6 +142,7 @@ struct SingleFileToolGenerationRuntime {
             displayName: displayName,
             executableName: executableName,
             bundleIdentifier: bundleIdentifier,
+            category: metadata.category,
             layout: layout,
             contentViewPath: contentViewPath,
             iconPrompt: metadata.iconPrompt,
@@ -161,6 +165,7 @@ struct SingleFileToolGenerationRuntime {
                 name: displayName,
                 executableName: executableName,
                 bundleIdentifier: ToolBundleIdentifier.make(executableName: executableName),
+                category: .utilities,
                 settings: settings,
                 packageRootURL: packageRootURL
             ),
@@ -278,6 +283,8 @@ struct SingleFileToolGenerationRuntime {
                     displayName: setup.displayName,
                     executableName: setup.executableName,
                     bundleIdentifier: setup.bundleIdentifier,
+                    category: setup.category,
+                    versionNumber: 1,
                     packageRootURL: setup.layout.packageRootURL,
                     settings: setup.settings,
                     iconPrompt: setup.iconPrompt,
@@ -299,6 +306,8 @@ struct SingleFileToolGenerationRuntime {
                     displayName: setup.displayName,
                     executableName: setup.executableName,
                     bundleIdentifier: setup.bundleIdentifier,
+                    category: setup.category,
+                    versionNumber: 1,
                     packageRootURL: setup.layout.packageRootURL,
                     settings: setup.settings,
                     iconPrompt: setup.iconPrompt,
@@ -331,6 +340,8 @@ struct SingleFileToolGenerationRuntime {
                 displayName: setup.displayName,
                 executableName: setup.executableName,
                 bundleIdentifier: setup.bundleIdentifier,
+                category: setup.category,
+                versionNumber: 1,
                 packageRootURL: setup.layout.packageRootURL,
                 settings: setup.settings,
                 iconPrompt: setup.iconPrompt,
@@ -430,6 +441,8 @@ struct SingleFileToolGenerationRuntime {
                 displayName: existingTool.name,
                 executableName: existingTool.executableName,
                 bundleIdentifier: existingTool.bundleIdentifier,
+                category: existingTool.category,
+                versionNumber: existingTool.appVersionNumber,
                 packageRootURL: existingTool.packageRootURL,
                 settings: settings,
                 iconPrompt: nil,
@@ -480,13 +493,7 @@ struct SingleFileToolGenerationRuntime {
                 try Task.checkCancellation()
                 try await lifecycle.updatePhase(.generating, .packaging, nil)
                 _ = try await context.appBundleClient.buildInternalApp(
-                    ToolAppBundleRequest(
-                        displayName: existingTool.name,
-                        executableName: existingTool.executableName,
-                        bundleIdentifier: existingTool.bundleIdentifier,
-                        packageRootURL: existingTool.packageRootURL,
-                        settings: settings
-                    )
+                    ToolAppBundleRequest.forTool(existingTool, settings: settings)
                 )
                 try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
                 try context.versionBackupClient.promoteStagedVersion(backup)
@@ -494,6 +501,7 @@ struct SingleFileToolGenerationRuntime {
                     toolName: existingTool.name,
                     executableName: existingTool.executableName,
                     bundleIdentifier: existingTool.bundleIdentifier,
+                    category: existingTool.category,
                     settings: settings,
                     packageRootURL: existingTool.packageRootURL
                 )
@@ -521,13 +529,7 @@ struct SingleFileToolGenerationRuntime {
             try Task.checkCancellation()
             try await lifecycle.updatePhase(.generating, .packaging, nil)
             _ = try await context.appBundleClient.buildInternalApp(
-                ToolAppBundleRequest(
-                    displayName: existingTool.name,
-                    executableName: existingTool.executableName,
-                    bundleIdentifier: existingTool.bundleIdentifier,
-                    packageRootURL: existingTool.packageRootURL,
-                    settings: settings
-                )
+                ToolAppBundleRequest.forTool(existingTool, settings: settings)
             )
             try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             try context.versionBackupClient.promoteStagedVersion(backup)
@@ -553,6 +555,7 @@ struct SingleFileToolGenerationRuntime {
             toolName: existingTool.name,
             executableName: existingTool.executableName,
             bundleIdentifier: existingTool.bundleIdentifier,
+            category: existingTool.category,
             settings: settings,
             packageRootURL: existingTool.packageRootURL
         )
@@ -1297,6 +1300,8 @@ struct SingleFileToolGenerationRuntime {
         displayName: String,
         executableName: String,
         bundleIdentifier: String,
+        category: StoreAppCategory,
+        versionNumber: Int,
         packageRootURL: URL,
         settings: ToolGenerationSettings,
         iconPrompt: String?,
@@ -1322,6 +1327,8 @@ struct SingleFileToolGenerationRuntime {
                 executableName: executableName,
                 bundleIdentifier: bundleIdentifier,
                 packageRootURL: packageRootURL,
+                category: category,
+                versionNumber: versionNumber,
                 settings: settings,
                 iconPrompt: iconPrompt
             )
@@ -1332,6 +1339,7 @@ struct SingleFileToolGenerationRuntime {
             toolName: displayName,
             executableName: executableName,
             bundleIdentifier: bundleIdentifier,
+            category: category,
             settings: settings,
             packageRootURL: packageRootURL
         )

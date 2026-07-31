@@ -297,9 +297,9 @@ struct ToolAppBundleClient {
             "CFBundleInfoDictionaryVersion": "6.0",
             "CFBundleName": request.displayName,
             "CFBundlePackageType": "APPL",
-            "CFBundleShortVersionString": "1.0",
-            "CFBundleVersion": "1",
-            "LSApplicationCategoryType": "public.app-category.utilities",
+            "CFBundleShortVersionString": "\(request.versionNumber).0",
+            "CFBundleVersion": "\(request.versionNumber)",
+            "LSApplicationCategoryType": request.category.applicationCategoryType,
             "LSMinimumSystemVersion": "26.0",
         ]
 

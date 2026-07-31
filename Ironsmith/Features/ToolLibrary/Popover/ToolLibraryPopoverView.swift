@@ -58,16 +58,18 @@ struct ToolLibraryPopoverView: View {
     ) {
         self.appUpdateStore = appUpdateStore
         self.welcomeOnboardingStore = welcomeOnboardingStore ?? WelcomeOnboardingStore()
+        let buildClient = iconBuildClient ?? .live()
         _storePublisher = State(
             initialValue: ToolLibraryStorePublisher(
                 storeClient: storeClient ?? .live,
-                iconClient: iconClient
+                iconClient: iconClient,
+                buildClient: buildClient
             )
         )
         _detailsEditor = State(
             initialValue: ToolAppDetailsEditorStore(
                 iconClient: iconEditingClient,
-                buildClient: iconBuildClient
+                buildClient: buildClient
             )
         )
     }

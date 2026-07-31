@@ -5,6 +5,8 @@ struct ToolAppBundleRequest: Equatable, Sendable {
     let executableName: String
     let bundleIdentifier: String
     let packageRootURL: URL
+    let category: StoreAppCategory
+    let versionNumber: Int
     let settings: ToolGenerationSettings
     let iconPrompt: String?
 
@@ -33,6 +35,8 @@ struct ToolAppBundleRequest: Equatable, Sendable {
         executableName: String,
         bundleIdentifier: String,
         packageRootURL: URL,
+        category: StoreAppCategory = .utilities,
+        versionNumber: Int = 1,
         settings: ToolGenerationSettings,
         iconPrompt: String? = nil
     ) {
@@ -40,6 +44,8 @@ struct ToolAppBundleRequest: Equatable, Sendable {
         self.executableName = executableName
         self.bundleIdentifier = bundleIdentifier
         self.packageRootURL = packageRootURL
+        self.category = category
+        self.versionNumber = max(1, versionNumber)
         self.settings = settings
         self.iconPrompt = iconPrompt
     }
@@ -61,7 +67,25 @@ struct ToolAppBundleRequest: Equatable, Sendable {
             executableName: tool.executableName,
             bundleIdentifier: tool.bundleIdentifier,
             packageRootURL: tool.packageRootURL,
+            category: tool.category,
+            versionNumber: tool.appVersionNumber,
             settings: tool.generationSettings(defaults: defaults),
+            iconPrompt: nil
+        )
+    }
+
+    static func forTool(
+        _ tool: Tool,
+        settings: ToolGenerationSettings
+    ) -> ToolAppBundleRequest {
+        ToolAppBundleRequest(
+            displayName: tool.name,
+            executableName: tool.executableName,
+            bundleIdentifier: tool.bundleIdentifier,
+            packageRootURL: tool.packageRootURL,
+            category: tool.category,
+            versionNumber: tool.appVersionNumber,
+            settings: settings,
             iconPrompt: nil
         )
     }
