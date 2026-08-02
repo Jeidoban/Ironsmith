@@ -20,7 +20,7 @@ enum ModelInstallState: String, Codable, CaseIterable {
     case failed
 }
 
-typealias ModelConfig = IronsmithSchemaV6.ModelConfig
+typealias ModelConfig = IronsmithSchemaV7.ModelConfig
 
 extension ModelConfig {
     static let appleFoundationIdentifier = "apple.foundation"

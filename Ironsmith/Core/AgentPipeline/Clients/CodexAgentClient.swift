@@ -45,6 +45,8 @@ nonisolated struct CodexAgentRequest: Sendable {
     let sandboxEnabled: Bool
     let userPrompt: String
     let modelIdentifier: String
+    let modelFamily: ToolModelFamily
+    let contextWindowTokens: Int?
     let reasoningEffort: ToolReasoningEffort
     let authentication: CodexAgentAuthentication
     let supportsImageInput: Bool
@@ -76,6 +78,8 @@ nonisolated struct CodexAgentRequest: Sendable {
         sandboxEnabled: Bool,
         userPrompt: String,
         modelIdentifier: String,
+        modelFamily: ToolModelFamily? = nil,
+        contextWindowTokens: Int? = nil,
         reasoningEffort: ToolReasoningEffort = .default,
         authentication: CodexAgentAuthentication,
         supportsImageInput: Bool = true,
@@ -88,6 +92,8 @@ nonisolated struct CodexAgentRequest: Sendable {
         self.sandboxEnabled = sandboxEnabled
         self.userPrompt = userPrompt
         self.modelIdentifier = modelIdentifier
+        self.modelFamily = modelFamily ?? ToolModelFamily.resolved(identifier: modelIdentifier)
+        self.contextWindowTokens = contextWindowTokens
         self.reasoningEffort = reasoningEffort
         self.authentication = authentication
         self.supportsImageInput = supportsImageInput
@@ -504,11 +510,13 @@ extension CodexAgentClient {
                 customProviderArguments = configurationArguments(for: provider)
             }
 
-            let latestSession = CodexAgentTranscriptReader.latestSession(
-                for: request.packageRootURL,
-                providerIdentifier: request.sessionProviderIdentifier,
-                toolCompatibility: request.toolCompatibility
-            )
+            let latestSession = request.modelFamily == .claude
+                ? nil
+                : CodexAgentTranscriptReader.latestSession(
+                    for: request.packageRootURL,
+                    providerIdentifier: request.sessionProviderIdentifier,
+                    toolCompatibility: request.toolCompatibility
+                )
             let layout = ToolPackageLayout(
                 packageRootURL: request.packageRootURL,
                 executableName: request.executableName
@@ -567,6 +575,7 @@ extension CodexAgentClient {
             if let model = modelArgument(from: request.modelIdentifier) {
                 arguments.append(contentsOf: ["--model", model])
             }
+            arguments.append(contentsOf: contextConfigurationArguments(for: request.contextWindowTokens))
             if request.reasoningEffort != .default {
                 arguments.append(contentsOf: [
                     "-c", "model_reasoning_effort=\(tomlString(request.reasoningEffort.rawValue))",
@@ -717,6 +726,26 @@ extension CodexAgentClient {
         if let environmentVariable = provider.authenticationEnvironmentVariable {
             arguments.append(contentsOf: [
                 "-c", "\(prefix).env_key=\(tomlString(environmentVariable))",
+            ])
+        }
+        return arguments
+    }
+
+    nonisolated private static func contextConfigurationArguments(
+        for managedContextWindowTokens: Int?
+    ) -> [String] {
+        guard let managedContextWindowTokens, managedContextWindowTokens > 0 else { return [] }
+        let maximumConfiguredContextWindowTokens = 272_000
+        let contextWindowTokens = min(
+            managedContextWindowTokens,
+            maximumConfiguredContextWindowTokens
+        )
+        var arguments = [
+            "-c", "model_context_window=\(contextWindowTokens)",
+        ]
+        if managedContextWindowTokens < maximumConfiguredContextWindowTokens {
+            arguments.append(contentsOf: [
+                "-c", "model_auto_compact_token_limit=\(managedContextWindowTokens * 4 / 5)",
             ])
         }
         return arguments

@@ -629,6 +629,8 @@ struct SingleFileToolGenerationRuntime {
             sandboxEnabled: settings.sandboxEnabled,
             userPrompt: userPrompt,
             modelIdentifier: context.codingAgentModelIdentifier,
+            modelFamily: context.codingAgentModelFamily,
+            contextWindowTokens: context.codingAgentContextWindowTokens,
             reasoningEffort: context.reasoningEffort,
             authentication: authentication,
             supportsImageInput: context.codingAgentSupportsImageInput

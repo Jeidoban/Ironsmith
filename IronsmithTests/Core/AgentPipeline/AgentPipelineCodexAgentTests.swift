@@ -518,6 +518,142 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func codexAgentClientConfiguresManagedContextWindows() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+
+        let cases: [(context: Int?, expectedContext: String?, expectedCompact: String?)] = [
+            (nil, nil, nil),
+            (200_000, "model_context_window=200000", "model_auto_compact_token_limit=160000"),
+            (272_000, "model_context_window=272000", nil),
+            (1_050_000, "model_context_window=272000", nil),
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let packageRoot = root.appendingPathComponent("Generated-\(index)", isDirectory: true)
+            try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+            let cliCapture = CodexAgentCLICapture()
+            let cliClient = CodexCLIClient(
+                run: { _ in CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0) },
+                runStreaming: { arguments, environment, _, _ in
+                    await cliCapture.record(arguments: arguments, environment: environment)
+                    return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+                }
+            )
+            let client = CodexAgentClient.live(
+                cliClient: cliClient,
+                openAICodexAuthClient: .unconfigured,
+                temporaryDirectory: temporaryDirectory
+            )
+
+            _ = try await client.run(
+                CodexAgentRequest(
+                    packageRootURL: packageRoot,
+                    executableName: "Demo",
+                    displayName: "Demo",
+                    appKind: .window,
+                    sandboxEnabled: true,
+                    userPrompt: "Make a demo",
+                    modelIdentifier: "openai/gpt-5.5",
+                    contextWindowTokens: testCase.context,
+                    authentication: .apiKey("sk-test")
+                )
+            )
+
+            let arguments = try #require(await cliCapture.arguments)
+            let contextArguments = arguments.filter { $0.hasPrefix("model_context_window=") }
+            let compactArguments = arguments.filter {
+                $0.hasPrefix("model_auto_compact_token_limit=")
+            }
+            #expect(contextArguments == testCase.expectedContext.map { [$0] } ?? [])
+            #expect(compactArguments == testCase.expectedCompact.map { [$0] } ?? [])
+        }
+    }
+
+    @Test
+    func codexAgentClientSkipsResumeOnlyForClaudeFamily() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        let provider = CodexAgentCustomResponsesProvider(
+            configurationIdentifier: "ironsmith",
+            sessionProviderIdentifier: "ironsmith",
+            displayName: "Ironsmith",
+            baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
+            authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
+            authenticationToken: "token"
+        )
+        let cases: [(family: ToolModelFamily, identifier: String, shouldResume: Bool)] = [
+            (.claude, "anthropic/claude-sonnet", false),
+            (.gemini, "google/gemini-pro", true),
+            (.other, "deepseek/deepseek-v4", true),
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let packageRoot = root.appendingPathComponent("Generated-\(index)", isDirectory: true)
+            let transcriptDirectory = CodexAgentTranscriptReader.transcriptDirectoryURL(
+                for: packageRoot
+            )
+            try FileManager.default.createDirectory(
+                at: transcriptDirectory,
+                withIntermediateDirectories: true
+            )
+            let previousTranscriptURL = transcriptDirectory.appendingPathComponent("agent-previous.jsonl")
+            try """
+            {"type":"thread.started","thread_id":"thread-\(index)"}
+            {"type":"turn.completed"}
+            """
+            .write(to: previousTranscriptURL, atomically: true, encoding: .utf8)
+            try CodexAgentTranscriptReader.writeMetadata(
+                CodexAgentSessionMetadata(
+                    providerIdentifier: "ironsmith",
+                    toolCompatibility: .portable,
+                    transcriptFileName: previousTranscriptURL.lastPathComponent
+                ),
+                for: previousTranscriptURL
+            )
+
+            let cliCapture = CodexAgentCLICapture()
+            let cliClient = CodexCLIClient(
+                run: { _ in CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0) },
+                runStreaming: { arguments, environment, _, _ in
+                    await cliCapture.record(arguments: arguments, environment: environment)
+                    return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+                }
+            )
+            let client = CodexAgentClient.live(
+                cliClient: cliClient,
+                openAICodexAuthClient: .unconfigured,
+                temporaryDirectory: temporaryDirectory
+            )
+
+            _ = try await client.run(
+                CodexAgentRequest(
+                    packageRootURL: packageRoot,
+                    executableName: "Demo",
+                    displayName: "Demo",
+                    appKind: .window,
+                    sandboxEnabled: true,
+                    userPrompt: "Improve the demo",
+                    modelIdentifier: testCase.identifier,
+                    modelFamily: testCase.family,
+                    authentication: .customResponsesProvider(provider)
+                )
+            )
+
+            let arguments = try #require(await cliCapture.arguments)
+            #expect(arguments.contains("resume") == testCase.shouldResume)
+            if testCase.shouldResume {
+                let resumeIndex = try #require(arguments.firstIndex(of: "resume"))
+                #expect(arguments[resumeIndex + 1] == "thread-\(index)")
+            }
+        }
+    }
+
+    @Test
     func codexAgentTranscriptReaderPicksNewestTranscriptAndParsesTimeline() throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

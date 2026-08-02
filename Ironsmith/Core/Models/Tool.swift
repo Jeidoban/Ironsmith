@@ -31,7 +31,7 @@ enum ToolGenerationMode: String, Codable, CaseIterable, Equatable, Sendable {
     case edit
 }
 
-typealias Tool = IronsmithSchemaV6.Tool
+typealias Tool = IronsmithSchemaV7.Tool
 
 extension Tool {
     var appVersionNumber: Int {

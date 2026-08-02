@@ -615,7 +615,8 @@ extension InferenceTests {
             displayName: "DeepSeek V4 Flash",
             providerIdentifier: provider.identifier,
             source: .remote,
-            installState: .installed
+            installState: .installed,
+            contextWindowTokens: 1_048_576
         )
 
         store.providers = [provider]
@@ -627,6 +628,8 @@ extension InferenceTests {
 
         #expect(context.pipelineConfiguration.codingAgent == .codex)
         #expect(context.codingAgentModelIdentifier == "deepseek/deepseek-v4-flash")
+        #expect(context.codingAgentModelFamily == .other)
+        #expect(context.codingAgentContextWindowTokens == 1_048_576)
         #expect(
             context.codexAgentAuthentication
                 == .customResponsesProvider(
@@ -739,7 +742,8 @@ extension InferenceTests {
             displayName: "GPT OSS 20B",
             providerIdentifier: provider.identifier,
             source: .remote,
-            installState: .installed
+            installState: .installed,
+            contextWindowTokens: 100_000
         )
         store.providers = [provider]
         store.remoteModels = [model]
@@ -753,6 +757,8 @@ extension InferenceTests {
         }
 
         #expect(context.pipelineConfiguration.codingAgent == .codex)
+        #expect(context.codingAgentModelFamily == .openAI)
+        #expect(context.codingAgentContextWindowTokens == nil)
         #expect(codexProvider.configurationIdentifier == "ironsmith_ollama")
         #expect(codexProvider.sessionProviderIdentifier == "ollama")
         #expect(codexProvider.baseURL.absoluteString == "http://localhost:11434/v1/")
