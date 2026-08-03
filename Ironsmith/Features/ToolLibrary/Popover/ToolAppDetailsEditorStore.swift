@@ -123,6 +123,7 @@ final class ToolAppDetailsEditorStore {
         defer { isSaving = false }
 
         let previousUpdatedAt = tool.updatedAt
+        let previousName = tool.name
         let shouldRename = trimmedName != tool.name
         guard let candidate else {
             if let renameError = rename(trimmedName) {
@@ -140,34 +141,53 @@ final class ToolAppDetailsEditorStore {
         )
         var snapshot: ToolIconEditingAssetSnapshot?
         var didBuildNewIcon = false
+        var didRename = false
 
         do {
             let installedSnapshot = try iconClient.install(candidate, request)
             snapshot = installedSnapshot
+            if shouldRename {
+                if let renameError = rename(trimmedName) {
+                    iconClient.restore(installedSnapshot, tool.packageLayout)
+                    tool.updatedAt = previousUpdatedAt
+                    try? modelContext.save()
+                    errorMessage = renameError
+                    return false
+                }
+                didRename = true
+            }
             try await buildClient.buildTool(tool)
             didBuildNewIcon = true
-            tool.updatedAt = .now
-            try modelContext.save()
-            if shouldRename, let renameError = rename(trimmedName) {
-                iconClient.restore(installedSnapshot, tool.packageLayout)
-                try? await buildClient.buildTool(tool)
-                tool.updatedAt = previousUpdatedAt
-                try? modelContext.save()
-                errorMessage = renameError
-                return false
+            if !didRename {
+                tool.updatedAt = .now
+                try modelContext.save()
             }
             finish()
             return true
         } catch {
+            var rollbackErrorMessage: String?
             if let snapshot {
                 iconClient.restore(snapshot, tool.packageLayout)
-                if didBuildNewIcon {
+                if didRename {
+                    if let rollbackError = rename(previousName) {
+                        rollbackErrorMessage = rollbackError
+                    } else {
+                        tool.updatedAt = previousUpdatedAt
+                        try? modelContext.save()
+                    }
+                } else if didBuildNewIcon {
                     try? await buildClient.buildTool(tool)
                 }
             }
-            tool.updatedAt = previousUpdatedAt
-            modelContext.rollback()
+            if !didRename {
+                tool.updatedAt = previousUpdatedAt
+                modelContext.rollback()
+            }
             present(error)
+            if let rollbackErrorMessage {
+                errorMessage =
+                    "\(errorMessage ?? error.localizedDescription) Ironsmith also could not restore the previous app name: \(rollbackErrorMessage)"
+            }
             return false
         }
     }

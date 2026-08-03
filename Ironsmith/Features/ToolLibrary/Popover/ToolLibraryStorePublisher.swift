@@ -21,22 +21,26 @@ final class ToolLibraryStorePublisher {
     @ObservationIgnored private let storeClient: IronsmithStoreClient
     @ObservationIgnored private let iconClient: ToolIconClient
     @ObservationIgnored private let buildClient: ToolBuildClient
+    @ObservationIgnored private let saveModelContext: (ModelContext) throws -> Void
     @ObservationIgnored private var currentPublishedSourceSha256: String?
 
     init() {
         self.storeClient = .live
         self.iconClient = .live()
         self.buildClient = .live()
+        self.saveModelContext = { try $0.save() }
     }
 
     init(
         storeClient: IronsmithStoreClient,
         iconClient: ToolIconClient,
-        buildClient: ToolBuildClient? = nil
+        buildClient: ToolBuildClient? = nil,
+        saveModelContext: ((ModelContext) throws -> Void)? = nil
     ) {
         self.storeClient = storeClient
         self.iconClient = iconClient
         self.buildClient = buildClient ?? .live()
+        self.saveModelContext = saveModelContext ?? { try $0.save() }
     }
 
     func canUpdateStoreVersion(for tool: Tool) -> Bool {
@@ -228,27 +232,12 @@ final class ToolLibraryStorePublisher {
                 )
             }
 
-            applyPublishedStoreLinkage(app, to: tool)
-            try modelContext.save()
-
-            let rebuildError: Error?
-            do {
-                try await buildClient.buildTool(tool)
-                rebuildError = nil
-            } catch {
-                rebuildError = error
-            }
-
-            publishedStoreAppsByID[app.id] = StoreAppSummary(detail: app)
-            isShowingPublishSheet = false
-            routeStore.open(.store(.publishedApp(app.id)))
-            if let rebuildError {
-                present(
-                    ToolLibraryStorePublishingError.localBundleRebuildFailed(
-                        rebuildError.localizedDescription
-                    )
-                )
-            }
+            await finishSuccessfulPublication(
+                app,
+                for: tool,
+                modelContext: modelContext,
+                routeStore: routeStore
+            )
         } catch {
             modelContext.rollback()
             present(error)
@@ -297,6 +286,42 @@ final class ToolLibraryStorePublisher {
         tool.updatedAt = Date()
     }
 
+    private func finishSuccessfulPublication(
+        _ app: StoreAppDetail,
+        for tool: Tool,
+        modelContext: ModelContext,
+        routeStore: IronsmithRouteStore
+    ) async {
+        applyPublishedStoreLinkage(app, to: tool)
+
+        let persistenceError: Error?
+        do {
+            try saveModelContext(modelContext)
+            persistenceError = nil
+        } catch {
+            persistenceError = error
+        }
+
+        let rebuildError: Error?
+        do {
+            try await buildClient.buildTool(tool)
+            rebuildError = nil
+        } catch {
+            rebuildError = error
+        }
+
+        publishedStoreAppsByID[app.id] = StoreAppSummary(detail: app)
+        isShowingPublishSheet = false
+        routeStore.open(.store(.publishedApp(app.id)))
+
+        if let warning = ToolLibraryStorePublishingError.localFinalizationWarning(
+            persistenceError: persistenceError,
+            rebuildError: rebuildError
+        ) {
+            present(warning)
+        }
+    }
+
     private func present(_ error: Error) {
         errorMessage =
             IronsmithErrorPresentation.message(for: error)
@@ -306,16 +331,35 @@ final class ToolLibraryStorePublisher {
 
 private enum ToolLibraryStorePublishingError: LocalizedError {
     case invalidDisplayName
-    case localBundleRebuildFailed(String)
+    case localFinalizationFailed(String)
+
+    static func localFinalizationWarning(
+        persistenceError: Error?,
+        rebuildError: Error?
+    ) -> Self? {
+        var details: [String] = []
+        if let persistenceError {
+            details.append(
+                "Ironsmith could not save the Store linkage locally: \(persistenceError.localizedDescription)"
+            )
+        }
+        if let rebuildError {
+            details.append(
+                "Ironsmith could not rebuild the local app with its updated Store metadata: \(rebuildError.localizedDescription)"
+            )
+        }
+        guard !details.isEmpty else { return nil }
+        return .localFinalizationFailed(details.joined(separator: " "))
+    }
 
     var errorDescription: String? {
         switch self {
         case .invalidDisplayName:
             "Enter a display name between 1 and 80 characters."
-        case .localBundleRebuildFailed(let detail):
+        case .localFinalizationFailed(let detail):
             """
-            This version was published successfully, but Ironsmith could not rebuild the local app \
-            with its updated version information. Rebuild the app and try opening it again. \(detail)
+            This app was published successfully, but Ironsmith could not finish updating its \
+            local state. \(detail)
             """
         }
     }

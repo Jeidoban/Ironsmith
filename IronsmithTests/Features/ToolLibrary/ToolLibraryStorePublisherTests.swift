@@ -406,6 +406,74 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func localPersistenceFailureStillRetainsSuccessfulStorePublication() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let publishedDetail = Self.publisherAppDetail(category: .productivity)
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.publishApp = { _ in publishedDetail }
+        let buildCapture = PublisherBuildCapture()
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: storeClient,
+            iconClient: .noOp,
+            buildClient: ToolBuildClient { tool in
+                await buildCapture.record(
+                    category: tool.category,
+                    versionNumber: tool.appVersionNumber
+                )
+            },
+            saveModelContext: { _ in
+                throw PublisherPersistenceError.failed
+            }
+        )
+        publisher.publishDisplayName = "Jade Westover"
+        publisher.publishShortDescription = "Clean copied text"
+        publisher.publishDescription = "Cleans and reformats text."
+        publisher.isShowingPublishSheet = true
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            executableName: "ClipboardCleaner",
+            packageRootPath: root.appendingPathComponent("ClipboardCleaner").path
+        )
+        try Self.writeSource(Self.publisherSource, to: tool)
+        try FileManager.default.createDirectory(
+            at: tool.packageLayout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try Data([1]).write(to: tool.packageLayout.cachedAppIconMasterJPEGURL)
+        try Data([2]).write(to: tool.packageLayout.cachedAppIconThumbnailJPEGURL)
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(
+                accountClient: Self.ironsmithAccountClient(balanceCredits: 100)
+            )
+        )
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
+
+        await publisher.publish(
+            tool,
+            modelContext: context,
+            inferenceStore: inferenceStore,
+            defaultSettings: .default,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {})
+        )
+
+        #expect(tool.storeAppId == publishedDetail.id)
+        #expect(tool.storeVersionId == publishedDetail.currentVersion.id)
+        #expect(tool.category == .productivity)
+        #expect(publisher.publishedStoreAppsByID[publishedDetail.id]?.id == publishedDetail.id)
+        #expect(publisher.canUpdateStoreVersion(for: tool))
+        #expect(await buildCapture.versionNumbers == [1])
+        #expect(publisher.errorMessage?.contains("published successfully") == true)
+        #expect(publisher.errorMessage?.contains("save the Store linkage") == true)
+        #expect(!publisher.isShowingPublishSheet)
+    }
+
+    @MainActor
+    @Test
     func localRebuildFailurePreservesSuccessfulVersionPublicationAndShowsWarning() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -628,5 +696,13 @@ private enum PublisherBuildError: LocalizedError {
 
     var errorDescription: String? {
         "The test bundle could not be rebuilt."
+    }
+}
+
+private enum PublisherPersistenceError: LocalizedError {
+    case failed
+
+    var errorDescription: String? {
+        "The test Store linkage could not be saved."
     }
 }

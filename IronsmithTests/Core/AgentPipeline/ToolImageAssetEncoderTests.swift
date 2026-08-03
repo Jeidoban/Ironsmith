@@ -391,6 +391,92 @@ struct ToolImageAssetEncoderTests {
 
     @MainActor
     @Test
+    func appDetailsEditorBuildsAReplacementIconWithTheStagedName() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tool = Tool(
+            name: "Original Name",
+            executableName: "OriginalName",
+            packageRootPath: root.appendingPathComponent("OriginalName").path
+        )
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+        let buildCapture = IconEditorBuildCapture()
+        let store = ToolAppDetailsEditorStore(
+            iconClient: .live(),
+            buildClient: ToolBuildClient { tool in
+                await buildCapture.record(name: tool.name)
+            }
+        )
+        store.beginEditing(tool)
+        store.name = "Updated Name"
+        try store.importIcon(
+            data: Self.pngData(from: try Self.solidImage(width: 1024, height: 1024))
+        )
+
+        let saved = await store.save(
+            tool,
+            in: context,
+            rename: { proposedName in
+                tool.name = proposedName
+                try? context.save()
+                return nil
+            }
+        )
+
+        #expect(saved)
+        #expect(tool.name == "Updated Name")
+        #expect(await buildCapture.names == ["Updated Name"])
+    }
+
+    @MainActor
+    @Test
+    func appDetailsEditorRestoresThePreviousNameWhenTheStagedBuildFails() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tool = Tool(
+            name: "Original Name",
+            executableName: "OriginalName",
+            packageRootPath: root.appendingPathComponent("OriginalName").path
+        )
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+        let store = ToolAppDetailsEditorStore(
+            iconClient: .live(),
+            buildClient: ToolBuildClient { _ in
+                throw IconEditorTestError.buildFailed
+            }
+        )
+        store.beginEditing(tool)
+        store.name = "Updated Name"
+        try store.importIcon(
+            data: Self.pngData(from: try Self.solidImage(width: 1024, height: 1024))
+        )
+        var renamedNames: [String] = []
+
+        let saved = await store.save(
+            tool,
+            in: context,
+            rename: { proposedName in
+                renamedNames.append(proposedName)
+                tool.name = proposedName
+                try? context.save()
+                return nil
+            }
+        )
+
+        #expect(!saved)
+        #expect(renamedNames == ["Updated Name", "Original Name"])
+        #expect(tool.name == "Original Name")
+        #expect(store.errorMessage?.contains("build failed") == true)
+    }
+
+    @MainActor
+    @Test
     func iconEditorPassesUserConceptDirectlyThroughExistingPromptBuilder() async throws {
         let capture = IconEditorPromptCapture()
         let source = try Self.transparentIconImage()
@@ -587,5 +673,13 @@ private actor IconEditorPromptCapture {
 
     func record(provider: ToolImageGenerationProvider, prompt: String) {
         last = (provider, prompt)
+    }
+}
+
+private actor IconEditorBuildCapture {
+    private(set) var names: [String] = []
+
+    func record(name: String) {
+        names.append(name)
     }
 }

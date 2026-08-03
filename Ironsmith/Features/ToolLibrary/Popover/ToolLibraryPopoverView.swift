@@ -826,7 +826,7 @@ struct ToolLibraryPopoverView: View {
         isSigningInToIronsmith = true
 
         Task {
-            let didSignIn = await inferenceStore.signInToIronsmithWithAppleOAuth { @MainActor url in
+            let didFinishProviderSetup = await inferenceStore.signInToIronsmithWithAppleOAuth { @MainActor url in
                 try await webAuthenticationSession.authenticate(
                     using: url,
                     callbackURLScheme: IronsmithOAuthRedirect.appCallbackScheme
@@ -835,13 +835,13 @@ struct ToolLibraryPopoverView: View {
 
             await MainActor.run {
                 isSigningInToIronsmith = false
-                guard didSignIn else { return }
+                guard didFinishProviderSetup else { return }
                 inferenceStore.selectIronsmithModel(
                     identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier
                 )
             }
-            guard didSignIn,
-                let resumePublishingToolID,
+            guard let resumePublishingToolID,
+                inferenceStore.ironsmithSession != nil,
                 let tool = tools.first(where: { $0.id == resumePublishingToolID })
             else { return }
             await storePublisher.beginPublishing(
