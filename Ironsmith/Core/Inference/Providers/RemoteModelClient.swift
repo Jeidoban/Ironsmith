@@ -165,7 +165,8 @@ extension RemoteModelClient {
                     displayName: $0.displayName,
                     estimatedToolCredits: $0.estimatedToolCredits,
                     reasoningEfforts: $0.reasoningEfforts ?? [],
-                    supportsImageInput: $0.supportsImageInput ?? false
+                    supportsImageInput: $0.supportsImageInput ?? false,
+                    contextWindowTokens: $0.contextWindowTokens
                 )
             }
         }
@@ -179,7 +180,8 @@ extension RemoteModelClient {
                 installState: .installed,
                 estimatedToolCredits: $0.estimatedToolCredits,
                 reasoningEfforts: $0.reasoningEfforts,
-                supportsImageInput: $0.supportsImageInput
+                supportsImageInput: $0.supportsImageInput,
+                contextWindowTokens: $0.contextWindowTokens
             )
         }
         guard provider.kind != .ironsmith else { return models }
@@ -337,19 +339,22 @@ private struct RemoteModelEntry {
     let estimatedToolCredits: Int?
     let reasoningEfforts: [ToolReasoningEffort]
     let supportsImageInput: Bool
+    let contextWindowTokens: Int?
 
     init(
         identifier: String,
         displayName: String,
         estimatedToolCredits: Int? = nil,
         reasoningEfforts: [ToolReasoningEffort] = [],
-        supportsImageInput: Bool = false
+        supportsImageInput: Bool = false,
+        contextWindowTokens: Int? = nil
     ) {
         self.identifier = identifier
         self.displayName = displayName
         self.estimatedToolCredits = estimatedToolCredits
         self.reasoningEfforts = reasoningEfforts
         self.supportsImageInput = supportsImageInput
+        self.contextWindowTokens = contextWindowTokens
     }
 }
 
@@ -371,6 +376,7 @@ private struct IronsmithModelEntry: Decodable {
     let estimatedToolCredits: Int?
     let reasoningEfforts: [ToolReasoningEffort]?
     let supportsImageInput: Bool?
+    let contextWindowTokens: Int?
 }
 
 private struct AnthropicModelsResponse: Decodable {

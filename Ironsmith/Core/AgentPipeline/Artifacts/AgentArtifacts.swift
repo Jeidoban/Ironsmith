@@ -9,6 +9,8 @@ nonisolated struct AgentLanguageModelContext {
     let pipelineConfiguration: ToolGenerationPipelineConfiguration
     let promptRefinementEnabled: Bool
     let codingAgentModelIdentifier: String
+    let codingAgentModelFamily: ToolModelFamily
+    let codingAgentContextWindowTokens: Int?
     let codexAgentAuthentication: CodexAgentAuthentication?
     let codingAgentSupportsImageInput: Bool
     let reasoningEffort: ToolReasoningEffort
@@ -32,6 +34,8 @@ nonisolated struct AgentLanguageModelContext {
         pipelineConfiguration: ToolGenerationPipelineConfiguration,
         promptRefinementEnabled: Bool = true,
         codingAgentModelIdentifier: String = "",
+        codingAgentModelFamily: ToolModelFamily = .other,
+        codingAgentContextWindowTokens: Int? = nil,
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
         codingAgentSupportsImageInput: Bool = false,
         reasoningEffort: ToolReasoningEffort = .default,
@@ -49,6 +53,8 @@ nonisolated struct AgentLanguageModelContext {
         self.pipelineConfiguration = pipelineConfiguration
         self.promptRefinementEnabled = promptRefinementEnabled
         self.codingAgentModelIdentifier = codingAgentModelIdentifier
+        self.codingAgentModelFamily = codingAgentModelFamily
+        self.codingAgentContextWindowTokens = codingAgentContextWindowTokens
         self.codexAgentAuthentication = codexAgentAuthentication
         self.codingAgentSupportsImageInput = codingAgentSupportsImageInput
         self.reasoningEffort = reasoningEffort
@@ -63,6 +69,8 @@ nonisolated struct AgentLanguageModelContext {
         pipelineConfiguration: ToolGenerationPipelineConfiguration,
         promptRefinementEnabled: Bool = true,
         codingAgentModelIdentifier: String = "",
+        codingAgentModelFamily: ToolModelFamily = .other,
+        codingAgentContextWindowTokens: Int? = nil,
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
         codingAgentSupportsImageInput: Bool = false,
         reasoningEffort: ToolReasoningEffort = .default,
@@ -91,6 +99,8 @@ nonisolated struct AgentLanguageModelContext {
             pipelineConfiguration: pipelineConfiguration,
             promptRefinementEnabled: promptRefinementEnabled,
             codingAgentModelIdentifier: codingAgentModelIdentifier,
+            codingAgentModelFamily: codingAgentModelFamily,
+            codingAgentContextWindowTokens: codingAgentContextWindowTokens,
             codexAgentAuthentication: codexAgentAuthentication,
             codingAgentSupportsImageInput: codingAgentSupportsImageInput,
             reasoningEffort: reasoningEffort,
@@ -225,6 +235,7 @@ struct ToolGenerationResult: Equatable, Sendable {
     let toolName: String
     let executableName: String
     let bundleIdentifier: String
+    let category: StoreAppCategory
     let settings: ToolGenerationSettings
     let packageRootURL: URL
 
@@ -232,6 +243,7 @@ struct ToolGenerationResult: Equatable, Sendable {
         toolName: String,
         executableName: String,
         bundleIdentifier: String? = nil,
+        category: StoreAppCategory = .utilities,
         settings: ToolGenerationSettings,
         packageRootURL: URL
     ) {
@@ -239,6 +251,7 @@ struct ToolGenerationResult: Equatable, Sendable {
         self.executableName = executableName
         self.bundleIdentifier =
             bundleIdentifier ?? ToolBundleIdentifier.make(executableName: executableName)
+        self.category = category
         self.settings = settings
         self.packageRootURL = packageRootURL
     }

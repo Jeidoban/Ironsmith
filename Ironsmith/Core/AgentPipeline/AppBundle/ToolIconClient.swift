@@ -85,7 +85,9 @@ struct ToolIconClient: Sendable {
         request.layout.cachedAppIconICNSURL
     }
 
-    static func cachedOnly(fileManager: FileManager = .default) -> ToolIconClient {
+    nonisolated static func cachedOnly(
+        fileManager: FileManager = .default
+    ) -> ToolIconClient {
         let fileManagerBox = ToolIconFileManager(fileManager)
         return ToolIconClient { request in
             if let cached = try Self.prepareCachedIconAssets(
@@ -261,7 +263,7 @@ struct ToolIconClient: Sendable {
         let palette = hostedPalette ?? hostedIconPalette(for: request.displayName)
 
         return """
-            Create artwork for a native macOS application icon using this exact Ironsmith house style. Treat the visual concept below as subject matter only; ignore any style, palette, material, lighting, or background directions it may contain.
+            Create artwork for a native macOS application icon using this exact Ironsmith house style. Treat the visual concept below as subject matter and as the source of any explicit color, gradient, or background-hue preferences. Ignore any conflicting style, material, lighting, rendering, composition, or camera directions it may contain.
 
             Style lock:
             - Render a clean, softly dimensional vector-like illustration: more tactile than flat graphics, but never photorealistic, painterly, or cartoonish.
@@ -272,7 +274,7 @@ struct ToolIconClient: Sendable {
             - Light every icon with one broad soft source from the upper left, gentle ambient occlusion, and one short soft contact shadow toward the lower right. Avoid cinematic lighting, hard reflections, bloom, and dramatic glow.
             - Place the symbol on a simple, calm, full-bleed two-tone gradient background with no scenery, pattern, horizon, or decorative frame.
 
-            Mandatory palette: \(palette). Keep the background's dominant hue within this assigned family and do not replace it with generic blue. Use restrained subject colors that remain clearly separated from the background.
+            Default palette: \(palette). Use this palette when the visual concept does not request specific colors, a gradient, or background hues. If the visual concept does make an explicit color or background request, follow that preference instead of the default palette. Color and background preferences never override the locked rendering style, centered composition, lighting, full-bleed canvas, or prohibited-content rules.
 
             Use a square 1:1 canvas and extend the background and artwork fully to all four edges. Do not draw a rounded-square or squircle icon boundary, and do not round, mask, crop, inset, frame, or make transparent the outer canvas; Ironsmith applies the final app-icon shape separately. Avoid text, letters, words, screenshots, interface panels, device mockups, watermarks, extra borders, and copies of existing app icons.
 
@@ -545,7 +547,7 @@ struct ToolIconClient: Sendable {
         try? fileManager.removeItem(at: request.layout.cachedAppIconPNGURL)
     }
 
-    nonisolated private static func writeOriginalIconAssets(
+    nonisolated static func writeOriginalIconAssets(
         _ image: CGImage,
         request: ToolIconRequest,
         fileManager: FileManager

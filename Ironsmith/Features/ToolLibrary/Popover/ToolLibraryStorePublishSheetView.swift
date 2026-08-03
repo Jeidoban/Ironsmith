@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 struct ToolLibraryStorePublishSheetView: View {
     let tool: Tool
     let isUpdatingPublishedListing: Bool
-    @Binding var publishName: String
     @Binding var publishShortDescription: String
     @Binding var publishDescription: String
     @Binding var publishCategory: StoreAppCategory
@@ -12,7 +11,6 @@ struct ToolLibraryStorePublishSheetView: View {
     let publishScreenshotName: String?
     let needsDisplayName: Bool
     let isPublishing: Bool
-    let onSaveDisplayName: () -> Void
     let onChooseScreenshot: (URL) -> Void
     let onCancel: () -> Void
     let onPublish: () -> Void
@@ -20,45 +18,66 @@ struct ToolLibraryStorePublishSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(isUpdatingPublishedListing ? "Update Store Version" : "Publish to Ironsmith Store")
+            Text(
+                isUpdatingPublishedListing
+                    ? "Update \(tool.name) on Ironsmith Store"
+                    : "Publish \(tool.name) to Ironsmith Store"
+            )
                 .font(.headline)
 
             if needsDisplayName {
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField("Display Name", text: $publishDisplayName)
-                    Button("Save Display Name", action: onSaveDisplayName)
-                        .disabled(
-                            publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .isEmpty)
+                field("Creator Name") {
+                    TextField(
+                        "The public name shown next to your apps",
+                        text: $publishDisplayName
+                    )
+                        .onChange(of: publishDisplayName) { _, value in
+                            if value.count > 80 {
+                                publishDisplayName = String(value.prefix(80))
+                            }
+                        }
                 }
             }
 
-            if !isUpdatingPublishedListing {
-                TextField("Name", text: $publishName)
-                TextField("Short Description", text: $publishShortDescription)
+            field("Short Description") {
+                TextField(
+                    "Summarize your app in a few words",
+                    text: $publishShortDescription
+                )
                     .onChange(of: publishShortDescription) { _, value in
                         if value.count > 40 {
                             publishShortDescription = String(value.prefix(40))
                         }
                     }
-                TextField("Description", text: $publishDescription, axis: .vertical)
+            }
+            field("Description") {
+                TextField(
+                    "Describe what your app does and how people can use it",
+                    text: $publishDescription,
+                    axis: .vertical
+                )
                     .lineLimit(3...5)
-                Picker("Category", selection: $publishCategory) {
-                    ForEach(StoreAppCategory.allCases) { category in
-                        Text(category.title).tag(category)
+            }
+            if !isUpdatingPublishedListing {
+                field("Category") {
+                    Picker("Category", selection: $publishCategory) {
+                        ForEach(StoreAppCategory.allCases) { category in
+                            Text(category.title).tag(category)
+                        }
                     }
+                    .labelsHidden()
                 }
             }
 
-            HStack {
-                Button {
-                    isChoosingScreenshot = true
-                } label: {
-                    Label("Screenshot", systemImage: "photo")
+            field("Screenshot") {
+                HStack {
+                    Button("Choose Screenshot…") {
+                        isChoosingScreenshot = true
+                    }
+                    Text(publishScreenshotName ?? "No screenshot selected")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Text(publishScreenshotName ?? "No screenshot selected")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
 
             HStack {
@@ -74,7 +93,7 @@ struct ToolLibraryStorePublishSheetView: View {
             }
         }
         .padding(18)
-        .frame(width: 340)
+        .frame(width: 390)
         .fileImporter(
             isPresented: $isChoosingScreenshot,
             allowedContentTypes: [.image],
@@ -86,16 +105,30 @@ struct ToolLibraryStorePublishSheetView: View {
         }
     }
 
+    private func field<Content: View>(
+        _ label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.subheadline.weight(.medium))
+            content()
+        }
+    }
+
     private var canPublish: Bool {
-        (isUpdatingPublishedListing || listingFieldsAreValid)
-            && (!needsDisplayName
-                || !publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        listingFieldsAreValid
+            && (!needsDisplayName || displayNameIsValid)
             && !tool.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var displayNameIsValid: Bool {
+        let trimmed = publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (1...80).contains(trimmed.count)
+    }
+
     private var listingFieldsAreValid: Bool {
-        !publishName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !publishShortDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !publishShortDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !publishDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }

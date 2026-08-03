@@ -5,15 +5,18 @@ struct ToolMetadataSuggestion: Equatable, Sendable {
     let displayName: String
     let iconPrompt: String
     let menuBarSystemImage: String
+    let category: StoreAppCategory
 
     nonisolated init(
         displayName: String,
         iconPrompt: String,
-        menuBarSystemImage: String = ToolMenuBarSymbol.fallback
+        menuBarSystemImage: String = ToolMenuBarSymbol.fallback,
+        category: StoreAppCategory = .utilities
     ) {
         self.displayName = displayName
         self.iconPrompt = iconPrompt
         self.menuBarSystemImage = ToolMenuBarSymbol.validated(menuBarSystemImage)
+        self.category = category
     }
 }
 
@@ -32,6 +35,11 @@ struct GeneratedToolMetadata {
         description:
             "One SF Symbol name chosen exactly from Ironsmith's allowed menuBarSystemImage list.")
     let menuBarSystemImage: String
+
+    @Guide(
+        description:
+            "One category raw value chosen exactly from Ironsmith's allowed category list.")
+    let category: String
 }
 
 extension GeneratedToolMetadata {
@@ -39,7 +47,21 @@ extension GeneratedToolMetadata {
         self.init(
             displayName: displayName,
             iconPrompt: iconPrompt,
-            menuBarSystemImage: ToolMenuBarSymbol.fallback
+            menuBarSystemImage: ToolMenuBarSymbol.fallback,
+            category: StoreAppCategory.utilities.rawValue
+        )
+    }
+
+    nonisolated init(
+        displayName: String,
+        iconPrompt: String,
+        menuBarSystemImage: String
+    ) {
+        self.init(
+            displayName: displayName,
+            iconPrompt: iconPrompt,
+            menuBarSystemImage: menuBarSystemImage,
+            category: StoreAppCategory.utilities.rawValue
         )
     }
 }
@@ -187,6 +209,9 @@ struct ToolMetadataClient: Sendable {
 
         Allowed menuBarSystemImage values:
         \(ToolMenuBarSymbol.allowedSymbols.joined(separator: ", "))
+
+        Allowed category values:
+        \(StoreAppCategory.allCases.map(\.rawValue).joined(separator: ", "))
         """
     }
 
@@ -210,6 +235,11 @@ struct ToolMetadataClient: Sendable {
         - Must be one exact SF Symbol name from the allowed list in the prompt.
         - Choose the closest symbol for the user's requested app.
         - Do not invent names or include variants outside that list.
+
+        category:
+        - Must be one exact raw value from the allowed category list in the prompt.
+        - Choose the category that best represents the app's primary purpose.
+        - Use utilities only when no more specific category applies.
         """
     }
 
@@ -253,10 +283,16 @@ struct ToolMetadataClient: Sendable {
         let displayName = response.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let iconPrompt = response.iconPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let menuBarSystemImage = ToolMenuBarSymbol.validated(response.menuBarSystemImage)
+        let category =
+            StoreAppCategory(
+                rawValue: response.category.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            ?? fallback.category
         return ToolMetadataSuggestion(
             displayName: displayName.isEmpty ? fallback.displayName : displayName,
             iconPrompt: iconPrompt.isEmpty ? fallback.iconPrompt : iconPrompt,
-            menuBarSystemImage: menuBarSystemImage
+            menuBarSystemImage: menuBarSystemImage,
+            category: category
         )
     }
 }
@@ -417,7 +453,8 @@ extension ToolMetadataSuggestion {
         return ToolMetadataSuggestion(
             displayName: displayName,
             iconPrompt: "",
-            menuBarSystemImage: ToolMenuBarSymbol.fallback
+            menuBarSystemImage: ToolMenuBarSymbol.fallback,
+            category: .utilities
         )
     }
 }

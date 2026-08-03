@@ -62,6 +62,7 @@ struct PersistenceTests {
             context.insert(
                 Tool(
                     name: "Incomplete",
+                    category: .music,
                     packageRootPath: "/tmp/incomplete",
                     generationState: .stopped,
                     generationPhase: .generatingSource,
@@ -80,9 +81,84 @@ struct PersistenceTests {
             #expect(tool.generationPhase == ToolGenerationPhase.generatingSource)
             #expect(tool.generationMode == ToolGenerationMode.create)
             #expect(tool.pendingPrompt == "Build a resumable app")
-            #expect(container.schema.version == IronsmithSchemaV5.versionIdentifier)
+            #expect(tool.category == .music)
+            #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
             #expect(container.migrationPlan != nil)
         }
+    }
+
+    @MainActor
+    @Test
+    func v5ToolsMigrateWithUtilitiesCategory() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = ModelConfiguration(
+            url: root.appendingPathComponent("ironsmith.sqlite")
+        )
+        let toolID = UUID()
+
+        do {
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: IronsmithSchemaV5.self),
+                configurations: config
+            )
+            let context = ModelContext(container)
+            context.insert(
+                IronsmithSchemaV5.Tool(
+                    id: toolID,
+                    name: "Legacy Utility",
+                    packageRootPath: "/tmp/legacy-utility"
+                )
+            )
+            try context.save()
+        }
+
+        let container = try IronsmithModelContainerFactory.make(configuration: config)
+        let context = ModelContext(container)
+        let tool = try #require(
+            try context.fetch(FetchDescriptor<Tool>()).first { $0.id == toolID }
+        )
+
+        #expect(tool.category == .utilities)
+    }
+
+    @MainActor
+    @Test
+    func v6ModelsMigrateWithUnknownContextWindow() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = ModelConfiguration(
+            url: root.appendingPathComponent("ironsmith.sqlite")
+        )
+        let modelID = UUID()
+
+        do {
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: IronsmithSchemaV6.self),
+                configurations: config
+            )
+            let context = ModelContext(container)
+            context.insert(
+                IronsmithSchemaV6.ModelConfig(
+                    id: modelID,
+                    identifier: "openai/gpt-5.5",
+                    displayName: "GPT-5.5",
+                    providerIdentifier: "ironsmith",
+                    source: .remote,
+                    installState: .installed
+                )
+            )
+            try context.save()
+        }
+
+        let container = try IronsmithModelContainerFactory.make(configuration: config)
+        let context = ModelContext(container)
+        let model = try #require(
+            try context.fetch(FetchDescriptor<ModelConfig>()).first { $0.id == modelID }
+        )
+
+        #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
+        #expect(model.contextWindowTokens == nil)
     }
 
     @MainActor
@@ -141,7 +217,7 @@ struct PersistenceTests {
         let tool = try #require(try context.fetch(FetchDescriptor<Tool>()).first)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV5.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
         #expect(tool.id == toolID)
         #expect(tool.appKind == .menuBar)
         #expect(tool.generationState == .stopped)
@@ -157,6 +233,7 @@ struct PersistenceTests {
         #expect(tool.storeSourceSha256 == nil)
         #expect(tool.storeImportedAt == nil)
         #expect(tool.storeRemixedFromVersionId == nil)
+        #expect(tool.category == .utilities)
         #expect(!(models.contains { $0.id == modelID }))
     }
 
@@ -209,7 +286,7 @@ struct PersistenceTests {
         let context = ModelContext(container)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV5.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
         #expect(!(models.contains { $0.id == legacyModelID }))
         #expect(models.contains { $0.id == foundationModelID })
     }

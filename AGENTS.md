@@ -78,6 +78,7 @@
 - Startup database backups include SQLite companion files and retain the three newest completed snapshots. Never silently delete or replace a failed user store.
 - Use `IronsmithModelContainerFactory.make(isRunningTests: true)` for tests and previews.
 - Persisted models are declared inside immutable versioned schema files in `Core/Persistence/Migrations`. `Core/Models` points application code at the current schema through typealiases and extensions.
+- Persist singular SwiftData enum properties directly as their enum types. Use raw-value serialization only for enum collections, such as arrays or sets, that SwiftData cannot persist directly in the required shape.
 - Keep one ordered `IronsmithSchemaMigrationPlan`. For each database change, add a new self-contained schema version and the adjacent migration stage; never mutate a shipped historical schema.
 - Persisted model names and stored properties are compatibility surfaces. Use SwiftData rename metadata and a migration when changing them.
 - Generated-package file access must remain inside the package root. Preserve the path validation in `ToolPackageLayout` and generation/version-backup helpers.

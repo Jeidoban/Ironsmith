@@ -23,6 +23,7 @@ extension InferenceTests {
                 "openai/gpt-5.6-sol",
             ]
         )
+        #expect(models.allSatisfy { $0.contextWindowTokens == nil })
     }
 
     @MainActor

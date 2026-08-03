@@ -234,6 +234,8 @@ struct ToolGenerationRuntimeContext {
     let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
     let codingAgentModelIdentifier: String
+    let codingAgentModelFamily: ToolModelFamily
+    let codingAgentContextWindowTokens: Int?
     let codexAgentAuthentication: CodexAgentAuthentication?
     let reasoningEffort: ToolReasoningEffort
     let codingAgentSupportsImageInput: Bool
@@ -279,6 +281,8 @@ struct ToolGenerationRuntimeContext {
         self.attachmentStorage = dependencies.attachmentStorage
         self.codexAgentClient = dependencies.codexAgentClient
         self.codingAgentModelIdentifier = languageModelContext.codingAgentModelIdentifier
+        self.codingAgentModelFamily = languageModelContext.codingAgentModelFamily
+        self.codingAgentContextWindowTokens = languageModelContext.codingAgentContextWindowTokens
         self.codexAgentAuthentication = languageModelContext.codexAgentAuthentication
         self.reasoningEffort = languageModelContext.reasoningEffort
         self.codingAgentSupportsImageInput = languageModelContext.codingAgentSupportsImageInput

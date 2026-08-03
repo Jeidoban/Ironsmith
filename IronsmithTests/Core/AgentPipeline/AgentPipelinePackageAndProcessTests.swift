@@ -484,6 +484,8 @@ extension AgentPipelineTests {
             executableName: "SandboxedTool",
             bundleIdentifier: "com.ironsmith.tests.sandboxed-tool",
             packageRootURL: packageRoot,
+            category: .finance,
+            versionNumber: 2,
             settings: ToolGenerationSettings(
                 resourcePermissions: GeneratedAppResourcePermissions(
                     GeneratedAppResourcePermission.allCases)
@@ -499,6 +501,9 @@ extension AgentPipelineTests {
         #expect(appURL.lastPathComponent == "Sandboxed Tool.app")
         #expect(plist["CFBundleIdentifier"] as? String == request.bundleIdentifier)
         #expect(plist["CFBundleExecutable"] as? String == request.executableName)
+        #expect(plist["CFBundleShortVersionString"] as? String == "2.0")
+        #expect(plist["CFBundleVersion"] as? String == "2")
+        #expect(plist["LSApplicationCategoryType"] as? String == "public.app-category.finance")
         #expect(plist["LSUIElement"] as? Bool == true)
         #expect(plist["IronsmithQuitOnLastWindowClose"] as? Bool == true)
         #expect(entitlements["com.apple.security.app-sandbox"] as? Bool == true)
@@ -685,8 +690,10 @@ extension AgentPipelineTests {
             name: "Existing",
             executableName: "ExistingTool",
             bundleIdentifier: "com.ironsmith.tests.existing",
+            category: .music,
             sandboxEnabled: true,
-            packageRootPath: packageRoot.path
+            packageRootPath: packageRoot.path,
+            storeVersionNumber: 3
         )
         try Self.writePlistDictionary(
             [
@@ -700,6 +707,8 @@ extension AgentPipelineTests {
 
         #expect(request.sandboxPermissions.contains(.internet))
         #expect(!(request.sandboxPermissions.contains(.userSelectedFiles)))
+        #expect(request.category == .music)
+        #expect(request.versionNumber == 3)
 
         let storedPackageRoot = root.appendingPathComponent("StoredSettingsTool", isDirectory: true)
         let storedTool = StoredTool(

@@ -433,7 +433,7 @@ extension InferenceTests {
         """.data(using: .utf8)!
         let ollamaModels = try RemoteModelClient.decodeModels(ollamaData, for: ollamaProvider)
         let ironsmithProvider = ProviderCatalog.makeProvider(for: .ironsmith)!
-        let ironsmithData = #"{"data":[{"id":"openai.gpt-5","displayName":"GPT-5","estimatedToolCredits":157,"supportsImageInput":true}]}"#.data(using: .utf8)!
+        let ironsmithData = #"{"data":[{"id":"openai.gpt-5","displayName":"GPT-5","estimatedToolCredits":157,"supportsImageInput":true,"contextWindowTokens":1050000}]}"#.data(using: .utf8)!
         let ironsmithModels = try RemoteModelClient.decodeModels(ironsmithData, for: ironsmithProvider)
 
         #expect(openAIModels.map(\.identifier) == ["gpt-test"])
@@ -449,6 +449,7 @@ extension InferenceTests {
         #expect(ironsmithModels.first?.displayName == "GPT-5")
         #expect(ironsmithModels.first?.estimatedToolCredits == 157)
         #expect(ironsmithModels.first?.supportsImageInput == true)
+        #expect(ironsmithModels.first?.contextWindowTokens == 1_050_000)
     }
 
     @MainActor

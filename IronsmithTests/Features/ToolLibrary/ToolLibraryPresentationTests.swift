@@ -126,6 +126,7 @@ extension ToolLibraryTests {
             isExporting: false,
             isRebuilding: false,
             isRestoring: false,
+            isEditingDetails: false,
             canRevert: false,
             showsStoreActions: false,
             canUpdateStoreVersion: false,

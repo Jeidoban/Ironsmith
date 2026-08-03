@@ -28,9 +28,8 @@ struct ToolLibraryPopoverView: View {
     private let welcomeOnboardingStore: WelcomeOnboardingStore
     @State private var toolLibraryStore = ToolLibraryStore()
     @State private var storePublisher: ToolLibraryStorePublisher
+    @State private var detailsEditor: ToolAppDetailsEditorStore
     @State private var toolPendingDeletion: Tool?
-    @State private var toolPendingRename: Tool?
-    @State private var pendingRenameName = ""
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
     @State private var isShowingModelPicker = false
@@ -45,6 +44,7 @@ struct ToolLibraryPopoverView: View {
         appUpdateStore = AppUpdateStore()
         welcomeOnboardingStore = WelcomeOnboardingStore()
         _storePublisher = State(initialValue: ToolLibraryStorePublisher())
+        _detailsEditor = State(initialValue: ToolAppDetailsEditorStore())
     }
 
     @MainActor
@@ -52,22 +52,189 @@ struct ToolLibraryPopoverView: View {
         appUpdateStore: AppUpdateStore,
         welcomeOnboardingStore: WelcomeOnboardingStore? = nil,
         storeClient: IronsmithStoreClient? = nil,
-        iconClient: ToolIconClient = .noOp
+        iconClient: ToolIconClient = .cachedOnly(),
+        iconEditingClient: ToolIconEditingClient? = nil,
+        iconBuildClient: ToolBuildClient? = nil
     ) {
         self.appUpdateStore = appUpdateStore
         self.welcomeOnboardingStore = welcomeOnboardingStore ?? WelcomeOnboardingStore()
+        let buildClient = iconBuildClient ?? .live()
         _storePublisher = State(
             initialValue: ToolLibraryStorePublisher(
                 storeClient: storeClient ?? .live,
-                iconClient: iconClient
+                iconClient: iconClient,
+                buildClient: buildClient
+            )
+        )
+        _detailsEditor = State(
+            initialValue: ToolAppDetailsEditorStore(
+                iconClient: iconEditingClient,
+                buildClient: buildClient
             )
         )
     }
 
     var body: some View {
-        @Bindable var storePublisher = storePublisher
+        sheetContent
+    }
 
-        // The menu bar popover stays intentionally small: tool list first, prompt last.
+    private var lifecycleContent: some View {
+        popoverLayout
+        .padding(16)
+        .frame(width: 340, height: 500)
+        .accessibilityIdentifier("tool-library-root")
+        .task(id: restoreAvailabilityRefreshID) {
+            await toolLibraryStore.refreshRestoreAvailability(for: tools)
+        }
+        .task(id: publishedStoreLinkRefreshID) {
+            guard isStoreFeatureEnabled else {
+                await storePublisher.refreshPublishedStoreApps(
+                    isSignedIn: false,
+                    tools: tools
+                )
+                return
+            }
+            await storePublisher.refreshPublishedStoreApps(
+                isSignedIn: inferenceStore.ironsmithSession != nil,
+                tools: tools
+            )
+        }
+        .onAppear {
+            handlePopoverAppear()
+        }
+        .onDisappear {
+            handlePopoverClose()
+        }
+        .onChange(of: menuBarPopoverPresentationStore.showCount) { _, _ in
+            handlePopoverShow()
+        }
+        .onChange(of: menuBarPopoverPresentationStore.closeCount) { _, _ in
+            handlePopoverClose()
+        }
+        .task(id: selectedIronsmithRefreshID) {
+            await refreshSelectedIronsmithAccountIfNeeded()
+        }
+        .task(id: inferenceStore.hasLoadedModels) {
+            presentWelcomeOnboardingIfNeeded()
+        }
+        .task(id: runningApplicationsRefreshID) {
+            await toolLibraryStore.refreshRunningApplications(for: tools)
+        }
+        .onChange(of: tools.map(\.id)) { _, _ in
+            toolLibraryStore.syncSelection(with: tools, defaultSettings: defaultGenerationSettings)
+            applyPendingToolLibraryRoute()
+        }
+        .onChange(of: defaultGenerationSettings) { _, settings in
+            toolLibraryStore.initializeNextGenerationSettingsIfNeeded(settings)
+        }
+        .onChange(of: showSandboxOverride) { _, isEnabled in
+            if !isEnabled {
+                toolLibraryStore.sandboxEnabled = true
+                toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
+            }
+        }
+    }
+
+    private var alertContent: some View {
+        lifecycleContent
+        .alert(
+            "Ironsmith couldn’t finish",
+            isPresented: toolLibraryErrorPresentedBinding
+        ) {
+            if toolLibraryStore.presentedErrorAction == .buyIronsmithCredits {
+                Button("Buy Credits") {
+                    openIronsmithCreditPurchase()
+                }
+            }
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(toolLibraryStore.presentedErrorMessage ?? "")
+        }
+        .alert(
+            "AI Model Unavailable",
+            isPresented: modelFallbackPresentedBinding
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(inferenceStore.selectedModelFallbackMessage ?? "")
+        }
+        .alert(
+            "Sign In Failed",
+            isPresented: signInErrorPresentedBinding
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(inferenceStore.presentedErrorMessage ?? "")
+        }
+        .alert(
+            "Ironsmith Store",
+            isPresented: storeErrorPresentedBinding
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(storePublisher.errorMessage ?? "")
+        }
+        .alert(
+            "Sign in to Publish",
+            isPresented: storeSignInRequiredBinding
+        ) {
+            Button("Cancel", role: .cancel) {
+                storePublisher.pendingSignInToolID = nil
+            }
+            Button("Sign In") {
+                let toolID = storePublisher.pendingSignInToolID
+                storePublisher.pendingSignInToolID = nil
+                signInToIronsmith(resumePublishingToolID: toolID)
+            }
+        } message: {
+            Text("Sign in with Ironsmith to publish this app to the Ironsmith Store.")
+        }
+        .confirmationDialog(
+            "Delete App?",
+            isPresented: deleteConfirmationBinding
+        ) {
+            Button("Delete App", role: .destructive) {
+                if let toolPendingDeletion {
+                    toolLibraryStore.delete(toolPendingDeletion, in: modelContext)
+                }
+                toolPendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) {
+                toolPendingDeletion = nil
+            }
+        } message: {
+            Text(
+                toolPendingDeletion.map { "Delete \($0.name)? This can't be undone." }
+                    ?? "Delete this app? This can't be undone.")
+        }
+    }
+
+    private var sheetContent: some View {
+        @Bindable var storePublisher = storePublisher
+        @Bindable var detailsEditor = detailsEditor
+
+        return alertContent
+        .sheet(
+            isPresented: $isShowingWelcomeOnboarding,
+            onDismiss: dismissWelcomeOnboardingPresentation
+        ) {
+            IronsmithWelcomeOnboardingSheetView(
+                onComplete: completeWelcomeOnboarding
+            )
+        }
+        .sheet(isPresented: $storePublisher.isShowingPublishSheet) {
+            storePublishSheet
+        }
+        .sheet(isPresented: $detailsEditor.isShowingSheet) {
+            detailsEditorSheet
+        }
+        .sheet(isPresented: $isShowingModelPicker) {
+            ModelPickerSheetView()
+        }
+    }
+
+    // The menu bar popover stays intentionally small: tool list first, prompt last.
+    private var popoverLayout: some View {
         VStack(spacing: 14) {
             ToolLibraryPopoverHeaderView(
                 isSearchPresented: $isSearchPresented,
@@ -151,143 +318,6 @@ struct ToolLibraryPopoverView: View {
             )
             .frame(maxHeight: isPromptExpanded ? .infinity : nil)
         }
-        .padding(16)
-        .frame(width: 340, height: 500)
-        .accessibilityIdentifier("tool-library-root")
-        .task(id: restoreAvailabilityRefreshID) {
-            await toolLibraryStore.refreshRestoreAvailability(for: tools)
-        }
-        .task(id: publishedStoreLinkRefreshID) {
-            guard isStoreFeatureEnabled else {
-                await storePublisher.refreshPublishedStoreApps(
-                    isSignedIn: false,
-                    tools: tools
-                )
-                return
-            }
-            await storePublisher.refreshPublishedStoreApps(
-                isSignedIn: inferenceStore.ironsmithSession != nil,
-                tools: tools
-            )
-        }
-        .onAppear {
-            handlePopoverAppear()
-        }
-        .onDisappear {
-            handlePopoverClose()
-        }
-        .onChange(of: menuBarPopoverPresentationStore.showCount) { _, _ in
-            handlePopoverShow()
-        }
-        .onChange(of: menuBarPopoverPresentationStore.closeCount) { _, _ in
-            handlePopoverClose()
-        }
-        .task(id: selectedIronsmithRefreshID) {
-            await refreshSelectedIronsmithAccountIfNeeded()
-        }
-        .task(id: inferenceStore.hasLoadedModels) {
-            presentWelcomeOnboardingIfNeeded()
-        }
-        .task(id: runningApplicationsRefreshID) {
-            await toolLibraryStore.refreshRunningApplications(for: tools)
-        }
-        .onChange(of: tools.map(\.id)) { _, _ in
-            toolLibraryStore.syncSelection(with: tools, defaultSettings: defaultGenerationSettings)
-            applyPendingToolLibraryRoute()
-        }
-        .onChange(of: defaultGenerationSettings) { _, settings in
-            toolLibraryStore.initializeNextGenerationSettingsIfNeeded(settings)
-        }
-        .onChange(of: showSandboxOverride) { _, isEnabled in
-            if !isEnabled {
-                toolLibraryStore.sandboxEnabled = true
-                toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
-            }
-        }
-        .alert(
-            "Ironsmith couldn’t finish",
-            isPresented: toolLibraryErrorPresentedBinding
-        ) {
-            if toolLibraryStore.presentedErrorAction == .buyIronsmithCredits {
-                Button("Buy Credits") {
-                    openIronsmithCreditPurchase()
-                }
-            }
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(toolLibraryStore.presentedErrorMessage ?? "")
-        }
-        .alert(
-            "AI Model Unavailable",
-            isPresented: modelFallbackPresentedBinding
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(inferenceStore.selectedModelFallbackMessage ?? "")
-        }
-        .alert(
-            "Sign In Failed",
-            isPresented: signInErrorPresentedBinding
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(inferenceStore.presentedErrorMessage ?? "")
-        }
-        .alert(
-            "Ironsmith Store",
-            isPresented: storeErrorPresentedBinding
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(storePublisher.errorMessage ?? "")
-        }
-        .confirmationDialog(
-            "Delete App?",
-            isPresented: deleteConfirmationBinding
-        ) {
-            Button("Delete App", role: .destructive) {
-                if let toolPendingDeletion {
-                    toolLibraryStore.delete(toolPendingDeletion, in: modelContext)
-                }
-                toolPendingDeletion = nil
-            }
-            Button("Cancel", role: .cancel) {
-                toolPendingDeletion = nil
-            }
-        } message: {
-            Text(
-                toolPendingDeletion.map { "Delete \($0.name)? This can't be undone." }
-                    ?? "Delete this app? This can't be undone.")
-        }
-        .alert(
-            "Rename App",
-            isPresented: renameAlertBinding
-        ) {
-            TextField("App Name", text: $pendingRenameName)
-            Button("Cancel", role: .cancel) {
-                clearPendingRename()
-            }
-            Button("Save") {
-                commitPendingRename()
-            }
-            .disabled(pendingRenameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        } message: {
-            Text("Enter a new display name for this app.")
-        }
-        .sheet(
-            isPresented: $isShowingWelcomeOnboarding,
-            onDismiss: dismissWelcomeOnboardingPresentation
-        ) {
-            IronsmithWelcomeOnboardingSheetView(
-                onComplete: completeWelcomeOnboarding
-            )
-        }
-        .sheet(isPresented: $storePublisher.isShowingPublishSheet) {
-            storePublishSheet
-        }
-        .sheet(isPresented: $isShowingModelPicker) {
-            ModelPickerSheetView()
-        }
     }
 
     @ViewBuilder
@@ -296,7 +326,9 @@ struct ToolLibraryPopoverView: View {
             ToolLibraryEmptyStateView(
                 showsNoModelActions: shouldShowNoModelsEmptyState,
                 isSigningInToIronsmith: isSigningInToIronsmith,
-                onSignInToIronsmith: signInToIronsmith
+                onSignInToIronsmith: {
+                    signInToIronsmith()
+                }
             )
         } else if visibleTools.isEmpty {
             ContentUnavailableView {
@@ -381,6 +413,7 @@ struct ToolLibraryPopoverView: View {
             isExporting: toolLibraryStore.exportingToolID == tool.id,
             isRebuilding: toolLibraryStore.rebuildingToolID == tool.id,
             isRestoring: toolLibraryStore.restoringToolID == tool.id,
+            isEditingDetails: detailsEditor.isWorking && detailsEditor.editingToolID == tool.id,
             canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
             showsStoreActions: isStoreFeatureEnabled,
             canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
@@ -410,8 +443,8 @@ struct ToolLibraryPopoverView: View {
                     await toolLibraryStore.quit(tool)
                 }
             },
-            onRename: {
-                beginRenaming(tool)
+            onEditDetails: {
+                detailsEditor.beginEditing(tool)
             },
             onRebuild: {
                 Task {
@@ -464,6 +497,64 @@ struct ToolLibraryPopoverView: View {
     }
 
     @ViewBuilder
+    private var detailsEditorSheet: some View {
+        @Bindable var detailsEditor = detailsEditor
+
+        if let tool = tools.first(where: { $0.id == detailsEditor.editingToolID }) {
+            ToolAppDetailsEditorSheetView(
+                previewData: detailsEditor.previewData,
+                name: $detailsEditor.name,
+                prompt: $detailsEditor.prompt,
+                imageProvider: inferenceStore.effectiveImageGenerationProvider,
+                canSave: detailsEditor.canSave(tool),
+                isGenerating: detailsEditor.isGenerating,
+                isSaving: detailsEditor.isSaving,
+                errorMessage: detailsEditor.errorMessage,
+                onChooseImage: { url in
+                    detailsEditor.importIcon(from: url)
+                },
+                onGenerate: {
+                    let provider = inferenceStore.effectiveImageGenerationProvider
+                    Task {
+                        await detailsEditor.generate(for: tool, provider: provider)
+                        if provider == .ironsmith {
+                            await inferenceStore.refreshIronsmithAccountSummary()
+                        }
+                    }
+                },
+                onOpenSettings: {
+                    routeStore.open(.settings(.root))
+                },
+                onCancel: {
+                    detailsEditor.cancel()
+                },
+                onSave: {
+                    Task {
+                        await detailsEditor.save(
+                            tool,
+                            in: modelContext,
+                            rename: { proposedName in
+                                guard toolLibraryStore.rename(
+                                    tool,
+                                    to: proposedName,
+                                    in: modelContext
+                                ) else {
+                                    let message =
+                                        toolLibraryStore.presentedErrorMessage
+                                        ?? "Ironsmith could not rename this app."
+                                    toolLibraryStore.clearPresentedError()
+                                    return message
+                                }
+                                return nil
+                            }
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
     private var storePublishSheet: some View {
         @Bindable var storePublisher = storePublisher
 
@@ -471,7 +562,6 @@ struct ToolLibraryPopoverView: View {
             ToolLibraryStorePublishSheetView(
                 tool: tool,
                 isUpdatingPublishedListing: canUpdateStoreVersion(for: tool),
-                publishName: $storePublisher.publishName,
                 publishShortDescription: $storePublisher.publishShortDescription,
                 publishDescription: $storePublisher.publishDescription,
                 publishCategory: $storePublisher.publishCategory,
@@ -479,9 +569,6 @@ struct ToolLibraryPopoverView: View {
                 publishScreenshotName: storePublisher.publishScreenshotName,
                 needsDisplayName: storePublisher.needsDisplayName(inferenceStore: inferenceStore),
                 isPublishing: storePublisher.isPublishing,
-                onSaveDisplayName: {
-                    Task { await storePublisher.saveDisplayName(inferenceStore: inferenceStore) }
-                },
                 onChooseScreenshot: { url in
                     storePublisher.importScreenshot(from: url)
                 },
@@ -734,12 +821,12 @@ struct ToolLibraryPopoverView: View {
         routeStore.open(.settings(.buyIronsmithCredits))
     }
 
-    private func signInToIronsmith() {
+    private func signInToIronsmith(resumePublishingToolID: UUID? = nil) {
         guard !isSigningInToIronsmith else { return }
         isSigningInToIronsmith = true
 
         Task {
-            let didSignIn = await inferenceStore.signInToIronsmithWithAppleOAuth { @MainActor url in
+            let didFinishProviderSetup = await inferenceStore.signInToIronsmithWithAppleOAuth { @MainActor url in
                 try await webAuthenticationSession.authenticate(
                     using: url,
                     callbackURLScheme: IronsmithOAuthRedirect.appCallbackScheme
@@ -748,11 +835,20 @@ struct ToolLibraryPopoverView: View {
 
             await MainActor.run {
                 isSigningInToIronsmith = false
-                guard didSignIn else { return }
+                guard didFinishProviderSetup else { return }
                 inferenceStore.selectIronsmithModel(
                     identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier
                 )
             }
+            guard let resumePublishingToolID,
+                inferenceStore.ironsmithSession != nil,
+                let tool = tools.first(where: { $0.id == resumePublishingToolID })
+            else { return }
+            await storePublisher.beginPublishing(
+                tool,
+                inferenceStore: inferenceStore,
+                tools: tools
+            )
         }
     }
 
@@ -780,22 +876,6 @@ struct ToolLibraryPopoverView: View {
                 )
             }
         }
-    }
-
-    private func beginRenaming(_ tool: Tool) {
-        toolPendingRename = tool
-        pendingRenameName = tool.name
-    }
-
-    private func commitPendingRename() {
-        guard let toolPendingRename else { return }
-        toolLibraryStore.rename(toolPendingRename, to: pendingRenameName, in: modelContext)
-        clearPendingRename()
-    }
-
-    private func clearPendingRename() {
-        toolPendingRename = nil
-        pendingRenameName = ""
     }
 
     private var shouldShowEmptyState: Bool {
@@ -923,16 +1003,17 @@ struct ToolLibraryPopoverView: View {
         )
     }
 
-    private var renameAlertBinding: Binding<Bool> {
+    private var storeSignInRequiredBinding: Binding<Bool> {
         Binding(
-            get: { toolPendingRename != nil },
+            get: { storePublisher.pendingSignInToolID != nil },
             set: { isPresented in
                 if !isPresented {
-                    clearPendingRename()
+                    storePublisher.pendingSignInToolID = nil
                 }
             }
         )
     }
+
 }
 #Preview("Tool Library") {
     let container = try! IronsmithModelContainerFactory.make(isRunningTests: true)

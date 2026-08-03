@@ -7,7 +7,6 @@ import SwiftData
 final class ToolLibraryStorePublisher {
     var publishedStoreAppsByID: [String: StoreAppSummary] = [:]
     var publishingToolID: UUID?
-    var publishName = ""
     var publishShortDescription = ""
     var publishDescription = ""
     var publishCategory: StoreAppCategory = .utilities
@@ -17,21 +16,31 @@ final class ToolLibraryStorePublisher {
     var isShowingPublishSheet = false
     var isPublishing = false
     var errorMessage: String?
+    var pendingSignInToolID: UUID?
 
     @ObservationIgnored private let storeClient: IronsmithStoreClient
     @ObservationIgnored private let iconClient: ToolIconClient
+    @ObservationIgnored private let buildClient: ToolBuildClient
+    @ObservationIgnored private let saveModelContext: (ModelContext) throws -> Void
+    @ObservationIgnored private var currentPublishedSourceSha256: String?
 
     init() {
         self.storeClient = .live
         self.iconClient = .live()
+        self.buildClient = .live()
+        self.saveModelContext = { try $0.save() }
     }
 
     init(
         storeClient: IronsmithStoreClient,
-        iconClient: ToolIconClient
+        iconClient: ToolIconClient,
+        buildClient: ToolBuildClient? = nil,
+        saveModelContext: ((ModelContext) throws -> Void)? = nil
     ) {
         self.storeClient = storeClient
         self.iconClient = iconClient
+        self.buildClient = buildClient ?? .live()
+        self.saveModelContext = saveModelContext ?? { try $0.save() }
     }
 
     func canUpdateStoreVersion(for tool: Tool) -> Bool {
@@ -98,37 +107,47 @@ final class ToolLibraryStorePublisher {
         inferenceStore: InferenceStore,
         tools: [Tool]
     ) async {
+        errorMessage = nil
         await inferenceStore.refreshIronsmithAccountSummary()
         guard inferenceStore.ironsmithSession != nil else {
-            errorMessage = "Sign in with Ironsmith before publishing to the Ironsmith Store."
+            pendingSignInToolID = tool.id
             return
         }
+        pendingSignInToolID = nil
         await refreshPublishedStoreApps(
             isSignedIn: true,
             tools: tools
         )
+        let linkedApp = linkedPublishedApp(for: tool)
+        if let linkedApp {
+            do {
+                // May consider adding the latest source hash to the StoreAppSummary so we don't have to fetch the detail here, but this is fine for now.
+                let detail = try await storeClient.fetchApp(linkedApp.storeId, linkedApp.id)
+                let source = try sourceCode(for: tool)
+                if IronsmithStoreClient.sha256Hex(for: source)
+                    == detail.currentVersion.sourceSha256.lowercased()
+                {
+                    throw IronsmithStoreClientError.unchangedStoreVersion
+                }
+                publishShortDescription = detail.shortDescription
+                publishDescription = detail.description
+                publishCategory = detail.category
+                currentPublishedSourceSha256 = detail.currentVersion.sourceSha256.lowercased()
+            } catch {
+                present(error)
+                return
+            }
+        } else {
+            publishShortDescription = ""
+            publishDescription = ""
+            publishCategory = tool.category
+            currentPublishedSourceSha256 = nil
+        }
         publishingToolID = tool.id
-        publishName = tool.name
-        publishShortDescription = ""
-        publishDescription = ""
-        publishCategory = linkedPublishedApp(for: tool)?.category ?? .utilities
         publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
         publishScreenshotData = nil
         publishScreenshotName = nil
         isShowingPublishSheet = true
-    }
-
-    func saveDisplayName(inferenceStore: InferenceStore) async {
-        let trimmed = publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        do {
-            let profile = try await inferenceStore.updateIronsmithAccountProfile(
-                IronsmithAccountProfileUpdate(displayName: trimmed)
-            )
-            publishDisplayName = profile.displayName ?? trimmed
-        } catch {
-            present(error)
-        }
     }
 
     func publish(
@@ -144,18 +163,26 @@ final class ToolLibraryStorePublisher {
 
         do {
             if needsDisplayName(inferenceStore: inferenceStore) {
+                let displayName = publishDisplayName.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+                guard (1...80).contains(displayName.count) else {
+                    throw ToolLibraryStorePublishingError.invalidDisplayName
+                }
                 _ = try await inferenceStore.updateIronsmithAccountProfile(
                     IronsmithAccountProfileUpdate(
-                        displayName: publishDisplayName.trimmingCharacters(
-                            in: .whitespacesAndNewlines)
+                        displayName: displayName
                     )
                 )
             }
 
-            let source = try String(
-                contentsOf: try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath),
-                encoding: .utf8
-            )
+            let source = try sourceCode(for: tool)
+            if linkedPublishedApp(for: tool) != nil,
+                let currentPublishedSourceSha256,
+                IronsmithStoreClient.sha256Hex(for: source) == currentPublishedSourceSha256
+            {
+                throw IronsmithStoreClientError.unchangedStoreVersion
+            }
             let settings = tool.generationSettings(defaults: defaultSettings)
             _ = try await iconClient.ensureIconAssets(
                 ToolIconRequest(displayName: tool.name, layout: tool.packageLayout)
@@ -172,6 +199,10 @@ final class ToolLibraryStorePublisher {
                     StoreVersionPublicationRequest(
                         storeId: linkedApp.storeId,
                         appId: linkedApp.id,
+                        shortDescription: publishShortDescription.trimmingCharacters(
+                            in: .whitespacesAndNewlines),
+                        description: publishDescription.trimmingCharacters(
+                            in: .whitespacesAndNewlines),
                         sourceCode: source,
                         generationSettings: settings,
                         iconMasterJPEG: iconMasterJPEG,
@@ -185,7 +216,7 @@ final class ToolLibraryStorePublisher {
                 app = try await storeClient.publishApp(
                     StorePublicationRequest(
                         storeId: tool.storeId ?? IronsmithStoreConstants.communityStoreId,
-                        name: publishName.trimmingCharacters(in: .whitespacesAndNewlines),
+                        name: tool.name,
                         shortDescription: publishShortDescription.trimmingCharacters(
                             in: .whitespacesAndNewlines),
                         description: publishDescription.trimmingCharacters(
@@ -201,11 +232,12 @@ final class ToolLibraryStorePublisher {
                 )
             }
 
-            applyPublishedStoreLinkage(app, to: tool)
-            try modelContext.save()
-            publishedStoreAppsByID[app.id] = StoreAppSummary(detail: app)
-            isShowingPublishSheet = false
-            routeStore.open(.store(.publishedApp(app.id)))
+            await finishSuccessfulPublication(
+                app,
+                for: tool,
+                modelContext: modelContext,
+                routeStore: routeStore
+            )
         } catch {
             modelContext.rollback()
             present(error)
@@ -235,9 +267,17 @@ final class ToolLibraryStorePublisher {
         return publishedStoreAppsByID[storeAppId]
     }
 
+    private func sourceCode(for tool: Tool) throws -> String {
+        try String(
+            contentsOf: try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath),
+            encoding: .utf8
+        )
+    }
+
     private func applyPublishedStoreLinkage(_ app: StoreAppDetail, to tool: Tool) {
         tool.storeId = app.storeId
         tool.storeAppId = app.id
+        tool.category = app.category
         tool.storeVersionId = app.currentVersion.id
         tool.storeVersionNumber = app.currentVersion.versionNumber
         tool.storeSourceSha256 = app.currentVersion.sourceSha256
@@ -246,9 +286,81 @@ final class ToolLibraryStorePublisher {
         tool.updatedAt = Date()
     }
 
+    private func finishSuccessfulPublication(
+        _ app: StoreAppDetail,
+        for tool: Tool,
+        modelContext: ModelContext,
+        routeStore: IronsmithRouteStore
+    ) async {
+        applyPublishedStoreLinkage(app, to: tool)
+
+        let persistenceError: Error?
+        do {
+            try saveModelContext(modelContext)
+            persistenceError = nil
+        } catch {
+            persistenceError = error
+        }
+
+        let rebuildError: Error?
+        do {
+            try await buildClient.buildTool(tool)
+            rebuildError = nil
+        } catch {
+            rebuildError = error
+        }
+
+        publishedStoreAppsByID[app.id] = StoreAppSummary(detail: app)
+        isShowingPublishSheet = false
+        routeStore.open(.store(.publishedApp(app.id)))
+
+        if let warning = ToolLibraryStorePublishingError.localFinalizationWarning(
+            persistenceError: persistenceError,
+            rebuildError: rebuildError
+        ) {
+            present(warning)
+        }
+    }
+
     private func present(_ error: Error) {
         errorMessage =
             IronsmithErrorPresentation.message(for: error)
             ?? error.localizedDescription
+    }
+}
+
+private enum ToolLibraryStorePublishingError: LocalizedError {
+    case invalidDisplayName
+    case localFinalizationFailed(String)
+
+    static func localFinalizationWarning(
+        persistenceError: Error?,
+        rebuildError: Error?
+    ) -> Self? {
+        var details: [String] = []
+        if let persistenceError {
+            details.append(
+                "Ironsmith could not save the Store linkage locally: \(persistenceError.localizedDescription)"
+            )
+        }
+        if let rebuildError {
+            details.append(
+                "Ironsmith could not rebuild the local app with its updated Store metadata: \(rebuildError.localizedDescription)"
+            )
+        }
+        guard !details.isEmpty else { return nil }
+        return .localFinalizationFailed(details.joined(separator: " "))
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidDisplayName:
+            "Enter a display name between 1 and 80 characters."
+        case .localFinalizationFailed(let detail):
+            """
+            This app was published successfully, but Ironsmith could not finish updating its \
+            local state. \(detail)
+            """
+        }
     }
 }

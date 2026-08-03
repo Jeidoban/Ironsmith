@@ -77,6 +77,7 @@ extension StoreToolImportClient {
             let tool = Tool(
                 name: displayName,
                 executableName: executableName,
+                category: request.app.category,
                 sandboxEnabled: settings.sandboxEnabled,
                 appKind: settings.appKind,
                 menuBarSystemImage: settings.menuBarSystemImage,

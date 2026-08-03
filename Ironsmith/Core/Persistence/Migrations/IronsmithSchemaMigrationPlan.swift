@@ -26,6 +26,8 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
             IronsmithSchemaV3.self,
             IronsmithSchemaV4.self,
             IronsmithSchemaV5.self,
+            IronsmithSchemaV6.self,
+            IronsmithSchemaV7.self,
         ]
     }
 
@@ -128,6 +130,24 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
             .lightweight(
                 fromVersion: IronsmithSchemaV4.self,
                 toVersion: IronsmithSchemaV5.self
+            ),
+            .custom(
+                fromVersion: IronsmithSchemaV5.self,
+                toVersion: IronsmithSchemaV6.self,
+                willMigrate: nil,
+                didMigrate: { context in
+                    let tools = try context.fetch(
+                        FetchDescriptor<IronsmithSchemaV6.Tool>()
+                    )
+                    for tool in tools {
+                        tool.category = .utilities
+                    }
+                    try context.save()
+                }
+            ),
+            .lightweight(
+                fromVersion: IronsmithSchemaV6.self,
+                toVersion: IronsmithSchemaV7.self
             ),
         ]
     }

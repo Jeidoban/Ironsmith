@@ -95,6 +95,8 @@ struct StoreImportTests {
         #expect(tool.storeAppId == app.id)
         #expect(tool.storeVersionId == version.id)
         #expect(tool.storeVersionNumber == version.versionNumber)
+        #expect(tool.appVersionNumber == version.versionNumber)
+        #expect(tool.category == app.category)
         #expect(tool.storeSourceSha256 == version.sourceSha256)
         #expect(tool.storeImportedAt != nil)
         #expect(tool.storeRemixedFromVersionId == version.id)

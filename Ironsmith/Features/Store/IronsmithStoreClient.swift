@@ -30,57 +30,6 @@ nonisolated enum StoreAssetKind: String, Codable, Equatable, Sendable {
     case screenshot
 }
 
-nonisolated enum StoreAppCategory: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
-    case business
-    case developerTools
-    case education
-    case entertainment
-    case finance
-    case games
-    case graphicsDesign
-    case healthFitness
-    case lifestyle
-    case music
-    case productivity
-    case utilities
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .business: "Business"
-        case .developerTools: "Developer Tools"
-        case .education: "Education"
-        case .entertainment: "Entertainment"
-        case .finance: "Finance"
-        case .games: "Games"
-        case .graphicsDesign: "Graphics & Design"
-        case .healthFitness: "Health & Fitness"
-        case .lifestyle: "Lifestyle"
-        case .music: "Music"
-        case .productivity: "Productivity"
-        case .utilities: "Utilities"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .business: "briefcase"
-        case .developerTools: "hammer"
-        case .education: "graduationcap"
-        case .entertainment: "play.rectangle"
-        case .finance: "dollarsign.circle"
-        case .games: "gamecontroller"
-        case .graphicsDesign: "paintbrush"
-        case .healthFitness: "heart"
-        case .lifestyle: "leaf"
-        case .music: "music.note"
-        case .productivity: "checkmark.circle"
-        case .utilities: "wrench.and.screwdriver"
-        }
-    }
-}
-
 nonisolated enum StoreAppListSort: String, Codable, Hashable, Sendable {
     case recent
     case trending
@@ -302,6 +251,8 @@ nonisolated struct StorePublicationRequest: Sendable {
 nonisolated struct StoreVersionPublicationRequest: Sendable {
     let storeId: String
     let appId: String
+    let shortDescription: String
+    let description: String
     let sourceCode: String
     let generationSettings: ToolGenerationSettings
     let iconMasterJPEG: Data?
@@ -325,6 +276,7 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
     case invalidResponse
     case requestFailed(statusCode: Int, message: String)
     case sourceHashMismatch(expected: String, actual: String)
+    case unchangedStoreVersion
 
     var errorDescription: String? {
         switch self {
@@ -338,6 +290,8 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
             return "The Ironsmith Store returned HTTP \(statusCode): \(message)"
         case .sourceHashMismatch:
             return "The downloaded source did not match the scanned source hash."
+        case .unchangedStoreVersion:
+            return "The source matches the currently published version. Make a source change before publishing a new version."
         }
     }
 }
@@ -489,7 +443,9 @@ extension IronsmithStoreClient {
                     generationSettings: StoreGenerationSettingsDTO(
                         settings: request.generationSettings),
                     remixedFromVersionId: request.remixedFromVersionId,
-                    replaceScreenshots: request.replaceScreenshots
+                    replaceScreenshots: request.replaceScreenshots,
+                    shortDescription: request.shortDescription,
+                    description: request.description
                 )
                 var body = try StoreMultipartBody()
                     .addingJSONField(name: "metadata", value: metadata)
@@ -704,6 +660,8 @@ nonisolated private struct StoreVersionMetadataPayload: Encodable {
     let generationSettings: StoreGenerationSettingsDTO
     let remixedFromVersionId: String?
     let replaceScreenshots: Bool
+    let shortDescription: String
+    let description: String
 }
 
 nonisolated struct StoreMultipartBody {

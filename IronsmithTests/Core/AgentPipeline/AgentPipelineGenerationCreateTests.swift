@@ -452,7 +452,8 @@ extension AgentPipelineTests {
                 ToolMetadataSuggestion(
                     displayName: "Focus Pad",
                     iconPrompt: iconPrompt,
-                    menuBarSystemImage: "note.text"
+                    menuBarSystemImage: "note.text",
+                    category: .productivity
                 )
             },
             promptRefinementClient: ToolPromptRefinementClient { _ in
@@ -490,6 +491,7 @@ extension AgentPipelineTests {
         #expect(tool.executableName == "FocusPad")
         #expect(tool.appKind == .menuBar)
         #expect(tool.validatedMenuBarSystemImage == "note.text")
+        #expect(tool.category == .productivity)
         #expect(tool.storedResourcePermissions?.enabled == [.camera])
         #expect(tool.pendingPrompt == nil)
         #expect(tool.packageRootURL.lastPathComponent == "focus-pad")
@@ -499,6 +501,8 @@ extension AgentPipelineTests {
         #expect(appEntrySource.contains("MenuBarExtra(\"Focus Pad\", systemImage: \"note.text\")"))
         #expect(await appBundleCapture.builtRequests.first?.iconPrompt == iconPrompt)
         #expect(await appBundleCapture.builtRequests.first?.displayName == "Focus Pad")
+        #expect(await appBundleCapture.builtRequests.first?.category == .productivity)
+        #expect(await appBundleCapture.builtRequests.first?.versionNumber == 1)
         #expect(await appBundleCapture.builtRequests.first?.appKind == .menuBar)
         #expect(await appBundleCapture.builtRequests.first?.menuBarSystemImage == "note.text")
     }

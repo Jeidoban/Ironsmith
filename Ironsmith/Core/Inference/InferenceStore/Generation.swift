@@ -49,6 +49,13 @@ extension InferenceStore {
             pipelineConfiguration: pipelineConfiguration(for: selectedModel, codingAgent: codingAgent),
             promptRefinementEnabled: generationPreferences.generatedPromptRefinementEnabled,
             codingAgentModelIdentifier: selectedModel.identifier,
+            codingAgentModelFamily: ToolModelFamily.resolved(
+                model: selectedModel,
+                provider: provider
+            ),
+            codingAgentContextWindowTokens: provider?.kind == .ironsmith
+                ? selectedModel.contextWindowTokens
+                : nil,
             codexAgentAuthentication: try await codexAgentAuthentication(
                 for: selectedModel,
                 provider: provider,

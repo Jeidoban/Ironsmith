@@ -241,14 +241,14 @@ extension IronsmithAccountClient {
                 )
             },
             updateProfile: { update in
-                let response: IronsmithAccountDataEnvelope<IronsmithAccountProfile> = try await Self.invokeAPI(
+                let response: IronsmithAccountProfileResponse = try await Self.invokeAPI(
                     configuration,
                     accessTokenProvider: validAccessToken,
                     path: "api/v1/account/profile",
                     method: .patch,
                     body: update
                 )
-                return response.data
+                return response.profile
             },
             fetchCreditPacks: {
                 let response: IronsmithCreditPacksResponse = try await Self.invokeAPI(
@@ -439,8 +439,8 @@ nonisolated private struct IronsmithAccountDeleteResponse: Decodable {
     let deleted: Bool
 }
 
-nonisolated private struct IronsmithAccountDataEnvelope<Data: Decodable>: Decodable {
-    let data: Data
+nonisolated struct IronsmithAccountProfileResponse: Decodable {
+    let profile: IronsmithAccountProfile
 }
 
 nonisolated private struct IronsmithCreditPacksResponse: Decodable {
