@@ -25,3 +25,6 @@ Config/*.local.xcconfig
 Config/*.env
 !Config/.env.example
 script/*.local.sh
+
+ironsmith-backend/
+.codex/environments/environment.toml

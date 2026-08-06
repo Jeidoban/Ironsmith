@@ -84,6 +84,7 @@ final class ToolLibraryStorePublisher {
                         nil,
                         offset,
                         .recent,
+                        nil,
                         nil
                     )
                     for app in page.apps {

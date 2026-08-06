@@ -455,13 +455,14 @@ struct StoreImportTests {
         let second = Self.appSummary(id: "app-two")
         let recorder = StoreListRequestRecorder()
         var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, scope, search, offset, sort, category in
+        client.listApps = { _, scope, search, offset, sort, category, creatorHandle in
             await recorder.record(
                 scope: scope,
                 search: search,
                 offset: offset,
                 sort: sort,
-                category: category
+                category: category,
+                creatorHandle: creatorHandle
             )
             if offset == 0 {
                 return StoreAppPage(apps: [first], hasMore: true)
@@ -496,7 +497,7 @@ struct StoreImportTests {
         let current = Self.appSummary(id: "current-app")
         let gate = StorePageGate()
         var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, _, search, _, _, _ in
+        client.listApps = { _, _, search, _, _, _, _ in
             if search == "first" {
                 return await gate.waitForPage()
             }
@@ -532,13 +533,14 @@ struct StoreImportTests {
         let app = Self.appSummary(id: "section-app")
         let recorder = StoreListRequestRecorder()
         var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, scope, search, offset, sort, category in
+        client.listApps = { _, scope, search, offset, sort, category, creatorHandle in
             await recorder.record(
                 scope: scope,
                 search: search,
                 offset: offset,
                 sort: sort,
-                category: category
+                category: category,
+                creatorHandle: creatorHandle
             )
             return StoreAppPage(
                 apps: [app],
@@ -571,6 +573,68 @@ struct StoreImportTests {
         #expect(requests.allSatisfy { $0.search == nil })
         #expect(requests.allSatisfy { $0.sort == .trending })
         #expect(requests.allSatisfy { $0.category == .games })
+        #expect(requests.allSatisfy { $0.creatorHandle == nil })
+    }
+
+    @MainActor
+    @Test
+    func creatorListForwardsExactHandleSortAndOffset() async {
+        let recorder = StoreListRequestRecorder()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, scope, search, offset, sort, category, creatorHandle in
+            await recorder.record(
+                scope: scope,
+                search: search,
+                offset: offset,
+                sort: sort,
+                category: category,
+                creatorHandle: creatorHandle
+            )
+            return StoreAppPage(apps: [], hasMore: false)
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        _ = await store.loadSectionApps(
+            sort: .trending,
+            category: nil,
+            creatorHandle: "jadew",
+            offset: 30
+        )
+
+        let request = await recorder.requests.first
+        #expect(request?.scope == .discover)
+        #expect(request?.search == nil)
+        #expect(request?.offset == 30)
+        #expect(request?.sort == .trending)
+        #expect(request?.category == nil)
+        #expect(request?.creatorHandle == "jadew")
+    }
+
+    @MainActor
+    @Test
+    func cancelledSectionLoadDoesNotPresentAnError() async {
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, _, _, _, _, _, _ in
+            throw CancellationError()
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        let page = await store.loadSectionApps(sort: .trending, category: .utilities)
+
+        #expect(page == nil)
+        #expect(store.errorMessage == nil)
     }
 
     @MainActor
@@ -580,13 +644,14 @@ struct StoreImportTests {
         let second = Self.appSummary(id: "published-two")
         let recorder = StoreListRequestRecorder()
         var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, scope, search, offset, sort, category in
+        client.listApps = { _, scope, search, offset, sort, category, creatorHandle in
             await recorder.record(
                 scope: scope,
                 search: search,
                 offset: offset,
                 sort: sort,
-                category: category
+                category: category,
+                creatorHandle: creatorHandle
             )
             if offset == 0 {
                 return StoreAppPage(apps: [first], hasMore: true)
@@ -1034,6 +1099,7 @@ private actor StoreListRequestRecorder {
         let offset: Int
         let sort: StoreAppListSort
         let category: StoreAppCategory?
+        let creatorHandle: String?
     }
 
     private(set) var requests: [Request] = []
@@ -1043,7 +1109,8 @@ private actor StoreListRequestRecorder {
         search: String?,
         offset: Int,
         sort: StoreAppListSort,
-        category: StoreAppCategory?
+        category: StoreAppCategory?,
+        creatorHandle: String?
     ) {
         requests.append(
             Request(
@@ -1051,7 +1118,8 @@ private actor StoreListRequestRecorder {
                 search: search,
                 offset: offset,
                 sort: sort,
-                category: category
+                category: category,
+                creatorHandle: creatorHandle
             )
         )
     }
