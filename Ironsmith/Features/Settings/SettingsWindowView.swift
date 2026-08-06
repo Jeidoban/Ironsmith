@@ -17,12 +17,12 @@ struct SettingsWindowView: View {
 
     var body: some View {
         Form {
-            SettingsAccountSectionView(
-                onManageAccount: { presentedSheet = .manageAccount }
-            )
             SettingsProvidersSectionView(
                 onAddProvider: { presentedSheet = .addProvider(initialKind: nil) },
                 onEditProvider: { presentedSheet = .editProvider($0, showsCreditPacks: false) }
+            )
+            SettingsAccountSectionView(
+                onManageAccount: { presentedSheet = .manageAccount }
             )
             SettingsPreferencesSectionView()
             #if DEBUG

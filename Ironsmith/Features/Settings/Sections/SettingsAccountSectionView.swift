@@ -22,6 +22,10 @@ struct SettingsAccountSectionView: View {
                 if let email = inferenceStore.ironsmithAccountSummary?.user.email {
                     LabeledContent("Email", value: email)
                 }
+                LabeledContent("Display Name") {
+                    Text(displayName ?? "Not set")
+                        .foregroundStyle(displayName == nil ? .secondary : .primary)
+                }
                 LabeledContent("Creator Handle") {
                     Text(handleText)
                         .foregroundStyle(handle == nil ? .secondary : .primary)
@@ -33,6 +37,16 @@ struct SettingsAccountSectionView: View {
 
     private var handle: String? {
         inferenceStore.ironsmithAccountSummary?.profile?.handle
+    }
+
+    private var displayName: String? {
+        guard let displayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !displayName.isEmpty
+        else {
+            return nil
+        }
+        return displayName
     }
 
     private var handleText: String {
