@@ -10,13 +10,17 @@ final class ToolLibraryStorePublisher {
     var publishShortDescription = ""
     var publishDescription = ""
     var publishCategory: StoreAppCategory = .utilities
-    var publishDisplayName = ""
     var publishScreenshotData: Data?
     var publishScreenshotName: String?
     var isShowingPublishSheet = false
     var isPublishing = false
     var errorMessage: String?
     var pendingSignInToolID: UUID?
+    var pendingCreatorProfileToolID: UUID?
+    var creatorDisplayName = ""
+    var creatorHandle = ""
+    var isShowingCreatorProfileSheet = false
+    var isSavingCreatorProfile = false
 
     @ObservationIgnored private let storeClient: IronsmithStoreClient
     @ObservationIgnored private let iconClient: ToolIconClient
@@ -96,10 +100,12 @@ final class ToolLibraryStorePublisher {
         }
     }
 
-    func needsDisplayName(inferenceStore: InferenceStore) -> Bool {
-        (inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty
+    func hasCompleteCreatorProfile(inferenceStore: InferenceStore) -> Bool {
+        let profile = inferenceStore.ironsmithAccountSummary?.profile
+        return !(profile?.displayName ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !(profile?.handle ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     func beginPublishing(
@@ -114,6 +120,14 @@ final class ToolLibraryStorePublisher {
             return
         }
         pendingSignInToolID = nil
+        guard hasCompleteCreatorProfile(inferenceStore: inferenceStore) else {
+            pendingCreatorProfileToolID = tool.id
+            creatorDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
+            creatorHandle = inferenceStore.ironsmithAccountSummary?.profile?.handle ?? ""
+            isShowingCreatorProfileSheet = true
+            return
+        }
+        pendingCreatorProfileToolID = nil
         await refreshPublishedStoreApps(
             isSignedIn: true,
             tools: tools
@@ -144,7 +158,6 @@ final class ToolLibraryStorePublisher {
             currentPublishedSourceSha256 = nil
         }
         publishingToolID = tool.id
-        publishDisplayName = inferenceStore.ironsmithAccountSummary?.profile?.displayName ?? ""
         publishScreenshotData = nil
         publishScreenshotName = nil
         isShowingPublishSheet = true
@@ -162,20 +175,6 @@ final class ToolLibraryStorePublisher {
         defer { isPublishing = false }
 
         do {
-            if needsDisplayName(inferenceStore: inferenceStore) {
-                let displayName = publishDisplayName.trimmingCharacters(
-                    in: .whitespacesAndNewlines
-                )
-                guard (1...80).contains(displayName.count) else {
-                    throw ToolLibraryStorePublishingError.invalidDisplayName
-                }
-                _ = try await inferenceStore.updateIronsmithAccountProfile(
-                    IronsmithAccountProfileUpdate(
-                        displayName: displayName
-                    )
-                )
-            }
-
             let source = try sourceCode(for: tool)
             if linkedPublishedApp(for: tool) != nil,
                 let currentPublishedSourceSha256,
@@ -240,6 +239,38 @@ final class ToolLibraryStorePublisher {
             )
         } catch {
             modelContext.rollback()
+            present(error)
+        }
+    }
+
+    func saveCreatorProfile(
+        inferenceStore: InferenceStore,
+        tools: [Tool]
+    ) async {
+        guard !isSavingCreatorProfile else { return }
+        let displayName = creatorDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let handle = IronsmithCreatorHandle.normalized(creatorHandle)
+        guard (1...80).contains(displayName.count) else {
+            present(ToolLibraryStorePublishingError.invalidDisplayName)
+            return
+        }
+        guard ToolLibraryCreatorProfileSheetView.isValidHandle(handle) else {
+            present(ToolLibraryStorePublishingError.invalidHandle)
+            return
+        }
+        isSavingCreatorProfile = true
+        defer { isSavingCreatorProfile = false }
+        do {
+            _ = try await inferenceStore.updateIronsmithAccountProfile(
+                IronsmithAccountProfileUpdate(displayName: displayName, handle: handle)
+            )
+            isShowingCreatorProfileSheet = false
+            guard let toolID = pendingCreatorProfileToolID,
+                let tool = tools.first(where: { $0.id == toolID })
+            else { return }
+            pendingCreatorProfileToolID = nil
+            await beginPublishing(tool, inferenceStore: inferenceStore, tools: tools)
+        } catch {
             present(error)
         }
     }
@@ -331,6 +362,7 @@ final class ToolLibraryStorePublisher {
 
 private enum ToolLibraryStorePublishingError: LocalizedError {
     case invalidDisplayName
+    case invalidHandle
     case localFinalizationFailed(String)
 
     static func localFinalizationWarning(
@@ -356,6 +388,8 @@ private enum ToolLibraryStorePublishingError: LocalizedError {
         switch self {
         case .invalidDisplayName:
             "Enter a display name between 1 and 80 characters."
+        case .invalidHandle:
+            "Enter a handle using 3–30 letters, numbers, or underscores that begins and ends with a letter or number."
         case .localFinalizationFailed(let detail):
             """
             This app was published successfully, but Ironsmith could not finish updating its \

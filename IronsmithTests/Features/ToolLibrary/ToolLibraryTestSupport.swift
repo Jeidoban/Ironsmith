@@ -48,6 +48,12 @@ extension ToolLibraryTests {
             signInWithAppleOAuth: { _ in
                 Self.ironsmithSession()
             },
+            signInWithEmailPassword: { _, _ in
+                Self.ironsmithSession()
+            },
+            signUpWithEmailPassword: { _, _ in
+                Self.ironsmithSession()
+            },
             signOut: {},
             fetchAccountSummary: {
                 IronsmithAccountSummary(
@@ -55,7 +61,12 @@ extension ToolLibraryTests {
                         id: "00000000-0000-4000-8000-000000000001",
                         email: "jade@example.com"
                     ),
-                    profile: nil,
+                    profile: IronsmithAccountProfile(
+                        id: "00000000-0000-4000-8000-000000000001",
+                        email: "jade@example.com",
+                        displayName: "Jade",
+                        handle: "jade"
+                    ),
                     credits: IronsmithCreditSummary(
                         userId: "00000000-0000-4000-8000-000000000001",
                         balanceCredits: balanceCredits
@@ -67,8 +78,12 @@ extension ToolLibraryTests {
                 IronsmithAccountProfile(
                     id: "00000000-0000-4000-8000-000000000001",
                     email: "jade@example.com",
-                    displayName: nil
+                    displayName: nil,
+                    handle: nil
                 )
+            },
+            checkHandleAvailability: {
+                IronsmithHandleAvailability(handle: $0, available: true)
             },
             fetchCreditPacks: { [] },
             createCheckoutSession: { _ in
@@ -96,6 +111,12 @@ extension ToolLibraryTests {
             signInWithAppleOAuth: { _ in
                 Self.ironsmithSession()
             },
+            signInWithEmailPassword: { _, _ in
+                Self.ironsmithSession()
+            },
+            signUpWithEmailPassword: { _, _ in
+                Self.ironsmithSession()
+            },
             signOut: {},
             fetchAccountSummary: {
                 await fetchCapture.fetch()
@@ -104,8 +125,12 @@ extension ToolLibraryTests {
                 IronsmithAccountProfile(
                     id: "00000000-0000-4000-8000-000000000001",
                     email: "jade@example.com",
-                    displayName: nil
+                    displayName: nil,
+                    handle: nil
                 )
+            },
+            checkHandleAvailability: {
+                IronsmithHandleAvailability(handle: $0, available: true)
             },
             fetchCreditPacks: { [] },
             createCheckoutSession: { _ in

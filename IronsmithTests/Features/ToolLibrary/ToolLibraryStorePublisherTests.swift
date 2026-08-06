@@ -152,7 +152,7 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
-    func storePublisherSavesMissingDisplayNameOnceBeforePublishing() async throws {
+    func storePublisherCompletesCreatorProfileBeforePublishing() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let profileCapture = PublisherProfileCapture()
@@ -163,12 +163,17 @@ extension ToolLibraryTests {
             validAccessToken: { "access-token" },
             generationAccessToken: { "access-token" },
             signInWithAppleOAuth: { _ in session },
+            signInWithEmailPassword: { _, _ in session },
+            signUpWithEmailPassword: { _, _ in session },
             signOut: {},
             fetchAccountSummary: {
                 await profileCapture.summary()
             },
             updateProfile: { update in
                 await profileCapture.update(update)
+            },
+            checkHandleAvailability: {
+                IronsmithHandleAvailability(handle: $0, available: true)
             },
             fetchCreditPacks: { [] },
             createCheckoutSession: { _ in
@@ -202,9 +207,6 @@ extension ToolLibraryTests {
                 )
             }
         )
-        publisher.publishShortDescription = "Clean copied text"
-        publisher.publishDescription = "Cleans and reformats text."
-        publisher.publishDisplayName = "  Jade Westover  "
         let tool = Tool(
             name: "Clipboard Cleaner",
             executableName: "ClipboardCleaner",
@@ -221,6 +223,14 @@ extension ToolLibraryTests {
         let context = container.mainContext
         context.insert(tool)
         try context.save()
+
+        await publisher.beginPublishing(tool, inferenceStore: inferenceStore, tools: [tool])
+        #expect(publisher.isShowingCreatorProfileSheet)
+        publisher.creatorDisplayName = "  Jade Westover  "
+        publisher.creatorHandle = "jade_w"
+        await publisher.saveCreatorProfile(inferenceStore: inferenceStore, tools: [tool])
+        publisher.publishShortDescription = "Clean copied text"
+        publisher.publishDescription = "Cleans and reformats text."
 
         await publisher.publish(
             tool,
@@ -262,7 +272,6 @@ extension ToolLibraryTests {
             iconClient: .cachedOnly(),
             buildClient: ToolBuildClient { _ in }
         )
-        publisher.publishDisplayName = "Jade Westover"
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
         let tool = Tool(
@@ -356,7 +365,6 @@ extension ToolLibraryTests {
         publisher.publishedStoreAppsByID[previousDetail.id] = StoreAppSummary(
             detail: previousDetail
         )
-        publisher.publishDisplayName = "Jade Westover"
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
         let tool = Tool(
@@ -426,7 +434,6 @@ extension ToolLibraryTests {
                 throw PublisherPersistenceError.failed
             }
         )
-        publisher.publishDisplayName = "Jade Westover"
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
         publisher.isShowingPublishSheet = true
@@ -499,7 +506,6 @@ extension ToolLibraryTests {
         publisher.publishedStoreAppsByID[previousDetail.id] = StoreAppSummary(
             detail: previousDetail
         )
-        publisher.publishDisplayName = "Jade Westover"
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
         publisher.isShowingPublishSheet = true
@@ -614,6 +620,7 @@ extension ToolLibraryTests {
             storeId: IronsmithStoreConstants.communityStoreId,
             storeVisibility: "public",
             authorDisplayName: "Jade",
+            authorHandle: "jade",
             name: "Clipboard Cleaner",
             shortDescription: "Clean copied text",
             description: "Cleans and reformats text from the clipboard.",
@@ -635,6 +642,7 @@ extension ToolLibraryTests {
 private actor PublisherProfileCapture {
     private(set) var updatedNames: [String] = []
     private var displayName: String?
+    private var handle: String?
 
     func summary() -> IronsmithAccountSummary {
         IronsmithAccountSummary(
@@ -646,7 +654,8 @@ private actor PublisherProfileCapture {
                 IronsmithAccountProfile(
                     id: "00000000-0000-4000-8000-000000000001",
                     email: "jade@example.com",
-                    displayName: $0
+                    displayName: $0,
+                    handle: handle
                 )
             },
             credits: IronsmithCreditSummary(
@@ -663,10 +672,14 @@ private actor PublisherProfileCapture {
             updatedNames.append(name)
         }
         displayName = name
+        if let updatedHandle = update.handle {
+            handle = updatedHandle
+        }
         return IronsmithAccountProfile(
             id: "00000000-0000-4000-8000-000000000001",
             email: "jade@example.com",
-            displayName: name
+            displayName: name,
+            handle: handle
         )
     }
 }

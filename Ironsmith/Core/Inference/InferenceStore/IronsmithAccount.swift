@@ -1,4 +1,5 @@
 import Foundation
+import Supabase
 
 extension InferenceStore {
     func refreshIronsmithSession() {
@@ -32,6 +33,14 @@ extension InferenceStore {
         let profile = try await dependencies.accountClient.updateProfile(update)
         await refreshIronsmithAccountSummary()
         return profile
+    }
+
+    func checkIronsmithHandleAvailability(_ handle: String) async throws -> IronsmithHandleAvailability {
+        refreshIronsmithSession()
+        guard ironsmithSession != nil else {
+            throw IronsmithAccountClientError.missingSession
+        }
+        return try await dependencies.accountClient.checkHandleAvailability(handle)
     }
 
     func refreshIronsmithCreditPacks() async {
@@ -75,11 +84,8 @@ extension InferenceStore {
         launchFlow: @escaping IronsmithOAuthLaunchFlow
     ) async -> Bool {
         do {
-            ironsmithSession = try await dependencies.accountClient.signInWithAppleOAuth(launchFlow)
-            reconcileImageGenerationProvider()
-            let didEnsureProvider = await ensureIronsmithProviderExists()
-            await refreshIronsmithAccountSummary()
-            return didEnsureProvider
+            let session = try await dependencies.accountClient.signInWithAppleOAuth(launchFlow)
+            return await finishIronsmithAuthentication(session)
         } catch {
             guard !IronsmithErrorPresentation.isCancellation(error) else {
                 return false
@@ -89,7 +95,61 @@ extension InferenceStore {
         }
     }
 
+    func signInToIronsmithWithEmailPassword(email: String, password: String) async -> Bool {
+        do {
+            let session = try await dependencies.accountClient.signInWithEmailPassword(
+                email,
+                password
+            )
+            return await finishIronsmithAuthentication(session)
+        } catch {
+            presentError(error)
+            return false
+        }
+    }
+
+    func createIronsmithAccountWithEmailPassword(email: String, password: String) async -> Bool {
+        do {
+            let session = try await dependencies.accountClient.signUpWithEmailPassword(
+                email,
+                password
+            )
+            return await finishIronsmithAuthentication(session)
+        } catch {
+            presentError(error)
+            return false
+        }
+    }
+
+    private func finishIronsmithAuthentication(_ session: Session) async -> Bool {
+        ironsmithSession = session
+        reconcileImageGenerationProvider()
+
+        guard await ensureIronsmithProviderExists() else {
+            try? await dependencies.accountClient.signOut()
+            ironsmithSession = nil
+            ironsmithAccountSummary = nil
+            ironsmithCreditPacks = []
+            pendingIronsmithAccountRefreshAfterCheckout = false
+            reconcileImageGenerationProvider()
+            return false
+        }
+
+        await refreshIronsmithAccountSummary()
+        return true
+    }
+
     func signOutIronsmithProvider(_ provider: ProviderConfig) async -> Bool {
+        await signOutIronsmithAccount(provider: provider)
+    }
+
+    func signOutIronsmithAccount() async -> Bool {
+        await signOutIronsmithAccount(
+            provider: providers.first(where: { $0.kind == .ironsmith })
+        )
+    }
+
+    private func signOutIronsmithAccount(provider: ProviderConfig?) async -> Bool {
         do {
             try await dependencies.accountClient.signOut()
             ironsmithSession = nil
@@ -97,7 +157,9 @@ extension InferenceStore {
             ironsmithAccountSummary = nil
             ironsmithCreditPacks = []
             pendingIronsmithAccountRefreshAfterCheckout = false
-            await removeProvider(provider)
+            if let provider {
+                await removeProvider(provider)
+            }
             return true
         } catch {
             presentError(error)
@@ -106,6 +168,16 @@ extension InferenceStore {
     }
 
     func deleteIronsmithAccount(provider: ProviderConfig) async -> Bool {
+        await deleteIronsmithAccount(provider: Optional(provider))
+    }
+
+    func deleteIronsmithAccount() async -> Bool {
+        await deleteIronsmithAccount(
+            provider: providers.first(where: { $0.kind == .ironsmith })
+        )
+    }
+
+    private func deleteIronsmithAccount(provider: ProviderConfig?) async -> Bool {
         do {
             try await dependencies.accountClient.deleteAccount()
             try? await dependencies.accountClient.signOut()
@@ -114,7 +186,9 @@ extension InferenceStore {
             ironsmithAccountSummary = nil
             ironsmithCreditPacks = []
             pendingIronsmithAccountRefreshAfterCheckout = false
-            await removeProvider(provider)
+            if let provider {
+                await removeProvider(provider)
+            }
             return true
         } catch {
             presentError(error)

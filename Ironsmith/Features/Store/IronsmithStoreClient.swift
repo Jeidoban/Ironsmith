@@ -143,6 +143,7 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
     let id: String
     let storeId: String
     let authorDisplayName: String
+    let authorHandle: String?
     let name: String
     let shortDescription: String
     let category: StoreAppCategory
@@ -156,6 +157,7 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
         id: String,
         storeId: String,
         authorDisplayName: String,
+        authorHandle: String?,
         name: String,
         shortDescription: String,
         category: StoreAppCategory,
@@ -168,6 +170,7 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
         self.id = id
         self.storeId = storeId
         self.authorDisplayName = authorDisplayName
+        self.authorHandle = authorHandle
         self.name = name
         self.shortDescription = shortDescription
         self.category = category
@@ -183,6 +186,7 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
             id: detail.id,
             storeId: detail.storeId,
             authorDisplayName: detail.authorDisplayName,
+            authorHandle: detail.authorHandle,
             name: detail.name,
             shortDescription: detail.shortDescription,
             category: detail.category,
@@ -201,6 +205,7 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
     let storeId: String
     let storeVisibility: String
     let authorDisplayName: String
+    let authorHandle: String?
     let name: String
     let shortDescription: String
     let description: String
@@ -218,6 +223,13 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
 
     var iconAsset: StoreAsset? {
         icon
+    }
+
+    var creatorDisplayText: String {
+        guard let authorHandle, !authorHandle.isEmpty else {
+            return authorDisplayName
+        }
+        return "\(authorDisplayName) · @\(authorHandle)"
     }
 }
 

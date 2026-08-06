@@ -861,6 +861,18 @@ struct StoreImportTests {
         #expect(StoreVersionPresentation.formattedDate(second.publishedAt).contains("2026"))
     }
 
+    @Test
+    func storeCreatorPresentationIncludesHandleWithLegacyFallback() {
+        let legacy = Self.appListing(sourceCode: Self.sourceCode("legacy"))
+        let attributed = Self.appListing(
+            sourceCode: Self.sourceCode("attributed"),
+            authorHandle: "jadew"
+        )
+
+        #expect(legacy.creatorDisplayText == "Jade")
+        #expect(attributed.creatorDisplayText == "Jade · @jadew")
+    }
+
     private static func sourceCode(_ text: String) -> String {
         """
         import SwiftUI
@@ -878,6 +890,7 @@ struct StoreImportTests {
             id: id,
             storeId: "00000000-0000-4000-8000-000000000011",
             authorDisplayName: "Jade",
+            authorHandle: nil,
             name: id,
             shortDescription: "A Store app",
             category: .utilities,
@@ -893,7 +906,8 @@ struct StoreImportTests {
         sourceCode: String,
         versions suppliedVersions: [StoreVersionMetadata]? = nil,
         icon: StoreAsset? = nil,
-        iconMaster: StoreAsset? = nil
+        iconMaster: StoreAsset? = nil,
+        authorHandle: String? = nil
     ) -> StoreAppDetail {
         let storeId = "00000000-0000-4000-8000-000000000011"
         let appId = "00000000-0000-4000-8000-000000000101"
@@ -916,6 +930,7 @@ struct StoreImportTests {
             storeId: storeId,
             storeVisibility: "public",
             authorDisplayName: "Jade",
+            authorHandle: authorHandle,
             name: "Clipboard Cleaner",
             shortDescription: "Clipboard cleanup",
             description: "Cleans clipboard text.",

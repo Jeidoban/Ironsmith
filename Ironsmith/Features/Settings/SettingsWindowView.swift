@@ -21,6 +21,9 @@ struct SettingsWindowView: View {
                 onAddProvider: { presentedSheet = .addProvider(initialKind: nil) },
                 onEditProvider: { presentedSheet = .editProvider($0, showsCreditPacks: false) }
             )
+            SettingsAccountSectionView(
+                onManageAccount: { presentedSheet = .manageAccount }
+            )
             SettingsPreferencesSectionView()
             #if DEBUG
             SettingsDebugSectionView()
@@ -31,6 +34,7 @@ struct SettingsWindowView: View {
         .frame(minWidth: 680, minHeight: 720)
         .task {
             await inferenceStore.prepareSettings(modelContext: modelContext)
+            await inferenceStore.refreshIronsmithAccountSummary()
             hasPreparedSettings = true
             consumePendingSettingsRoute()
         }
@@ -52,6 +56,14 @@ struct SettingsWindowView: View {
                 ProviderEditorSheetView(
                     provider: provider,
                     showsCreditPacksOnAppear: showsCreditPacks
+                )
+            case .manageAccount:
+                ManageIronsmithAccountSheetView(
+                    onBuyCredits: {
+                        presentedSheet = inferenceStore.providers
+                            .first { $0.kind == .ironsmith }
+                            .map { .editProvider($0, showsCreditPacks: true) }
+                    }
                 )
             }
         }
@@ -128,6 +140,7 @@ struct SettingsWindowView: View {
 private enum SettingsPresentedSheet: Identifiable {
     case addProvider(initialKind: ProviderKind?)
     case editProvider(ProviderConfig, showsCreditPacks: Bool)
+    case manageAccount
 
     var id: String {
         switch self {
@@ -135,6 +148,8 @@ private enum SettingsPresentedSheet: Identifiable {
             "addProvider.\(initialKind?.rawValue ?? "default")"
         case .editProvider(let provider, let showsCreditPacks):
             "editProvider.\(provider.id.uuidString).credits.\(showsCreditPacks)"
+        case .manageAccount:
+            "manageAccount"
         }
     }
 }

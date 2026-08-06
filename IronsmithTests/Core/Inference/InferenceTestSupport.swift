@@ -154,6 +154,8 @@ extension InferenceTests {
     static func accountClient(
         signInBox: AppleOAuthSignInBox? = nil,
         signInError: Error? = nil,
+        emailPasswordBox: EmailPasswordAuthBox? = nil,
+        emailPasswordError: Error? = nil,
         signOutBox: SignOutBox? = nil,
         deleteError: IronsmithAccountClientError? = nil,
         fetchError: Error? = nil,
@@ -179,6 +181,24 @@ extension InferenceTests {
                 }
                 return Self.ironsmithSession()
             },
+            signInWithEmailPassword: { email, password in
+                emailPasswordBox?.email = email
+                emailPasswordBox?.password = password
+                emailPasswordBox?.operation = .signIn
+                if let emailPasswordError {
+                    throw emailPasswordError
+                }
+                return Self.ironsmithSession()
+            },
+            signUpWithEmailPassword: { email, password in
+                emailPasswordBox?.email = email
+                emailPasswordBox?.password = password
+                emailPasswordBox?.operation = .signUp
+                if let emailPasswordError {
+                    throw emailPasswordError
+                }
+                return Self.ironsmithSession()
+            },
             signOut: {
                 signOutBox?.didSignOut = true
             },
@@ -192,8 +212,12 @@ extension InferenceTests {
                 IronsmithAccountProfile(
                     id: "00000000-0000-4000-8000-000000000001",
                     email: "jade@example.com",
-                    displayName: nil
+                    displayName: nil,
+                    handle: nil
                 )
+            },
+            checkHandleAvailability: {
+                IronsmithHandleAvailability(handle: $0, available: true)
             },
             fetchCreditPacks: {
                 [
@@ -294,6 +318,17 @@ final class CredentialBox {
 nonisolated final class AppleOAuthSignInBox: @unchecked Sendable {
     var authorizationURL: URL?
     var callbackURL: URL?
+}
+
+nonisolated final class EmailPasswordAuthBox: @unchecked Sendable {
+    enum Operation: Equatable {
+        case signIn
+        case signUp
+    }
+
+    var email: String?
+    var password: String?
+    var operation: Operation?
 }
 
 final class SignOutBox: @unchecked Sendable {

@@ -62,7 +62,11 @@ extension InferenceStore {
             try refreshData()
 
             if provider.kind == .ironsmith {
-                await refreshDiscoveredModels(for: provider)
+                let didDiscoverModels = await refreshDiscoveredModels(for: provider)
+                guard didDiscoverModels else {
+                    await removeProvider(provider)
+                    return false
+                }
                 if selectedModelID == nil {
                     selectModel(
                         remoteModels.first(where: { $0.providerIdentifier == provider.identifier })?

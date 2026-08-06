@@ -12,13 +12,10 @@ struct ProviderEditorSheetView: View {
     @State private var baseURLString = ""
     @State private var openAICompatibleAPIVariant: OpenAICompatibleAPIVariant = .chatCompletions
     @State private var isConfirmingDelete = false
-    @State private var isConfirmingAccountDeletion = false
-    @State private var isConfirmingAccountDeletionWithCredits = false
     @State private var isShowingCreditPacks = false
     @State private var isSigningOut = false
     @State private var isSigningInToChatGPT = false
     @State private var isSigningOutOfChatGPT = false
-    @State private var isDeletingAccount = false
 
     private var isCustomOpenAICompatible: Bool {
         provider.kind == .customOpenAICompatible
@@ -61,12 +58,6 @@ struct ProviderEditorSheetView: View {
                         Text("AI Models")
                     }
                 } else if isIronsmith {
-                    Section {
-                        ironsmithAccountRows
-                    } header: {
-                        Text("Account")
-                    }
-
                     Section {
                         LabeledContent("Available Credits") {
                             Text(ironsmithBalanceText)
@@ -129,18 +120,11 @@ struct ProviderEditorSheetView: View {
         .safeAreaInset(edge: .bottom) {
             HStack {
                 if isIronsmith {
-                    Button("Delete Account", role: .destructive) {
-                        isConfirmingAccountDeletion = true
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                    .disabled(isDeletingAccount || isSigningOut)
-
                     Button(isSigningOut ? "Signing Out..." : "Sign Out") {
                         signOut()
                     }
                     .buttonStyle(.bordered)
-                    .disabled(isSigningOut || isDeletingAccount)
+                    .disabled(isSigningOut)
                 } else if provider.isRemovable {
                     Button("Delete Provider", role: .destructive) {
                         isConfirmingDelete = true
@@ -230,34 +214,6 @@ struct ProviderEditorSheetView: View {
         } message: {
             Text("This removes \(provider.displayName) and all of its AI models from Ironsmith.")
         }
-        .confirmationDialog(
-            "Delete Ironsmith Account?",
-            isPresented: $isConfirmingAccountDeletion
-        ) {
-            Button("Delete Account", role: .destructive) {
-                if (remainingIronsmithCreditBalance ?? 0) > 0 {
-                    isConfirmingAccountDeletionWithCredits = true
-                } else {
-                    deleteAccount()
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This permanently deletes your Ironsmith account and removes this provider from the app.")
-        }
-        .confirmationDialog(
-            "Delete Account With Credits?",
-            isPresented: $isConfirmingAccountDeletionWithCredits
-        ) {
-            Button("Delete Anyway", role: .destructive) {
-                deleteAccount()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "You still have \(ironsmithBalanceText). Deleting your account removes access to these credits. If you purchased credits less than 30 days ago, you can get a refund by contacting support@ironsmith.app"
-            )
-        }
     }
 
     private var providerSummaryRow: some View {
@@ -299,24 +255,6 @@ struct ProviderEditorSheetView: View {
         }
     }
 
-    @ViewBuilder
-    private var ironsmithAccountRows: some View {
-        if let summary = inferenceStore.ironsmithAccountSummary {
-            LabeledContent("Email") {
-                Text(summary.user.email ?? "Hidden")
-                    .textSelection(.enabled)
-            }
-        } else if let session = inferenceStore.ironsmithSession {
-            LabeledContent("Email") {
-                Text(session.user.email ?? "Hidden")
-                    .textSelection(.enabled)
-            }
-        } else {
-            Text("Not Signed In")
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private var ironsmithBalanceText: String {
         guard let credits = remainingIronsmithCreditBalance else {
             return "Unknown"
@@ -350,21 +288,6 @@ struct ProviderEditorSheetView: View {
             await MainActor.run {
                 isSigningOut = false
                 if didSignOut {
-                    dismiss()
-                }
-            }
-        }
-    }
-
-    private func deleteAccount() {
-        guard !isDeletingAccount else { return }
-
-        isDeletingAccount = true
-        Task {
-            let didDelete = await inferenceStore.deleteIronsmithAccount(provider: provider)
-            await MainActor.run {
-                isDeletingAccount = false
-                if didDelete {
                     dismiss()
                 }
             }

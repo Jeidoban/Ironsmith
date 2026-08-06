@@ -121,7 +121,7 @@ private struct StoreDetailMetadataStrip: View {
 
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-            StoreDetailMetadataItem(title: "Creator", value: app.authorDisplayName)
+            StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
             StoreDetailMetadataItem(
                 title: "Version",
                 value: String(app.currentVersion.versionNumber)
@@ -133,6 +133,7 @@ private struct StoreDetailMetadataStrip: View {
         .overlay(alignment: .top) { Divider() }
         .overlay(alignment: .bottom) { Divider() }
     }
+
 }
 
 private struct StoreDetailMetadataItem: View {
