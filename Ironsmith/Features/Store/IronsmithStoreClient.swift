@@ -30,9 +30,18 @@ nonisolated enum StoreAssetKind: String, Codable, Equatable, Sendable {
     case screenshot
 }
 
-nonisolated enum StoreAppListSort: String, Codable, Hashable, Sendable {
+nonisolated enum StoreAppListSort: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
     case recent
     case trending
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .recent: "Recent"
+        case .trending: "Trending"
+        }
+    }
 }
 
 nonisolated struct AppStoreDescriptor: Decodable, Identifiable, Equatable, Sendable {
@@ -318,7 +327,8 @@ nonisolated struct IronsmithStoreClient {
             _ search: String?,
             _ offset: Int,
             _ sort: StoreAppListSort,
-            _ category: StoreAppCategory?
+            _ category: StoreAppCategory?,
+            _ creatorHandle: String?
         ) async throws
             -> StoreAppPage
     var fetchApp: @Sendable (_ storeId: String, _ appId: String) async throws -> StoreAppDetail
@@ -362,7 +372,7 @@ extension IronsmithStoreClient {
                 )
                 return response.data
             },
-            listApps: { storeId, scope, search, offset, sort, category in
+            listApps: { storeId, scope, search, offset, sort, category, creatorHandle in
                 var queryItems = [
                     URLQueryItem(name: "scope", value: scope.rawValue),
                     URLQueryItem(name: "sort", value: sort.rawValue),
@@ -377,6 +387,9 @@ extension IronsmithStoreClient {
                 }
                 if let category {
                     queryItems.append(URLQueryItem(name: "category", value: category.rawValue))
+                }
+                if let creatorHandle, !creatorHandle.isEmpty {
+                    queryItems.append(URLQueryItem(name: "creator", value: creatorHandle))
                 }
                 let response: StorePageEnvelope<StoreAppSummary> = try await api.request(
                     "api/v1/stores/\(storeId)/apps",
@@ -510,7 +523,7 @@ extension IronsmithStoreClient {
         Self(
             listStores: { throw IronsmithStoreClientError.notConfigured },
             listHomeSections: { _ in throw IronsmithStoreClientError.notConfigured },
-            listApps: { _, _, _, _, _, _ in throw IronsmithStoreClientError.notConfigured },
+            listApps: { _, _, _, _, _, _, _ in throw IronsmithStoreClientError.notConfigured },
             fetchApp: { _, _ in throw IronsmithStoreClientError.notConfigured },
             fetchVersion: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
             publishApp: { _ in throw IronsmithStoreClientError.notConfigured },

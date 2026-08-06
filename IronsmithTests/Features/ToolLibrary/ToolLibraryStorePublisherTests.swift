@@ -70,7 +70,7 @@ extension ToolLibraryTests {
 
         let detail = Self.publisherAppDetail()
         var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, _, _, _, _, _ in
+        client.listApps = { _, _, _, _, _, _, _ in
             StoreAppPage(apps: [StoreAppSummary(detail: detail)], hasMore: false)
         }
         client.fetchApp = { _, _ in detail }
@@ -115,7 +115,7 @@ extension ToolLibraryTests {
 
         let detail = Self.publisherAppDetail()
         var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, _, _, _, _, _ in
+        client.listApps = { _, _, _, _, _, _, _ in
             StoreAppPage(apps: [StoreAppSummary(detail: detail)], hasMore: false)
         }
         client.fetchApp = { _, _ in detail }

@@ -165,6 +165,7 @@ final class StoreWindowStore {
                 trimmedSearch,
                 0,
                 .recent,
+                nil,
                 nil
             )
             guard searchPaginationRevision == revision,
@@ -203,6 +204,7 @@ final class StoreWindowStore {
                 trimmedSearch,
                 offset,
                 .recent,
+                nil,
                 nil
             )
             guard searchPaginationRevision == revision,
@@ -226,6 +228,7 @@ final class StoreWindowStore {
     func loadSectionApps(
         sort: StoreAppListSort,
         category: StoreAppCategory?,
+        creatorHandle: String? = nil,
         offset: Int = 0
     ) async -> StoreAppPage? {
         do {
@@ -235,9 +238,13 @@ final class StoreWindowStore {
                 nil,
                 offset,
                 sort,
-                category
+                category,
+                creatorHandle
             )
         } catch {
+            guard !IronsmithErrorPresentation.isCancellation(error), !Task.isCancelled else {
+                return nil
+            }
             present(error)
             return nil
         }
@@ -296,6 +303,7 @@ final class StoreWindowStore {
                 nil,
                 0,
                 .recent,
+                nil,
                 nil
             )
             guard publishedPaginationRevision == revision, selectedStoreId == storeId else {
@@ -327,6 +335,7 @@ final class StoreWindowStore {
                 nil,
                 offset,
                 .recent,
+                nil,
                 nil
             )
             guard publishedPaginationRevision == revision,
@@ -345,10 +354,19 @@ final class StoreWindowStore {
     }
 
     func select(_ app: StoreAppSummary) {
-        selectedAppID = app.id
+        select(storeID: app.storeId, appID: app.id)
+    }
+
+    func select(storeID: String, appID: String) {
+        if selectedAppID == appID,
+            selectedAppDetail?.id == appID || isLoadingDetail
+        {
+            return
+        }
+        selectedAppID = appID
         selectedAppDetail = nil
         Task {
-            await loadDetail(for: app)
+            await loadDetail(storeID: storeID, appID: appID)
         }
     }
 
@@ -705,19 +723,19 @@ final class StoreWindowStore {
         )
     }
 
-    private func loadDetail(for app: StoreAppSummary) async {
+    private func loadDetail(storeID: String, appID: String) async {
         isLoadingDetail = true
         defer {
-            if selectedAppID == app.id {
+            if selectedAppID == appID {
                 isLoadingDetail = false
             }
         }
         do {
-            let detail = try await client.fetchApp(app.storeId, app.id)
-            guard selectedAppID == app.id else { return }
+            let detail = try await client.fetchApp(storeID, appID)
+            guard selectedAppID == appID else { return }
             selectedAppDetail = detail
         } catch {
-            guard selectedAppID == app.id else { return }
+            guard selectedAppID == appID else { return }
             present(error)
         }
     }

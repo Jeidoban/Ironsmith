@@ -10,6 +10,7 @@ struct StoreAppDetailView: View {
     let versionInstallDisposition: (StoreAppDetail, StoreVersionMetadata) -> StoreAppInstallDisposition
     let onGet: (StoreAppDetail) -> Void
     let onRemix: (StoreAppDetail) -> Void
+    let onOpenCreator: (String, String) -> Void
     let onInstallVersion: (StoreAppDetail, StoreVersionMetadata) -> Void
 
     @State private var expandedVersionID: String?
@@ -28,7 +29,7 @@ struct StoreAppDetailView: View {
                             onRemix: { onRemix(app) }
                         )
 
-                        StoreDetailMetadataStrip(app: app)
+                        StoreDetailMetadataStrip(app: app, onOpenCreator: onOpenCreator)
 
                         if let screenshot = app.screenshots.first {
                             StoreDetailScreenshot(asset: screenshot)
@@ -114,6 +115,7 @@ private struct StoreDetailHeroView: View {
 
 private struct StoreDetailMetadataStrip: View {
     let app: StoreAppDetail
+    let onOpenCreator: (String, String) -> Void
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: 140), spacing: 16, alignment: .top)]
@@ -121,7 +123,15 @@ private struct StoreDetailMetadataStrip: View {
 
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-            StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
+            if let handle = app.authorHandle, !handle.isEmpty {
+                StoreDetailCreatorMetadataItem(
+                    displayName: app.authorDisplayName,
+                    handle: handle,
+                    action: { onOpenCreator(app.authorDisplayName, handle) }
+                )
+            } else {
+                StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
+            }
             StoreDetailMetadataItem(
                 title: "Version",
                 value: String(app.currentVersion.versionNumber)
@@ -134,6 +144,38 @@ private struct StoreDetailMetadataStrip: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
+}
+
+private struct StoreDetailCreatorMetadataItem: View {
+    let displayName: String
+    let handle: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("CREATOR")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            Button(action: action) {
+                Text("\(Text(displayName).bold()) · @\(handle)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isHovering ? Color.primary.opacity(0.08) : Color.clear)
+                    }
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+        }
+    }
 }
 
 private struct StoreDetailMetadataItem: View {

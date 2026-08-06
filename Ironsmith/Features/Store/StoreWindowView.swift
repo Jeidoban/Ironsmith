@@ -63,14 +63,16 @@ struct StoreWindowView: View {
                 .navigationTitle(navigationTitle)
                 .navigationDestination(for: StoreNavigationDestination.self) { destination in
                     switch destination {
-                    case .app(let appID):
+                    case .app(let appRoute):
                         StoreAppDetailDestinationView(
-                            appID: appID,
+                            appID: appRoute.appID,
+                            storeID: appRoute.storeID,
                             store: store,
                             tools: tools,
                             modelContext: modelContext,
                             routeStore: routeStore,
-                            inferenceStore: inferenceStore
+                            inferenceStore: inferenceStore,
+                            onOpenCreator: openCreator
                         )
                     case .section(let section):
                         StoreSectionAppsView(
@@ -147,11 +149,17 @@ struct StoreWindowView: View {
 
     private func openApp(_ app: StoreAppSummary) {
         store.select(app)
-        path.append(.app(app.id))
+        path.append(.app(StoreAppRoute(app: app)))
     }
 
     private func openSection(_ section: StoreHomeSection) {
         path.append(.section(StoreSectionRoute(section: section)))
+    }
+
+    private func openCreator(displayName: String, handle: String) {
+        path.append(
+            .section(StoreSectionRoute(creatorDisplayName: displayName, handle: handle))
+        )
     }
 
     private func install(_ app: StoreAppSummary, mode: StoreToolImportMode = .get) {
@@ -208,7 +216,7 @@ struct StoreWindowView: View {
                 categoryRefreshToken += 1
                 if let app = store.publishedApps.first(where: { $0.id == appID }) {
                     store.select(app)
-                    path = [.app(app.id)]
+                    path = [.app(StoreAppRoute(app: app))]
                 }
             }
         }
@@ -216,8 +224,18 @@ struct StoreWindowView: View {
 }
 
 private enum StoreNavigationDestination: Hashable {
-    case app(String)
+    case app(StoreAppRoute)
     case section(StoreSectionRoute)
+}
+
+private struct StoreAppRoute: Hashable {
+    let appID: String
+    let storeID: String
+
+    init(app: StoreAppSummary) {
+        appID = app.id
+        storeID = app.storeId
+    }
 }
 
 private enum StoreSidebarSelection: Hashable {
@@ -253,12 +271,20 @@ private struct StoreSectionRoute: Hashable, Identifiable {
     let title: String
     let sort: StoreAppListSort
     let category: StoreAppCategory?
+    let creatorDisplayName: String?
+    let creatorHandle: String?
+
+    var showsSortControl: Bool {
+        category != nil || creatorHandle != nil
+    }
 
     init(section: StoreHomeSection) {
         id = section.id
         title = section.title
         sort = section.sort
         category = section.category
+        creatorDisplayName = nil
+        creatorHandle = nil
     }
 
     init(category: StoreAppCategory) {
@@ -266,6 +292,17 @@ private struct StoreSectionRoute: Hashable, Identifiable {
         title = category.title
         sort = .recent
         self.category = category
+        creatorDisplayName = nil
+        creatorHandle = nil
+    }
+
+    init(creatorDisplayName: String, handle: String) {
+        id = "creator-\(handle)"
+        title = creatorDisplayName
+        sort = .recent
+        category = nil
+        self.creatorDisplayName = creatorDisplayName
+        creatorHandle = handle
     }
 }
 
@@ -427,13 +464,43 @@ private struct StoreSectionAppsView: View {
     @State private var isLoading = true
     @State private var isLoadingMore = false
     @State private var paginationRevision = 0
+    @State private var selectedSort: StoreAppListSort?
+
+    private var activeSort: StoreAppListSort {
+        selectedSort ?? section.sort
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text(section.title)
-                    .font(.largeTitle.weight(.semibold))
-                    .padding(.horizontal, 28)
+                HStack(alignment: .center, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(section.title)
+                            .font(.largeTitle.weight(.semibold))
+                        if let creatorHandle = section.creatorHandle {
+                            Text("@\(creatorHandle)")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if section.showsSortControl {
+                        HStack(spacing: 6) {
+                            Text("Sort by")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                            Picker("Sort by", selection: sortBinding) {
+                                ForEach(StoreAppListSort.allCases) { sort in
+                                    Text(sort.title).tag(sort)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                        }
+                        .fixedSize()
+                    }
+                }
+                .padding(.horizontal, 28)
 
                 if isLoading {
                     ProgressView()
@@ -464,9 +531,20 @@ private struct StoreSectionAppsView: View {
             .padding(.bottom, 24)
         }
         .navigationTitle(section.title)
-        .task(id: "\(section.id)-\(refreshToken)") {
+        .task(id: "\(section.id)-\(refreshToken)-\(activeSort.rawValue)") {
             await reload()
         }
+    }
+
+    private var sortBinding: Binding<StoreAppListSort> {
+        Binding(
+            get: { activeSort },
+            set: { sort in
+                guard sort != activeSort else { return }
+                paginationRevision += 1
+                selectedSort = sort
+            }
+        )
     }
 
     private func reload() async {
@@ -477,14 +555,15 @@ private struct StoreSectionAppsView: View {
             isLoading = true
         }
         defer {
-            if showsLoadingIndicator {
+            if showsLoadingIndicator, paginationRevision == revision {
                 isLoading = false
             }
         }
         guard
             let page = await store.loadSectionApps(
-                sort: section.sort,
-                category: section.category
+                sort: activeSort,
+                category: section.category,
+                creatorHandle: section.creatorHandle
             )
         else {
             return
@@ -507,8 +586,9 @@ private struct StoreSectionAppsView: View {
         defer { isLoadingMore = false }
         guard
             let page = await store.loadSectionApps(
-                sort: section.sort,
+                sort: activeSort,
                 category: section.category,
+                creatorHandle: section.creatorHandle,
                 offset: offset
             )
         else {
@@ -753,11 +833,13 @@ private struct StorePublishedRowView: View {
 
 private struct StoreAppDetailDestinationView: View {
     let appID: String
+    let storeID: String
     @Bindable var store: StoreWindowStore
     let tools: [Tool]
     let modelContext: ModelContext
     let routeStore: IronsmithRouteStore
     let inferenceStore: InferenceStore
+    let onOpenCreator: (String, String) -> Void
 
     var body: some View {
         StoreAppDetailView(
@@ -796,6 +878,7 @@ private struct StoreAppDetailDestinationView: View {
                     )
                 }
             },
+            onOpenCreator: onOpenCreator,
             onInstallVersion: { app, version in
                 Task {
                     await store.installVersion(
@@ -810,13 +893,8 @@ private struct StoreAppDetailDestinationView: View {
             }
         )
         .navigationTitle(detail?.name ?? "App")
-        .task(id: appID) {
-            guard store.selectedAppDetail?.id != appID,
-                let summary = store.appSummary(id: appID)
-            else {
-                return
-            }
-            store.select(summary)
+        .onAppear {
+            store.select(storeID: storeID, appID: appID)
         }
     }
 
