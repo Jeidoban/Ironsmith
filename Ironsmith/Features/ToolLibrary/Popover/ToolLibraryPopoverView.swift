@@ -225,6 +225,27 @@ struct ToolLibraryPopoverView: View {
         .sheet(isPresented: $storePublisher.isShowingPublishSheet) {
             storePublishSheet
         }
+        .sheet(isPresented: $storePublisher.isShowingCreatorProfileSheet) {
+            ToolLibraryCreatorProfileSheetView(
+                displayName: $storePublisher.creatorDisplayName,
+                handle: $storePublisher.creatorHandle,
+                isSaving: storePublisher.isSavingCreatorProfile,
+                isClaimingHandle:
+                    inferenceStore.ironsmithAccountSummary?.profile?.handle == nil,
+                onCancel: {
+                    storePublisher.isShowingCreatorProfileSheet = false
+                    storePublisher.pendingCreatorProfileToolID = nil
+                },
+                onSave: {
+                    Task {
+                        await storePublisher.saveCreatorProfile(
+                            inferenceStore: inferenceStore,
+                            tools: tools
+                        )
+                    }
+                }
+            )
+        }
         .sheet(isPresented: $detailsEditor.isShowingSheet) {
             detailsEditorSheet
         }
@@ -565,9 +586,7 @@ struct ToolLibraryPopoverView: View {
                 publishShortDescription: $storePublisher.publishShortDescription,
                 publishDescription: $storePublisher.publishDescription,
                 publishCategory: $storePublisher.publishCategory,
-                publishDisplayName: $storePublisher.publishDisplayName,
                 publishScreenshotName: storePublisher.publishScreenshotName,
-                needsDisplayName: storePublisher.needsDisplayName(inferenceStore: inferenceStore),
                 isPublishing: storePublisher.isPublishing,
                 onChooseScreenshot: { url in
                     storePublisher.importScreenshot(from: url)

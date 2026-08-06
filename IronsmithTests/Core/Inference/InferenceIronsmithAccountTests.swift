@@ -14,7 +14,8 @@ extension InferenceTests {
               "profile": {
                 "id": "user-123",
                 "email": "jade@example.com",
-                "displayName": "Jade Westover"
+                "displayName": "Jade Westover",
+                "handle": "jadew"
               }
             }
             """.utf8
@@ -28,6 +29,7 @@ extension InferenceTests {
         #expect(response.profile.id == "user-123")
         #expect(response.profile.email == "jade@example.com")
         #expect(response.profile.displayName == "Jade Westover")
+        #expect(response.profile.handle == "jadew")
     }
 
     @MainActor
@@ -179,7 +181,7 @@ extension InferenceTests {
         try context.save()
         try inferenceStore.refreshData()
 
-        let didSignOut = await inferenceStore.signOutIronsmithProvider(provider)
+        let didSignOut = await inferenceStore.signOutIronsmithAccount()
 
         #expect(didSignOut)
         #expect(signOutBox.didSignOut)
@@ -205,7 +207,7 @@ extension InferenceTests {
         try context.save()
         try inferenceStore.refreshData()
 
-        let didDelete = await inferenceStore.deleteIronsmithAccount(provider: provider)
+        let didDelete = await inferenceStore.deleteIronsmithAccount()
 
         #expect(didDelete)
         #expect(signOutBox.didSignOut)

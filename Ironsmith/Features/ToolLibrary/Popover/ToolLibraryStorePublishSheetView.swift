@@ -7,9 +7,7 @@ struct ToolLibraryStorePublishSheetView: View {
     @Binding var publishShortDescription: String
     @Binding var publishDescription: String
     @Binding var publishCategory: StoreAppCategory
-    @Binding var publishDisplayName: String
     let publishScreenshotName: String?
-    let needsDisplayName: Bool
     let isPublishing: Bool
     let onChooseScreenshot: (URL) -> Void
     let onCancel: () -> Void
@@ -24,20 +22,6 @@ struct ToolLibraryStorePublishSheetView: View {
                     : "Publish \(tool.name) to Ironsmith Store"
             )
                 .font(.headline)
-
-            if needsDisplayName {
-                field("Creator Name") {
-                    TextField(
-                        "The public name shown next to your apps",
-                        text: $publishDisplayName
-                    )
-                        .onChange(of: publishDisplayName) { _, value in
-                            if value.count > 80 {
-                                publishDisplayName = String(value.prefix(80))
-                            }
-                        }
-                }
-            }
 
             field("Short Description") {
                 TextField(
@@ -118,13 +102,7 @@ struct ToolLibraryStorePublishSheetView: View {
 
     private var canPublish: Bool {
         listingFieldsAreValid
-            && (!needsDisplayName || displayNameIsValid)
             && !tool.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var displayNameIsValid: Bool {
-        let trimmed = publishDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (1...80).contains(trimmed.count)
     }
 
     private var listingFieldsAreValid: Bool {

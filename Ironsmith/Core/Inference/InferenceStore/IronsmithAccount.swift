@@ -34,6 +34,14 @@ extension InferenceStore {
         return profile
     }
 
+    func checkIronsmithHandleAvailability(_ handle: String) async throws -> IronsmithHandleAvailability {
+        refreshIronsmithSession()
+        guard ironsmithSession != nil else {
+            throw IronsmithAccountClientError.missingSession
+        }
+        return try await dependencies.accountClient.checkHandleAvailability(handle)
+    }
+
     func refreshIronsmithCreditPacks() async {
         refreshIronsmithSession()
         guard ironsmithSession != nil else {
@@ -90,6 +98,16 @@ extension InferenceStore {
     }
 
     func signOutIronsmithProvider(_ provider: ProviderConfig) async -> Bool {
+        await signOutIronsmithAccount(provider: provider)
+    }
+
+    func signOutIronsmithAccount() async -> Bool {
+        await signOutIronsmithAccount(
+            provider: providers.first(where: { $0.kind == .ironsmith })
+        )
+    }
+
+    private func signOutIronsmithAccount(provider: ProviderConfig?) async -> Bool {
         do {
             try await dependencies.accountClient.signOut()
             ironsmithSession = nil
@@ -97,7 +115,9 @@ extension InferenceStore {
             ironsmithAccountSummary = nil
             ironsmithCreditPacks = []
             pendingIronsmithAccountRefreshAfterCheckout = false
-            await removeProvider(provider)
+            if let provider {
+                await removeProvider(provider)
+            }
             return true
         } catch {
             presentError(error)
@@ -106,6 +126,16 @@ extension InferenceStore {
     }
 
     func deleteIronsmithAccount(provider: ProviderConfig) async -> Bool {
+        await deleteIronsmithAccount(provider: Optional(provider))
+    }
+
+    func deleteIronsmithAccount() async -> Bool {
+        await deleteIronsmithAccount(
+            provider: providers.first(where: { $0.kind == .ironsmith })
+        )
+    }
+
+    private func deleteIronsmithAccount(provider: ProviderConfig?) async -> Bool {
         do {
             try await dependencies.accountClient.deleteAccount()
             try? await dependencies.accountClient.signOut()
@@ -114,7 +144,9 @@ extension InferenceStore {
             ironsmithAccountSummary = nil
             ironsmithCreditPacks = []
             pendingIronsmithAccountRefreshAfterCheckout = false
-            await removeProvider(provider)
+            if let provider {
+                await removeProvider(provider)
+            }
             return true
         } catch {
             presentError(error)

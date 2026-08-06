@@ -341,6 +341,21 @@ extension InferenceTests {
     }
 
     @Test
+    func ironsmithAPIRequestsPreserveQueryItems() throws {
+        let request = IronsmithAccountClient.makeAuthenticatedAPIRequest(
+            baseURL: try #require(URL(string: "http://localhost:8000")),
+            path: "api/v1/account/handle-availability?handle=jade_w",
+            method: .get,
+            accessToken: "access-token"
+        )
+
+        #expect(
+            request.url?.absoluteString
+                == "http://localhost:8000/api/v1/account/handle-availability?handle=jade_w"
+        )
+    }
+
+    @Test
     func ollamaModelManagementRequestsAppendAPIPathAndAuthorization() throws {
         let pullRequest = try OllamaClient.makePullRequest(
             baseURLString: "http://localhost:11434",

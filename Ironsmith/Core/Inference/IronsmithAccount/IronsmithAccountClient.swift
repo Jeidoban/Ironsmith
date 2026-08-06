@@ -88,13 +88,34 @@ nonisolated struct IronsmithAccountProfile: Decodable, Equatable, Sendable {
     let id: String
     let email: String?
     let displayName: String?
+    let handle: String?
 }
 
 nonisolated struct IronsmithAccountProfileUpdate: Encodable, Equatable, Sendable {
     var displayName: String?
+    var handle: String?
 
-    init(displayName: String? = nil) {
+    init(displayName: String? = nil, handle: String? = nil) {
         self.displayName = displayName
+        self.handle = handle
+    }
+}
+
+nonisolated struct IronsmithHandleAvailability: Decodable, Equatable, Sendable {
+    let handle: String
+    let available: Bool
+}
+
+nonisolated enum IronsmithCreatorHandle {
+    static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    static func isValid(_ value: String) -> Bool {
+        normalized(value).range(
+            of: "^[a-z0-9][a-z0-9_]{1,28}[a-z0-9]$",
+            options: .regularExpression
+        ) != nil
     }
 }
 
@@ -184,6 +205,7 @@ nonisolated struct IronsmithAccountClient {
     var signOut: @Sendable () async throws -> Void
     var fetchAccountSummary: @Sendable () async throws -> IronsmithAccountSummary
     var updateProfile: @Sendable (_ update: IronsmithAccountProfileUpdate) async throws -> IronsmithAccountProfile
+    var checkHandleAvailability: @Sendable (_ handle: String) async throws -> IronsmithHandleAvailability
     var fetchCreditPacks: @Sendable () async throws -> [IronsmithCreditPack]
     var createCheckoutSession:
         @Sendable (_ creditPackID: String) async throws -> IronsmithCheckoutSession
@@ -250,6 +272,15 @@ extension IronsmithAccountClient {
                 )
                 return response.profile
             },
+            checkHandleAvailability: { handle in
+                let encoded = handle.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? handle
+                return try await Self.invokeAPI(
+                    configuration,
+                    accessTokenProvider: validAccessToken,
+                    path: "api/v1/account/handle-availability?handle=\(encoded)",
+                    method: .get
+                )
+            },
             fetchCreditPacks: {
                 let response: IronsmithCreditPacksResponse = try await Self.invokeAPI(
                     configuration,
@@ -297,6 +328,7 @@ extension IronsmithAccountClient {
             signOut: {},
             fetchAccountSummary: { throw IronsmithAccountClientError.notConfigured },
             updateProfile: { _ in throw IronsmithAccountClientError.notConfigured },
+            checkHandleAvailability: { _ in throw IronsmithAccountClientError.notConfigured },
             fetchCreditPacks: { throw IronsmithAccountClientError.notConfigured },
             createCheckoutSession: { _ in throw IronsmithAccountClientError.notConfigured },
             deleteAccount: { throw IronsmithAccountClientError.notConfigured },
@@ -311,9 +343,14 @@ extension IronsmithAccountClient {
         accessToken: String,
         body: Data? = nil
     ) -> URLRequest {
+        let pathAndQuery = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
         var url = baseURL
-        for component in path.split(separator: "/") {
+        for component in pathAndQuery[0].split(separator: "/") {
             url.appendPathComponent(String(component))
+        }
+        if pathAndQuery.count == 2, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.percentEncodedQuery = String(pathAndQuery[1])
+            url = components.url ?? url
         }
 
         var request = URLRequest(url: url)
