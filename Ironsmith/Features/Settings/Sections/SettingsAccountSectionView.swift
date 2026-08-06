@@ -6,9 +6,13 @@ struct SettingsAccountSectionView: View {
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     let onManageAccount: () -> Void
     @State private var isSigningIn = false
+    #if DEBUG
+    @State private var email = ""
+    @State private var password = ""
+    #endif
 
     var body: some View {
-        Section("Account") {
+        Section("Ironsmith Account") {
             if inferenceStore.ironsmithSession == nil {
                 LabeledContent("Ironsmith Account") {
                     Button(isSigningIn ? "Signing In…" : "Sign In") {
@@ -16,6 +20,27 @@ struct SettingsAccountSectionView: View {
                     }
                     .disabled(isSigningIn)
                 }
+                #if DEBUG
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Debug email/password sign-in")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Email", text: $email)
+                        .textFieldStyle(.roundedBorder)
+                    SecureField("Password", text: $password)
+                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Button("Create Account") {
+                            authenticateWithEmailPassword(createAccount: true)
+                        }
+                        Button("Sign In") {
+                            authenticateWithEmailPassword(createAccount: false)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .disabled(isEmailPasswordAuthenticationDisabled)
+                }
+                #endif
                 Text("Sign in to publish apps, manage your creator identity, and use Ironsmith credits.")
                     .foregroundStyle(.secondary)
             } else {
@@ -66,4 +91,36 @@ struct SettingsAccountSectionView: View {
             isSigningIn = false
         }
     }
+
+    #if DEBUG
+    private var isEmailPasswordAuthenticationDisabled: Bool {
+        isSigningIn
+            || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || password.isEmpty
+    }
+
+    private func authenticateWithEmailPassword(createAccount: Bool) {
+        guard !isEmailPasswordAuthenticationDisabled else { return }
+        isSigningIn = true
+        let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = password
+        Task {
+            defer {
+                isSigningIn = false
+                self.password = ""
+            }
+            if createAccount {
+                _ = await inferenceStore.createIronsmithAccountWithEmailPassword(
+                    email: email,
+                    password: password
+                )
+            } else {
+                _ = await inferenceStore.signInToIronsmithWithEmailPassword(
+                    email: email,
+                    password: password
+                )
+            }
+        }
+    }
+    #endif
 }

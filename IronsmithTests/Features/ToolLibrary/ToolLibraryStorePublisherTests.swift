@@ -163,6 +163,8 @@ extension ToolLibraryTests {
             validAccessToken: { "access-token" },
             generationAccessToken: { "access-token" },
             signInWithAppleOAuth: { _ in session },
+            signInWithEmailPassword: { _, _ in session },
+            signUpWithEmailPassword: { _, _ in session },
             signOut: {},
             fetchAccountSummary: {
                 await profileCapture.summary()

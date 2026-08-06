@@ -165,6 +165,7 @@ nonisolated enum IronsmithAPIRequestMethod: String, Sendable {
 nonisolated enum IronsmithAccountClientError: LocalizedError, Equatable {
     case notConfigured
     case missingSession
+    case emailConfirmationRequired
     case invalidResponse
     case requestFailed(statusCode: Int, message: String)
     case refundRequired(balanceCredits: Int)
@@ -182,6 +183,9 @@ nonisolated enum IronsmithAccountClientError: LocalizedError, Equatable {
                 "Ironsmith service is not configured. Missing configuration keys: \(Self.requiredConfigurationKeyNames.joined(separator: ", "))."
         case .missingSession:
             return "Sign in with Ironsmith before using Ironsmith credits."
+        case .emailConfirmationRequired:
+            return
+                "Account created, but Supabase requires email confirmation. Disable Confirm email in the Supabase Auth settings for debug sign-in."
         case .invalidResponse:
             return "The Ironsmith service returned an invalid response."
         case .requestFailed(let statusCode, let message):
@@ -202,6 +206,10 @@ nonisolated struct IronsmithAccountClient {
     var generationAccessToken: @Sendable () async throws -> String
     var signInWithAppleOAuth:
         @Sendable (_ launchFlow: @escaping IronsmithOAuthLaunchFlow) async throws -> Session
+    var signInWithEmailPassword:
+        @Sendable (_ email: String, _ password: String) async throws -> Session
+    var signUpWithEmailPassword:
+        @Sendable (_ email: String, _ password: String) async throws -> Session
     var signOut: @Sendable () async throws -> Void
     var fetchAccountSummary: @Sendable () async throws -> IronsmithAccountSummary
     var updateProfile: @Sendable (_ update: IronsmithAccountProfileUpdate) async throws -> IronsmithAccountProfile
@@ -250,6 +258,16 @@ extension IronsmithAccountClient {
                     scopes: "email",
                     launchFlow: launchFlow,
                 )
+            },
+            signInWithEmailPassword: { email, password in
+                try await supabase.auth.signIn(email: email, password: password)
+            },
+            signUpWithEmailPassword: { email, password in
+                let response = try await supabase.auth.signUp(email: email, password: password)
+                guard let session = response.session else {
+                    throw IronsmithAccountClientError.emailConfirmationRequired
+                }
+                return session
             },
             signOut: {
                 try await supabase.auth.signOut()
@@ -325,6 +343,8 @@ extension IronsmithAccountClient {
             validAccessToken: { throw IronsmithAccountClientError.notConfigured },
             generationAccessToken: { throw IronsmithAccountClientError.notConfigured },
             signInWithAppleOAuth: { _ in throw IronsmithAccountClientError.notConfigured },
+            signInWithEmailPassword: { _, _ in throw IronsmithAccountClientError.notConfigured },
+            signUpWithEmailPassword: { _, _ in throw IronsmithAccountClientError.notConfigured },
             signOut: {},
             fetchAccountSummary: { throw IronsmithAccountClientError.notConfigured },
             updateProfile: { _ in throw IronsmithAccountClientError.notConfigured },

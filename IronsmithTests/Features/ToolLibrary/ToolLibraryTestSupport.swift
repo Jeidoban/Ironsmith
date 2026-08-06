@@ -48,6 +48,12 @@ extension ToolLibraryTests {
             signInWithAppleOAuth: { _ in
                 Self.ironsmithSession()
             },
+            signInWithEmailPassword: { _, _ in
+                Self.ironsmithSession()
+            },
+            signUpWithEmailPassword: { _, _ in
+                Self.ironsmithSession()
+            },
             signOut: {},
             fetchAccountSummary: {
                 IronsmithAccountSummary(
@@ -103,6 +109,12 @@ extension ToolLibraryTests {
                 "access-token"
             },
             signInWithAppleOAuth: { _ in
+                Self.ironsmithSession()
+            },
+            signInWithEmailPassword: { _, _ in
+                Self.ironsmithSession()
+            },
+            signUpWithEmailPassword: { _, _ in
                 Self.ironsmithSession()
             },
             signOut: {},

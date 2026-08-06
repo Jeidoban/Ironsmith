@@ -1,4 +1,5 @@
 import Foundation
+import Supabase
 
 extension InferenceStore {
     func refreshIronsmithSession() {
@@ -83,11 +84,8 @@ extension InferenceStore {
         launchFlow: @escaping IronsmithOAuthLaunchFlow
     ) async -> Bool {
         do {
-            ironsmithSession = try await dependencies.accountClient.signInWithAppleOAuth(launchFlow)
-            reconcileImageGenerationProvider()
-            let didEnsureProvider = await ensureIronsmithProviderExists()
-            await refreshIronsmithAccountSummary()
-            return didEnsureProvider
+            let session = try await dependencies.accountClient.signInWithAppleOAuth(launchFlow)
+            return await finishIronsmithAuthentication(session)
         } catch {
             guard !IronsmithErrorPresentation.isCancellation(error) else {
                 return false
@@ -95,6 +93,50 @@ extension InferenceStore {
             presentError(error)
             return false
         }
+    }
+
+    func signInToIronsmithWithEmailPassword(email: String, password: String) async -> Bool {
+        do {
+            let session = try await dependencies.accountClient.signInWithEmailPassword(
+                email,
+                password
+            )
+            return await finishIronsmithAuthentication(session)
+        } catch {
+            presentError(error)
+            return false
+        }
+    }
+
+    func createIronsmithAccountWithEmailPassword(email: String, password: String) async -> Bool {
+        do {
+            let session = try await dependencies.accountClient.signUpWithEmailPassword(
+                email,
+                password
+            )
+            return await finishIronsmithAuthentication(session)
+        } catch {
+            presentError(error)
+            return false
+        }
+    }
+
+    private func finishIronsmithAuthentication(_ session: Session) async -> Bool {
+        ironsmithSession = session
+        reconcileImageGenerationProvider()
+
+        guard await ensureIronsmithProviderExists() else {
+            try? await dependencies.accountClient.signOut()
+            ironsmithSession = nil
+            ironsmithAccountSummary = nil
+            ironsmithCreditPacks = []
+            pendingIronsmithAccountRefreshAfterCheckout = false
+            reconcileImageGenerationProvider()
+            return false
+        }
+
+        await refreshIronsmithAccountSummary()
+        return true
     }
 
     func signOutIronsmithProvider(_ provider: ProviderConfig) async -> Bool {

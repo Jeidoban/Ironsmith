@@ -154,6 +154,8 @@ extension InferenceTests {
     static func accountClient(
         signInBox: AppleOAuthSignInBox? = nil,
         signInError: Error? = nil,
+        emailPasswordBox: EmailPasswordAuthBox? = nil,
+        emailPasswordError: Error? = nil,
         signOutBox: SignOutBox? = nil,
         deleteError: IronsmithAccountClientError? = nil,
         fetchError: Error? = nil,
@@ -176,6 +178,24 @@ extension InferenceTests {
                 signInBox?.callbackURL = try await launchFlow(authorizationURL)
                 if let signInError {
                     throw signInError
+                }
+                return Self.ironsmithSession()
+            },
+            signInWithEmailPassword: { email, password in
+                emailPasswordBox?.email = email
+                emailPasswordBox?.password = password
+                emailPasswordBox?.operation = .signIn
+                if let emailPasswordError {
+                    throw emailPasswordError
+                }
+                return Self.ironsmithSession()
+            },
+            signUpWithEmailPassword: { email, password in
+                emailPasswordBox?.email = email
+                emailPasswordBox?.password = password
+                emailPasswordBox?.operation = .signUp
+                if let emailPasswordError {
+                    throw emailPasswordError
                 }
                 return Self.ironsmithSession()
             },
@@ -298,6 +318,17 @@ final class CredentialBox {
 nonisolated final class AppleOAuthSignInBox: @unchecked Sendable {
     var authorizationURL: URL?
     var callbackURL: URL?
+}
+
+nonisolated final class EmailPasswordAuthBox: @unchecked Sendable {
+    enum Operation: Equatable {
+        case signIn
+        case signUp
+    }
+
+    var email: String?
+    var password: String?
+    var operation: Operation?
 }
 
 final class SignOutBox: @unchecked Sendable {

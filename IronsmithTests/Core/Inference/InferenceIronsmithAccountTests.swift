@@ -165,6 +165,148 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func emailPasswordSignInAddsIronsmithProviderAndRefreshesAccount() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let authBox = EmailPasswordAuthBox()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(
+                remoteModelIDs: ["anthropic.claude-test"],
+                accountClient: Self.accountClient(emailPasswordBox: authBox)
+            )
+        )
+
+        await inferenceStore.loadIfNeeded(modelContext: context)
+        let didSignIn = await inferenceStore.signInToIronsmithWithEmailPassword(
+            email: " test@example.com ",
+            password: "password"
+        )
+
+        #expect(didSignIn)
+        #expect(authBox.email == " test@example.com ")
+        #expect(authBox.password == "password")
+        #expect(authBox.operation == .signIn)
+        #expect(inferenceStore.providers.contains { $0.kind == .ironsmith })
+        #expect(inferenceStore.ironsmithAccountSummary?.credits.balanceCredits == 42)
+        #expect(inferenceStore.remoteModels.map(\.identifier) == ["anthropic.claude-test"])
+    }
+
+    @MainActor
+    @Test
+    func emailPasswordSignUpCreatesSessionAndAddsIronsmithProvider() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let authBox = EmailPasswordAuthBox()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(
+                remoteModelIDs: ["openai.gpt-5"],
+                accountClient: Self.accountClient(emailPasswordBox: authBox)
+            )
+        )
+
+        await inferenceStore.loadIfNeeded(modelContext: context)
+        let didCreateAccount = await inferenceStore.createIronsmithAccountWithEmailPassword(
+            email: "new@example.com",
+            password: "password"
+        )
+
+        #expect(didCreateAccount)
+        #expect(authBox.email == "new@example.com")
+        #expect(authBox.password == "password")
+        #expect(authBox.operation == .signUp)
+        #expect(inferenceStore.ironsmithSession != nil)
+        #expect(inferenceStore.providers.contains { $0.kind == .ironsmith })
+    }
+
+    @MainActor
+    @Test
+    func emailPasswordSignUpPresentsEmailConfirmationConfigurationError() async {
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(
+                accountClient: Self.accountClient(
+                    emailPasswordError: IronsmithAccountClientError.emailConfirmationRequired
+                )
+            )
+        )
+
+        let didCreateAccount = await inferenceStore.createIronsmithAccountWithEmailPassword(
+            email: "new@example.com",
+            password: "password"
+        )
+
+        #expect(!didCreateAccount)
+        #expect(
+            inferenceStore.presentedErrorMessage
+                == "Account created, but Supabase requires email confirmation. Disable Confirm email in the Supabase Auth settings for debug sign-in."
+        )
+    }
+
+    @MainActor
+    @Test
+    func authenticationRollsBackWhenExistingIronsmithProviderSetupFails() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let signOutBox = SignOutBox()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(
+                remoteDiscoveryError: NSError(
+                    domain: "IronsmithTests.ModelDiscovery",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Model discovery failed."]
+                ),
+                accountClient: Self.accountClient(signOutBox: signOutBox)
+            )
+        )
+
+        await inferenceStore.loadIfNeeded(modelContext: context)
+        let provider = try #require(ProviderCatalog.makeProvider(for: .ironsmith))
+        context.insert(provider)
+        try context.save()
+        try inferenceStore.refreshData()
+
+        let didSignIn = await inferenceStore.signInToIronsmithWithEmailPassword(
+            email: "jade@example.com",
+            password: "password"
+        )
+
+        #expect(!didSignIn)
+        #expect(signOutBox.didSignOut)
+        #expect(inferenceStore.ironsmithSession == nil)
+        #expect(inferenceStore.ironsmithAccountSummary == nil)
+    }
+
+    @MainActor
+    @Test
+    func authenticationRollsBackWhenNewIronsmithProviderDiscoveryFails() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let signOutBox = SignOutBox()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.dependencies(
+                remoteDiscoveryError: NSError(
+                    domain: "IronsmithTests.ModelDiscovery",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Model discovery failed."]
+                ),
+                accountClient: Self.accountClient(signOutBox: signOutBox)
+            )
+        )
+
+        await inferenceStore.loadIfNeeded(modelContext: context)
+        let didSignIn = await inferenceStore.signInToIronsmithWithEmailPassword(
+            email: "jade@example.com",
+            password: "password"
+        )
+
+        #expect(!didSignIn)
+        #expect(signOutBox.didSignOut)
+        #expect(inferenceStore.ironsmithSession == nil)
+        #expect(inferenceStore.ironsmithAccountSummary == nil)
+        #expect(!(inferenceStore.providers.contains { $0.kind == .ironsmith }))
+    }
+
+    @MainActor
+    @Test
     func signOutRemovesIronsmithProvider() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)

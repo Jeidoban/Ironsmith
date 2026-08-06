@@ -20,7 +20,11 @@ struct ManageIronsmithAccountSheetView: View {
     var body: some View {
         Form {
             Section("Creator Profile") {
-                TextField("Display Name", text: $displayName)
+                TextField(
+                    "Display Name",
+                    text: $displayName,
+                    prompt: Text("Your public creator name")
+                )
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 12) {
                         Text("Handle")
