@@ -411,7 +411,7 @@ extension IronsmithStoreClient {
                 let response: StoreDataEnvelope<StoreVersionDownload> = try await api.request(
                     "api/v1/stores/\(storeId)/apps/\(appId)/versions/\(versionNumber)",
                     method: "GET",
-                    authentication: .optional
+                    authentication: .required
                 )
                 return response.data
             },

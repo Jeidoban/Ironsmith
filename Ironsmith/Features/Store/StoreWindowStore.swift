@@ -24,6 +24,12 @@ enum StoreAppInstallDisposition {
     }
 }
 
+enum StorePendingDownloadRequest {
+    case appSummary(StoreAppSummary, mode: StoreToolImportMode)
+    case appDetail(StoreAppDetail, mode: StoreToolImportMode)
+    case version(StoreVersionMetadata, app: StoreAppDetail)
+}
+
 @MainActor
 @Observable
 final class StoreWindowStore {
@@ -49,6 +55,8 @@ final class StoreWindowStore {
     var workingVersionID: String?
     var contentRevision = 0
     var errorMessage: String?
+    var isDownloadSignInRequired = false
+    var pendingDownloadRequest: StorePendingDownloadRequest?
 
     @ObservationIgnored private let client: IronsmithStoreClient
     @ObservationIgnored private let importClient: StoreToolImportClient
@@ -259,6 +267,18 @@ final class StoreWindowStore {
         inferenceStore: InferenceStore
     ) async {
         selectedAppID = app.id
+        if mode == .get,
+            case .openExisting(let tool) = installDisposition(for: app, tools: tools)
+        {
+            routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+            return
+        }
+        guard
+            requireAccountForDownload(
+                .appSummary(app, mode: mode),
+                inferenceStore: inferenceStore
+            )
+        else { return }
         do {
             let detail: StoreAppDetail
             if let selectedAppDetail, selectedAppDetail.id == app.id {
@@ -444,6 +464,18 @@ final class StoreWindowStore {
         inferenceStore: InferenceStore
     ) async {
         guard workingAppID == nil else { return }
+        if mode == .get,
+            case .openExisting(let tool) = installDisposition(for: app, tools: tools)
+        {
+            routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+            return
+        }
+        guard
+            requireAccountForDownload(
+                .appDetail(app, mode: mode),
+                inferenceStore: inferenceStore
+            )
+        else { return }
         workingAppID = app.id
         workingVersionID = app.currentVersion.id
         defer {
@@ -504,6 +536,20 @@ final class StoreWindowStore {
         inferenceStore: InferenceStore
     ) async {
         guard workingAppID == nil else { return }
+        if case .openExisting(let tool) = installDisposition(
+            for: version,
+            of: app,
+            tools: tools
+        ) {
+            routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+            return
+        }
+        guard
+            requireAccountForDownload(
+                .version(version, app: app),
+                inferenceStore: inferenceStore
+            )
+        else { return }
         workingAppID = app.id
         workingVersionID = version.id
         defer {
@@ -643,6 +689,61 @@ final class StoreWindowStore {
             try? modelContext.save()
             throw error
         }
+    }
+
+    func takePendingDownloadRequest() -> StorePendingDownloadRequest? {
+        defer { pendingDownloadRequest = nil }
+        return pendingDownloadRequest
+    }
+
+    func resumeDownload(
+        _ request: StorePendingDownloadRequest,
+        tools: [Tool],
+        modelContext: ModelContext,
+        routeStore: IronsmithRouteStore,
+        inferenceStore: InferenceStore
+    ) async {
+        switch request {
+        case .appSummary(let app, let mode):
+            await install(
+                app,
+                mode: mode,
+                tools: tools,
+                modelContext: modelContext,
+                routeStore: routeStore,
+                inferenceStore: inferenceStore
+            )
+        case .appDetail(let app, let mode):
+            await install(
+                app,
+                mode: mode,
+                tools: tools,
+                modelContext: modelContext,
+                routeStore: routeStore,
+                inferenceStore: inferenceStore
+            )
+        case .version(let version, let app):
+            await installVersion(
+                version,
+                of: app,
+                tools: tools,
+                modelContext: modelContext,
+                routeStore: routeStore,
+                inferenceStore: inferenceStore
+            )
+        }
+    }
+
+    private func requireAccountForDownload(
+        _ request: StorePendingDownloadRequest,
+        inferenceStore: InferenceStore
+    ) -> Bool {
+        guard inferenceStore.ironsmithSession != nil else {
+            pendingDownloadRequest = request
+            isDownloadSignInRequired = true
+            return false
+        }
+        return true
     }
 
     private func importAndBuild(
