@@ -63,6 +63,8 @@ nonisolated struct CodexAgentTranscriptEntry: Equatable, Identifiable, Sendable 
         case fileChange(changes: [CodexAgentFileChange], status: String?)
         case webSearch(search: CodexAgentWebSearch, status: String?)
         case todoList(items: [CodexAgentTodoItem], status: String?)
+        case mcpToolCall(call: CodexAgentMCPToolCall, status: String?)
+        case reasoning(String)
         case error(String)
     }
 
@@ -250,7 +252,9 @@ private extension CodexAgentEvent {
         case .todoList(let id, let items, _):
             let fallbackKey = items.map(\.text).joined(separator: "|")
             return id.map { "todo-list:\($0)" } ?? "todo-list:\(fallbackKey)"
-        case .threadStarted, .turnStarted, .turnCompleted, .agentMessage, .error:
+        case .mcpToolCall(let id, let call, _):
+            return id.map { "mcp-tool-call:\($0)" } ?? "mcp-tool-call:\(call.displayName)"
+        case .threadStarted, .turnStarted, .turnCompleted, .agentMessage, .reasoning, .error:
             return nil
         }
     }
@@ -275,6 +279,10 @@ private extension CodexAgentTranscriptEntry.Kind {
             self = .webSearch(search: search, status: status)
         case .todoList(_, let items, let status):
             self = .todoList(items: items, status: status)
+        case .mcpToolCall(_, let call, let status):
+            self = .mcpToolCall(call: call, status: status)
+        case .reasoning(let text):
+            self = .reasoning(text)
         case .error(let message):
             self = .error(message)
         }

@@ -297,6 +297,15 @@ private struct AgentOutputEventRow: View {
                     webSearchRow(search: search, status: status)
                 case .todoList(let items, let status):
                     todoListRow(items: items, status: status)
+                case .mcpToolCall(let call, let status):
+                    mcpToolCallRow(call: call, status: status)
+                case .reasoning(let text):
+                    Text(text)
+                        .font(.callout)
+                        .italic()
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 case .error(let message):
                     Text(message)
                         .font(.callout)
@@ -331,6 +340,10 @@ private struct AgentOutputEventRow: View {
             return "magnifyingglass"
         case .todoList:
             return "checklist"
+        case .mcpToolCall:
+            return "wrench.and.screwdriver"
+        case .reasoning:
+            return "brain.head.profile"
         case .error:
             return "exclamationmark.triangle.fill"
         case .threadStarted, .turnStarted, .turnCompleted:
@@ -358,6 +371,12 @@ private struct AgentOutputEventRow: View {
         case .todoList(_, let status):
             if status == "failed" { return .red }
             if status == "completed" { return .green }
+            return .secondary
+        case .mcpToolCall(_, let status):
+            if status == "failed" { return .red }
+            if status == "completed" { return .green }
+            return .secondary
+        case .reasoning:
             return .secondary
         case .error:
             return .red
@@ -506,6 +525,41 @@ private struct AgentOutputEventRow: View {
                             .textSelection(.enabled)
                     }
                 }
+            }
+        }
+    }
+
+    private func mcpToolCallRow(call: CodexAgentMCPToolCall, status: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("MCP tool call")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                if let statusText = CodexAgentStatusFormatter.displayText(status) {
+                    Text(statusText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(statusStyle(status: status, exitCode: nil))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            statusStyle(status: status, exitCode: nil).opacity(0.12),
+                            in: Capsule()
+                        )
+                }
+            }
+
+            Text(call.displayName)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+
+            if let arguments = call.arguments {
+                Text(arguments)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(5)
             }
         }
     }
