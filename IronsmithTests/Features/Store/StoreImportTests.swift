@@ -1034,13 +1034,13 @@ struct StoreImportTests {
             sourceCode: source,
             settings: ToolGenerationSettings(
                 sandboxEnabled: true,
-                sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+                sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections]),
                 resourcePermissions: GeneratedAppResourcePermissions([.microphone])
             )
         )
         let items = StorePermissionPresentation.items(for: permissionVersion)
 
-        #expect(items.map(\.title) == ["Internet", "Microphone"])
+        #expect(items.map(\.title) == ["Internet access", "Microphone"])
         #expect(
             items.map(\.explanation) == [
                 "Access to network connections",

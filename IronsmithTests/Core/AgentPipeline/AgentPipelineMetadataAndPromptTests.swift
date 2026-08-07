@@ -224,6 +224,37 @@ extension AgentPipelineTests {
         )
     }
 
+    @Test
+    func promptRefinementScopeMatchesCodingAgentCapacity() {
+        let spark = ToolPromptRefinementClient.promptRefinementInstructions(
+            for: .ironsmithSpark)
+        let flame = ToolPromptRefinementClient.promptRefinementInstructions(
+            for: .ironsmithFlame)
+        let codex = ToolPromptRefinementClient.promptRefinementInstructions(for: .codex)
+
+        #expect(spark.contains("Choose at most 3 core user-facing features."))
+        #expect(spark.contains("explicitly simplify or omit the rest."))
+        #expect(spark.contains("Must be under 750 characters."))
+        for instructions in [flame, codex] {
+            #expect(instructions.contains("Must be additive only: preserve every requested feature and constraint"))
+            #expect(instructions.contains("without removing, simplifying, replacing, or reprioritizing"))
+            #expect(instructions.contains("specific product intent, core features, expected interactions"))
+            #expect(instructions.contains("Must preserve whether the generated app is a window app or menu bar app."))
+            #expect(instructions.contains("For menu bar apps, describe a compact menu bar popover utility"))
+            #expect(instructions.contains("For window apps, describe a normal native macOS window app layout"))
+            #expect(instructions.contains("Prefer one polished primary workflow over many secondary workflows"))
+            #expect(instructions.contains("native Apple framework such as Vision for OCR, PDFKit for PDFs, or AVFoundation"))
+            #expect(instructions.contains("Must describe a self-contained Mac app"))
+            #expect(instructions.contains("May include local persistence, local files, import/export"))
+            #expect(instructions.contains("Must not add or imply a separate backend service"))
+            #expect(instructions.contains("Should emphasize a native macOS feel"))
+            #expect(instructions.contains("games, drawing canvases, and highly visual toys"))
+            #expect(!instructions.contains("Choose at most 3 core user-facing features."))
+            #expect(!instructions.contains("explicitly simplify or omit the rest."))
+            #expect(!instructions.contains("Must be under 750 characters."))
+        }
+    }
+
     @MainActor
     @Test
     func livePromptRefinementClientStreamsPlainTextResponse() async throws {

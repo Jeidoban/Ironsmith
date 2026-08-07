@@ -61,7 +61,7 @@ extension AgentPipelineTests {
         )
 
         let resourcePermissions = GeneratedAppResourcePermissions([.location, .calendar])
-        let sandboxPermissions = GeneratedAppSandboxPermissions([.internet])
+        let sandboxPermissions = GeneratedAppSandboxPermissions([.outgoingConnections])
         let settings = ToolGenerationSettings(
             appKind: .menuBar,
             sandboxPermissions: sandboxPermissions,

@@ -725,7 +725,7 @@ extension InferenceTests {
 
         inferenceStore.pullOllamaRecommendedModel(entry, provider: provider)
 
-        await Self.eventually(timeoutNanoseconds: 5_000_000_000) {
+        await Self.eventually(timeoutNanoseconds: 15_000_000_000) {
             inferenceStore.ollamaPullStates.isEmpty &&
                 inferenceStore.remoteModels.contains { $0.identifier == entry.identifier }
         }

@@ -54,7 +54,7 @@ extension AgentPipelineTests {
         #expect(tools.first?.packageRootPath == packageRoot.path)
         #expect(store.prompt == "Make a mortgage calculator")
         #expect(!(store.isGenerating))
-        #expect(await generationCapture.settings?.sandboxPermissions.enabled == [.internet, .userSelectedFiles])
+        #expect(await generationCapture.settings?.sandboxPermissions == .default)
         #expect(await generationCapture.settings?.resourcePermissions.enabled == [.microphone, .camera])
         #expect(await runCapture.ranToolIDs.isEmpty)
 

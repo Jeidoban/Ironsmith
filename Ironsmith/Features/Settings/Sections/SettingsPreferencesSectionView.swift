@@ -128,14 +128,27 @@ struct SettingsPreferencesSectionView: View {
 private struct GeneratedAppSandboxAccessPreferencesGrid: View {
     let preferences: GenerationPreferencesStore
 
+    private static let rows: [(GeneratedAppSandboxPermission, GeneratedAppSandboxPermission?)] = [
+        (.incomingConnections, .outgoingConnections),
+        (.userSelectedFiles, .downloadsFolder),
+        (.picturesFolder, .musicFolder),
+        (.moviesFolder, nil),
+    ]
+
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
-            GridRow {
-                ForEach(GeneratedAppSandboxPermission.allCases) { permission in
-                    Toggle(permission.displayName, isOn: binding(for: permission))
+            ForEach(Self.rows, id: \.0) { leftPermission, rightPermission in
+                GridRow {
+                    Toggle(leftPermission.displayName, isOn: binding(for: leftPermission))
                         .toggleStyle(.checkbox)
                         .controlSize(.small)
                         .frame(width: 150, alignment: .leading)
+                    if let rightPermission {
+                        Toggle(rightPermission.displayName, isOn: binding(for: rightPermission))
+                            .toggleStyle(.checkbox)
+                            .controlSize(.small)
+                            .frame(width: 150, alignment: .leading)
+                    }
                 }
             }
         }

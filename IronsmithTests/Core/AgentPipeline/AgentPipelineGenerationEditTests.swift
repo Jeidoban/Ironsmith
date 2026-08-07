@@ -54,7 +54,7 @@ extension AgentPipelineTests {
         #expect(!(tools.first?.sandboxEnabled ?? false))
         #expect(await capture.existingToolID == existingTool.id)
         #expect(await capture.settings?.sandboxEnabled == false)
-        #expect(await capture.settings?.sandboxPermissions.enabled == [.internet, .userSelectedFiles])
+        #expect(await capture.settings?.sandboxPermissions == .default)
         #expect(await capture.settings?.resourcePermissions.enabled == [.location, .calendar])
         #expect(await capture.repairStrategy == .deterministicOnly)
         #expect(await runCapture.ranToolIDs.isEmpty)
