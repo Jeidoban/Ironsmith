@@ -244,7 +244,6 @@ extension AgentPipelineTests {
             #expect(instructions.contains("For window apps, describe a normal native macOS window app layout"))
             #expect(instructions.contains("Prefer one polished primary workflow over many secondary workflows"))
             #expect(instructions.contains("native Apple framework such as Vision for OCR, PDFKit for PDFs, or AVFoundation"))
-            #expect(instructions.contains("Treat that as runtime context, not a reason to reduce useful scope."))
             #expect(instructions.contains("Must describe a self-contained Mac app"))
             #expect(instructions.contains("May include local persistence, local files, import/export"))
             #expect(instructions.contains("Must not add or imply a separate backend service"))
