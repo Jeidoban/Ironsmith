@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftData
 import SwiftUI
 
@@ -9,12 +10,14 @@ struct StoreWindowView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(InferenceStore.self) private var inferenceStore
     @Environment(IronsmithRouteStore.self) private var routeStore
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @State private var store = StoreWindowStore()
     @State private var path: [StoreNavigationDestination] = []
     @State private var sidebarSelection: StoreSidebarSelection? = .discover
     @State private var categoryRefreshToken = 0
     @State private var searchTask: Task<Void, Never>?
+    @State private var isSigningInToIronsmith = false
 
     var body: some View {
         @Bindable var store = store
@@ -145,6 +148,42 @@ struct StoreWindowView: View {
         } message: {
             Text(store.errorMessage ?? "")
         }
+        .alert(
+            "Sign in to Download",
+            isPresented: Binding(
+                get: { store.isDownloadSignInRequired },
+                set: { isPresented in
+                    store.isDownloadSignInRequired = isPresented
+                    if !isPresented, !isSigningInToIronsmith {
+                        store.pendingDownloadRequest = nil
+                    }
+                }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                store.pendingDownloadRequest = nil
+            }
+            Button("Sign In") {
+                signInToIronsmith(resumeDownload: store.takePendingDownloadRequest())
+            }
+        } message: {
+            Text("Sign in with Ironsmith to download this app from the Ironsmith Store.")
+        }
+        .alert(
+            "Sign In Failed",
+            isPresented: Binding(
+                get: { inferenceStore.presentedErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        inferenceStore.presentedErrorMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(inferenceStore.presentedErrorMessage ?? "")
+        }
     }
 
     private func openApp(_ app: StoreAppSummary) {
@@ -167,6 +206,31 @@ struct StoreWindowView: View {
             await store.install(
                 app,
                 mode: mode,
+                tools: tools,
+                modelContext: modelContext,
+                routeStore: routeStore,
+                inferenceStore: inferenceStore
+            )
+        }
+    }
+
+    private func signInToIronsmith(resumeDownload request: StorePendingDownloadRequest?) {
+        guard !isSigningInToIronsmith else { return }
+        isSigningInToIronsmith = true
+        Task {
+            let didSignIn = await inferenceStore.signInToIronsmithWithAppleOAuth { @MainActor url in
+                try await webAuthenticationSession.authenticate(
+                    using: url,
+                    callbackURLScheme: IronsmithOAuthRedirect.appCallbackScheme
+                )
+            }
+            isSigningInToIronsmith = false
+            guard didSignIn,
+                inferenceStore.ironsmithSession != nil,
+                let request
+            else { return }
+            await store.resumeDownload(
+                request,
                 tools: tools,
                 modelContext: modelContext,
                 routeStore: routeStore,

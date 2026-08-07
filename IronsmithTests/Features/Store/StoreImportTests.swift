@@ -1,12 +1,169 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import Supabase
 import SwiftData
 import Testing
 
 @testable import Ironsmith
 
 struct StoreImportTests {
+    @MainActor
+    @Test
+    func unsignedStoreDownloadRequiresAnAccountBeforeFetchingAppDetails() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let app = Self.appSummary(id: "account-required")
+        var client = IronsmithStoreClient.unconfigured
+        client.fetchApp = { _, _ in
+            Issue.record("An unsigned download must not fetch app details.")
+            throw IronsmithStoreClientError.notConfigured
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                Issue.record("An unsigned download must not import an app.")
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in
+                Issue.record("An unsigned download must not build an app.")
+            })
+        )
+
+        await store.install(
+            app,
+            mode: .get,
+            tools: [],
+            modelContext: context,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {}),
+            inferenceStore: InferenceStore()
+        )
+
+        #expect(store.isDownloadSignInRequired)
+        #expect(store.workingAppID == nil)
+        #expect(store.errorMessage == nil)
+        #expect(try context.fetch(FetchDescriptor<Tool>()).isEmpty)
+        guard case .appSummary(let pendingApp, mode: .get) = store.pendingDownloadRequest else {
+            Issue.record("Expected the Get request to remain pending for sign-in.")
+            return
+        }
+        #expect(pendingApp.id == app.id)
+    }
+
+    @MainActor
+    @Test
+    func unsignedHistoricalVersionDownloadRequiresAnAccountBeforeFetchingSource() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let source = Self.sourceCode("historical")
+        let version = Self.versionMetadata(versionNumber: 1, sourceCode: source)
+        let app = Self.appListing(sourceCode: source, versions: [version])
+        var client = IronsmithStoreClient.unconfigured
+        client.fetchVersion = { _, _, _ in
+            Issue.record("An unsigned version download must not fetch source.")
+            throw IronsmithStoreClientError.notConfigured
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                Issue.record("An unsigned version download must not import an app.")
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        await store.installVersion(
+            version,
+            of: app,
+            tools: [],
+            modelContext: context,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {}),
+            inferenceStore: InferenceStore()
+        )
+
+        #expect(store.isDownloadSignInRequired)
+        #expect(store.workingAppID == nil)
+        #expect(store.workingVersionID == nil)
+        #expect(store.errorMessage == nil)
+        guard case .version(let pendingVersion, let pendingApp) = store.pendingDownloadRequest else {
+            Issue.record("Expected the historical version request to remain pending for sign-in.")
+            return
+        }
+        #expect(pendingVersion.id == version.id)
+        #expect(pendingApp.id == app.id)
+    }
+
+    @MainActor
+    @Test
+    func unsignedRemixRequiresAnAccountAndPreservesThePendingAction() async throws {
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let app = Self.appListing(sourceCode: Self.sourceCode("remix"))
+        let store = StoreWindowStore(
+            client: .unconfigured,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                Issue.record("An unsigned remix must not import an app.")
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        await store.install(
+            app,
+            mode: .remix,
+            tools: [],
+            modelContext: context,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {}),
+            inferenceStore: InferenceStore()
+        )
+
+        #expect(store.isDownloadSignInRequired)
+        guard case .appDetail(let pendingApp, mode: .remix) = store.pendingDownloadRequest else {
+            Issue.record("Expected the Remix request to remain pending for sign-in.")
+            return
+        }
+        #expect(pendingApp.id == app.id)
+    }
+
+    @MainActor
+    @Test
+    func unsignedUserCanOpenAnAlreadyInstalledCurrentVersion() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let source = Self.sourceCode("installed")
+        let app = Self.appListing(sourceCode: source)
+        let version = Self.versionDownload(
+            appId: app.id,
+            sourceCode: source,
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: source)
+        )
+        let importer = StoreToolImportClient.live(toolsDirectoryURL: root)
+        let installed = try await importer.importTool(
+            StoreToolImportRequest(app: app, version: version, mode: .get),
+            context
+        ).tool
+        let store = StoreWindowStore(
+            client: .unconfigured,
+            importClient: importer,
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        await store.install(
+            app,
+            mode: .get,
+            tools: [installed],
+            modelContext: context,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {}),
+            inferenceStore: InferenceStore()
+        )
+
+        #expect(!store.isDownloadSignInRequired)
+        #expect(store.pendingDownloadRequest == nil)
+        #expect(store.errorMessage == nil)
+    }
+
     @Test
     func storeMultipartUsesJPEGAssetContract() throws {
         let body = StoreMultipartBody(boundary: "JPEG-Test-Boundary")
@@ -741,7 +898,7 @@ struct StoreImportTests {
             tools: [existing],
             modelContext: context,
             routeStore: IronsmithRouteStore(openSettingsWindow: {}),
-            inferenceStore: InferenceStore()
+            inferenceStore: Self.signedInInferenceStore()
         )
 
         let tools = try context.fetch(FetchDescriptor<Tool>())
@@ -820,7 +977,7 @@ struct StoreImportTests {
             tools: [],
             modelContext: context,
             routeStore: IronsmithRouteStore(openSettingsWindow: {}),
-            inferenceStore: InferenceStore()
+            inferenceStore: Self.signedInInferenceStore()
         )
 
         #expect(try context.fetch(FetchDescriptor<Tool>()).isEmpty)
@@ -859,7 +1016,7 @@ struct StoreImportTests {
             tools: [],
             modelContext: context,
             routeStore: IronsmithRouteStore(openSettingsWindow: {}),
-            inferenceStore: InferenceStore()
+            inferenceStore: Self.signedInInferenceStore()
         )
 
         let failedTool = try #require(context.fetch(FetchDescriptor<Tool>()).first)
@@ -948,6 +1105,30 @@ struct StoreImportTests {
             }
         }
         """
+    }
+
+    @MainActor
+    private static func signedInInferenceStore() -> InferenceStore {
+        let store = InferenceStore()
+        let userID = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
+        store.ironsmithSession = Session(
+            accessToken: "access-token",
+            tokenType: "bearer",
+            expiresIn: 3_600,
+            expiresAt: Date().addingTimeInterval(3_600).timeIntervalSince1970,
+            refreshToken: "refresh-token",
+            user: User(
+                id: userID,
+                appMetadata: [:],
+                userMetadata: [:],
+                aud: "authenticated",
+                email: "jade@example.com",
+                createdAt: Date(),
+                role: "authenticated",
+                updatedAt: Date()
+            )
+        )
+        return store
     }
 
     private static func appSummary(id: String) -> StoreAppSummary {
