@@ -390,7 +390,8 @@ struct SingleFileToolGenerationRuntime {
             userPrompt: prompt,
             invoker: context.languageModelInvoker,
             appKind: appKind,
-            sandboxEnabled: sandboxEnabled
+            sandboxEnabled: sandboxEnabled,
+            codingAgent: context.pipelineConfiguration.codingAgent
         )
         try Task.checkCancellation()
         guard let refinedPrompt else {

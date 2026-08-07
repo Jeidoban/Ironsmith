@@ -144,14 +144,14 @@ extension AgentPipelineTests {
             sandboxEnabled: false,
             appKind: .menuBar,
             menuBarSystemImage: "timer",
-            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections]),
             resourcePermissions: GeneratedAppResourcePermissions([.camera, .microphone]),
             packageRootPath: "/tmp/timer"
         )
 
         #expect(tool.appKind == .menuBar)
         #expect(tool.validatedMenuBarSystemImage == "timer")
-        #expect(tool.storedSandboxPermissions?.enabled == [.internet])
+        #expect(tool.storedSandboxPermissions?.enabled == [.outgoingConnections])
         #expect(tool.storedResourcePermissions?.enabled == [.camera, .microphone])
 
         tool.storedSandboxPermissions = GeneratedAppSandboxPermissions.none
@@ -201,7 +201,7 @@ extension AgentPipelineTests {
             appKind: .menuBar,
             menuBarSystemImage: "timer",
             sandboxEnabled: true,
-            sandboxPermissions: GeneratedAppSandboxPermissions([.internet, .userSelectedFiles]),
+            sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections, .userSelectedFiles]),
             resourcePermissions: GeneratedAppResourcePermissions([.camera])
         )
         let backup = try ToolVersionBackupClient.live.stageCurrentVersion(
@@ -259,7 +259,7 @@ extension AgentPipelineTests {
         #expect(restored.appKind == .menuBar)
         #expect(restored.menuBarSystemImage == "timer")
         #expect(restored.sandboxEnabled)
-        #expect(restored.sandboxPermissions.enabled == [.internet])
+        #expect(restored.sandboxPermissions.enabled == [.outgoingConnections])
         #expect(restored.resourcePermissions.enabled == [.microphone, .camera])
     }
 
@@ -671,12 +671,30 @@ extension AgentPipelineTests {
 
         let withoutUserSelectedFiles = try await buildEntitlements(
             executableName: "NoFilesTool",
-            sandboxPermissions: GeneratedAppSandboxPermissions([.internet])
+            sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections])
         )
         #expect(withoutUserSelectedFiles["com.apple.security.app-sandbox"] as? Bool == true)
         #expect(withoutUserSelectedFiles["com.apple.security.network.client"] as? Bool == true)
         #expect(
             withoutUserSelectedFiles["com.apple.security.files.user-selected.read-write"] == nil)
+
+        let expandedAccess = try await buildEntitlements(
+            executableName: "ExpandedAccessTool",
+            sandboxPermissions: GeneratedAppSandboxPermissions(
+                GeneratedAppSandboxPermission.allCases)
+        )
+        let expectedEntitlements = [
+            "com.apple.security.network.server",
+            "com.apple.security.network.client",
+            "com.apple.security.files.user-selected.read-write",
+            "com.apple.security.files.downloads.read-write",
+            "com.apple.security.assets.pictures.read-write",
+            "com.apple.security.assets.music.read-write",
+            "com.apple.security.assets.movies.read-write",
+        ]
+        for entitlement in expectedEntitlements {
+            #expect(expandedAccess[entitlement] as? Bool == true)
+        }
     }
 
     @MainActor
@@ -705,7 +723,7 @@ extension AgentPipelineTests {
 
         let request = ToolAppBundleRequest.forToolPreservingExistingBundlePermissions(tool)
 
-        #expect(request.sandboxPermissions.contains(.internet))
+        #expect(request.sandboxPermissions.contains(.outgoingConnections))
         #expect(!(request.sandboxPermissions.contains(.userSelectedFiles)))
         #expect(request.category == .music)
         #expect(request.versionNumber == 3)

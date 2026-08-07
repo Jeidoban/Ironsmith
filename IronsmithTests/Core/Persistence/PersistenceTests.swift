@@ -190,7 +190,7 @@ struct PersistenceTests {
                 sandboxEnabled: false,
                 appKind: .menuBar,
                 menuBarSystemImage: "timer",
-                sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+                sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections]),
                 resourcePermissions: GeneratedAppResourcePermissions([.camera, .microphone]),
                 packageRootPath: "/tmp/menu-timer",
                 generationState: .stopped,
@@ -224,7 +224,7 @@ struct PersistenceTests {
         #expect(tool.generationPhase == .generatingSource)
         #expect(tool.generationMode == .edit)
         #expect(tool.pendingPrompt == "Make it better")
-        #expect(tool.storedSandboxPermissions?.enabled == [.internet])
+        #expect(tool.storedSandboxPermissions?.enabled == [.outgoingConnections])
         #expect(tool.storedResourcePermissions?.enabled == [.camera, .microphone])
         #expect(tool.storeId == nil)
         #expect(tool.storeAppId == nil)

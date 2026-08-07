@@ -148,15 +148,25 @@ nonisolated struct GeneratedAppResourcePermissions: Equatable, Sendable {
 }
 
 nonisolated enum GeneratedAppSandboxPermission: String, CaseIterable, Identifiable, Sendable {
-    case internet
+    case incomingConnections
+    case outgoingConnections = "internet"
     case userSelectedFiles
+    case downloadsFolder
+    case picturesFolder
+    case musicFolder
+    case moviesFolder
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .internet: return "Internet"
+        case .incomingConnections: return "Incoming connections (server)"
+        case .outgoingConnections: return "Internet access"
         case .userSelectedFiles: return "User-selected files"
+        case .downloadsFolder: return "Downloads folder"
+        case .picturesFolder: return "Pictures folder"
+        case .musicFolder: return "Music folder"
+        case .moviesFolder: return "Movies folder"
         }
     }
 
@@ -166,8 +176,13 @@ nonisolated enum GeneratedAppSandboxPermission: String, CaseIterable, Identifiab
 
     var entitlementKey: String {
         switch self {
-        case .internet: return "com.apple.security.network.client"
+        case .incomingConnections: return "com.apple.security.network.server"
+        case .outgoingConnections: return "com.apple.security.network.client"
         case .userSelectedFiles: return "com.apple.security.files.user-selected.read-write"
+        case .downloadsFolder: return "com.apple.security.files.downloads.read-write"
+        case .picturesFolder: return "com.apple.security.assets.pictures.read-write"
+        case .musicFolder: return "com.apple.security.assets.music.read-write"
+        case .moviesFolder: return "com.apple.security.assets.movies.read-write"
         }
     }
 }
@@ -175,12 +190,16 @@ nonisolated enum GeneratedAppSandboxPermission: String, CaseIterable, Identifiab
 nonisolated struct GeneratedAppSandboxPermissions: Equatable, Sendable {
     var enabled: Set<GeneratedAppSandboxPermission>
 
-    init(_ enabled: some Sequence<GeneratedAppSandboxPermission> = GeneratedAppSandboxPermission.allCases) {
+    init(
+        _ enabled: some Sequence<GeneratedAppSandboxPermission> = [
+            .outgoingConnections, .userSelectedFiles,
+        ]
+    ) {
         self.enabled = Set(enabled)
     }
 
     nonisolated static var `default`: GeneratedAppSandboxPermissions {
-        GeneratedAppSandboxPermissions()
+        GeneratedAppSandboxPermissions([.outgoingConnections, .userSelectedFiles])
     }
 
     nonisolated static var none: GeneratedAppSandboxPermissions {

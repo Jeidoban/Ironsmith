@@ -321,9 +321,9 @@ nonisolated struct StorePermissionPresentation: Identifiable, Equatable, Sendabl
         let sandbox: [Self] = settings.sandboxEnabled
             ? settings.sandboxPermissions.enabledPermissions.map { permission in
                 switch permission {
-                case .internet:
+                case .incomingConnections, .outgoingConnections:
                     Self(
-                        id: "sandbox.internet",
+                        id: "sandbox.\(permission.rawValue)",
                         title: permission.displayName,
                         explanation: "Access to network connections",
                         systemImage: "network"
@@ -334,6 +334,13 @@ nonisolated struct StorePermissionPresentation: Identifiable, Equatable, Sendabl
                         title: permission.displayName,
                         explanation: "Access to files you choose",
                         systemImage: "folder.badge.plus"
+                    )
+                case .downloadsFolder, .picturesFolder, .musicFolder, .moviesFolder:
+                    Self(
+                        id: "sandbox.\(permission.rawValue)",
+                        title: permission.displayName,
+                        explanation: "Read and write access to this folder",
+                        systemImage: "folder"
                     )
                 }
             }

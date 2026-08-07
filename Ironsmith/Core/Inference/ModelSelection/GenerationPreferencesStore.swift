@@ -87,11 +87,19 @@ final class GenerationPreferencesStore {
             )
         }
     }
-    var generatedAppInternetAccessEnabled: Bool {
+    var generatedAppIncomingConnectionsEnabled: Bool {
         didSet {
             userDefaults.set(
-                generatedAppInternetAccessEnabled,
-                forKey: GeneratedAppSandboxPermission.internet.userDefaultsKey
+                generatedAppIncomingConnectionsEnabled,
+                forKey: GeneratedAppSandboxPermission.incomingConnections.userDefaultsKey
+            )
+        }
+    }
+    var generatedAppOutgoingConnectionsEnabled: Bool {
+        didSet {
+            userDefaults.set(
+                generatedAppOutgoingConnectionsEnabled,
+                forKey: GeneratedAppSandboxPermission.outgoingConnections.userDefaultsKey
             )
         }
     }
@@ -100,6 +108,38 @@ final class GenerationPreferencesStore {
             userDefaults.set(
                 generatedAppUserSelectedFileAccessEnabled,
                 forKey: GeneratedAppSandboxPermission.userSelectedFiles.userDefaultsKey
+            )
+        }
+    }
+    var generatedAppDownloadsFolderAccessEnabled: Bool {
+        didSet {
+            userDefaults.set(
+                generatedAppDownloadsFolderAccessEnabled,
+                forKey: GeneratedAppSandboxPermission.downloadsFolder.userDefaultsKey
+            )
+        }
+    }
+    var generatedAppPicturesFolderAccessEnabled: Bool {
+        didSet {
+            userDefaults.set(
+                generatedAppPicturesFolderAccessEnabled,
+                forKey: GeneratedAppSandboxPermission.picturesFolder.userDefaultsKey
+            )
+        }
+    }
+    var generatedAppMusicFolderAccessEnabled: Bool {
+        didSet {
+            userDefaults.set(
+                generatedAppMusicFolderAccessEnabled,
+                forKey: GeneratedAppSandboxPermission.musicFolder.userDefaultsKey
+            )
+        }
+    }
+    var generatedAppMoviesFolderAccessEnabled: Bool {
+        didSet {
+            userDefaults.set(
+                generatedAppMoviesFolderAccessEnabled,
+                forKey: GeneratedAppSandboxPermission.moviesFolder.userDefaultsKey
             )
         }
     }
@@ -155,16 +195,32 @@ final class GenerationPreferencesStore {
         self.generatedAppAppleEventsAccessEnabled = userDefaults.bool(
             forKey: GeneratedAppResourcePermission.appleEvents.userDefaultsKey
         )
-        self.generatedAppInternetAccessEnabled = userDefaults.object(
-            forKey: GeneratedAppSandboxPermission.internet.userDefaultsKey
+        self.generatedAppIncomingConnectionsEnabled = userDefaults.bool(
+            forKey: GeneratedAppSandboxPermission.incomingConnections.userDefaultsKey
+        )
+        self.generatedAppOutgoingConnectionsEnabled = userDefaults.object(
+            forKey: GeneratedAppSandboxPermission.outgoingConnections.userDefaultsKey
         ) == nil
             ? true
-            : userDefaults.bool(forKey: GeneratedAppSandboxPermission.internet.userDefaultsKey)
+            : userDefaults.bool(
+                forKey: GeneratedAppSandboxPermission.outgoingConnections.userDefaultsKey)
         self.generatedAppUserSelectedFileAccessEnabled = userDefaults.object(
             forKey: GeneratedAppSandboxPermission.userSelectedFiles.userDefaultsKey
         ) == nil
             ? true
             : userDefaults.bool(forKey: GeneratedAppSandboxPermission.userSelectedFiles.userDefaultsKey)
+        self.generatedAppDownloadsFolderAccessEnabled = userDefaults.bool(
+            forKey: GeneratedAppSandboxPermission.downloadsFolder.userDefaultsKey
+        )
+        self.generatedAppPicturesFolderAccessEnabled = userDefaults.bool(
+            forKey: GeneratedAppSandboxPermission.picturesFolder.userDefaultsKey
+        )
+        self.generatedAppMusicFolderAccessEnabled = userDefaults.bool(
+            forKey: GeneratedAppSandboxPermission.musicFolder.userDefaultsKey
+        )
+        self.generatedAppMoviesFolderAccessEnabled = userDefaults.bool(
+            forKey: GeneratedAppSandboxPermission.moviesFolder.userDefaultsKey
+        )
     }
 
     func isGeneratedAppResourcePermissionEnabled(_ permission: GeneratedAppResourcePermission) -> Bool {
@@ -207,19 +263,39 @@ final class GenerationPreferencesStore {
 
     func isGeneratedAppSandboxPermissionEnabled(_ permission: GeneratedAppSandboxPermission) -> Bool {
         switch permission {
-        case .internet:
-            return generatedAppInternetAccessEnabled
+        case .incomingConnections:
+            return generatedAppIncomingConnectionsEnabled
+        case .outgoingConnections:
+            return generatedAppOutgoingConnectionsEnabled
         case .userSelectedFiles:
             return generatedAppUserSelectedFileAccessEnabled
+        case .downloadsFolder:
+            return generatedAppDownloadsFolderAccessEnabled
+        case .picturesFolder:
+            return generatedAppPicturesFolderAccessEnabled
+        case .musicFolder:
+            return generatedAppMusicFolderAccessEnabled
+        case .moviesFolder:
+            return generatedAppMoviesFolderAccessEnabled
         }
     }
 
     func setGeneratedAppSandboxPermission(_ permission: GeneratedAppSandboxPermission, enabled: Bool) {
         switch permission {
-        case .internet:
-            generatedAppInternetAccessEnabled = enabled
+        case .incomingConnections:
+            generatedAppIncomingConnectionsEnabled = enabled
+        case .outgoingConnections:
+            generatedAppOutgoingConnectionsEnabled = enabled
         case .userSelectedFiles:
             generatedAppUserSelectedFileAccessEnabled = enabled
+        case .downloadsFolder:
+            generatedAppDownloadsFolderAccessEnabled = enabled
+        case .picturesFolder:
+            generatedAppPicturesFolderAccessEnabled = enabled
+        case .musicFolder:
+            generatedAppMusicFolderAccessEnabled = enabled
+        case .moviesFolder:
+            generatedAppMoviesFolderAccessEnabled = enabled
         }
     }
 }

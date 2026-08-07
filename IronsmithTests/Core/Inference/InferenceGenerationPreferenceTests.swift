@@ -404,23 +404,28 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func generatedAppSandboxPermissionPreferencesDefaultOnAndPersist() {
+    func generatedAppSandboxPermissionPreferencesPreserveLegacyDefaultsAndPersist() {
         let suiteName = "IronsmithTests.GeneratedAppSandboxPermissions.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
         userDefaults.removePersistentDomain(forName: suiteName)
 
         let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
-        for permission in GeneratedAppSandboxPermission.allCases {
-            #expect(preferences.isGeneratedAppSandboxPermissionEnabled(permission))
-        }
         #expect(preferences.generatedAppSandboxPermissions == .default)
+        #expect(
+            preferences.generatedAppSandboxPermissions.enabled
+                == [.outgoingConnections, .userSelectedFiles]
+        )
 
-        preferences.setGeneratedAppSandboxPermission(.internet, enabled: false)
+        preferences.setGeneratedAppSandboxPermission(.downloadsFolder, enabled: true)
 
         let reloadedPreferences = GenerationPreferencesStore(userDefaults: userDefaults)
-        #expect(!(reloadedPreferences.isGeneratedAppSandboxPermissionEnabled(.internet)))
+        #expect(reloadedPreferences.isGeneratedAppSandboxPermissionEnabled(.outgoingConnections))
         #expect(reloadedPreferences.isGeneratedAppSandboxPermissionEnabled(.userSelectedFiles))
-        #expect(reloadedPreferences.generatedAppSandboxPermissions.enabled == [.userSelectedFiles])
+        #expect(reloadedPreferences.isGeneratedAppSandboxPermissionEnabled(.downloadsFolder))
+        #expect(
+            reloadedPreferences.generatedAppSandboxPermissions.enabled
+                == [.outgoingConnections, .userSelectedFiles, .downloadsFolder]
+        )
     }
 
     @Test

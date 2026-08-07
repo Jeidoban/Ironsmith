@@ -260,19 +260,19 @@ struct ToolMetadataClient: Sendable {
         switch provider {
         case .gemini, .openAI, .ironsmith:
             return """
-            - Write one concise visual concept of 8 to 20 words.
-            - Describe only the concrete subject, any meaningful secondary object, and how they relate or are arranged.
-            - Choose a concept specific to the requested app instead of repeating the app name.
-            - Do not specify icon shape, canvas, background, palette, materials, lighting, depth, style, rendering quality, legibility, macOS conventions, or generation instructions.
-            - Good examples: A small house sheltering a calculator, with one coin orbiting the roofline. A calendar page whose date square becomes a checkmark.
-            """
+                - Write one concise visual concept of 8 to 20 words.
+                - Describe only the concrete subject, any meaningful secondary object, and how they relate or are arranged.
+                - Choose a concept specific to the requested app instead of repeating the app name.
+                - Do not specify icon shape, canvas, background, palette, materials, lighting, depth, style, rendering quality, legibility, macOS conventions, or generation instructions.
+                - Good examples: A small house sheltering a calculator, with one coin orbiting the roofline. A calendar page whose date square becomes a checkmark.
+                """
         case .automatic, .imagePlayground, .disabled:
             return """
-            - Must be a tiny object phrase, not a sentence or description.
-            - Must be 2 to 5 words.
-            - Good examples: Calculator in front of house. Gamepad with buttons.
-            - Do not mention app icon, macOS, style, text, letters, screenshots, UI, logos, or backgrounds.
-            """
+                - Must be a tiny object phrase, not a sentence or description.
+                - Must be 2 to 5 words.
+                - Good examples: Calculator in front of house. Gamepad with buttons.
+                - Do not mention app icon, macOS, style, text, letters, screenshots, UI, logos, or backgrounds.
+                """
         }
     }
 
@@ -301,6 +301,7 @@ struct ToolPromptRefinementRequest: Sendable {
     let userPrompt: String
     let appKind: ToolAppKind
     let sandboxEnabled: Bool
+    let codingAgent: ToolCodingAgent
     let invoker: ToolLanguageModelInvoker
 }
 
@@ -326,13 +327,15 @@ struct ToolPromptRefinementClient: Sendable {
         userPrompt: String,
         invoker: ToolLanguageModelInvoker,
         appKind: ToolAppKind = .window,
-        sandboxEnabled: Bool = true
+        sandboxEnabled: Bool = true,
+        codingAgent: ToolCodingAgent = .ironsmithSpark
     ) async -> String? {
         await refinePromptForRequest(
             ToolPromptRefinementRequest(
                 userPrompt: userPrompt,
                 appKind: appKind,
                 sandboxEnabled: sandboxEnabled,
+                codingAgent: codingAgent,
                 invoker: invoker
             )
         )
@@ -349,7 +352,7 @@ struct ToolPromptRefinementClient: Sendable {
                 do {
                     let session = request.invoker.makeSession(
                         for: .promptRefinement,
-                        instructions: promptRefinementInstructions
+                        instructions: promptRefinementInstructions(for: request.codingAgent)
                     )
                     let response = try await request.invoker.respond(
                         stage: .promptRefinement,
@@ -412,7 +415,37 @@ struct ToolPromptRefinementClient: Sendable {
         """
     }
 
-    nonisolated private static let promptRefinementInstructions = """
+    nonisolated static func promptRefinementInstructions(
+        for codingAgent: ToolCodingAgent
+    ) -> String {
+        switch codingAgent {
+        case .ironsmithSpark:
+            return sparkPromptRefinementInstructions
+        case .ironsmithFlame, .codex:
+            return additivePromptRefinementInstructions
+        }
+    }
+
+    nonisolated private static let additivePromptRefinementInstructions = """
+        You lightly refine a user's app request for a macOS SwiftUI AI coding agent.
+        Return only the refined prompt as one concise plain-text paragraph, without markdown, labels, commentary, code, or file names.
+
+        The refined prompt:
+        - Must be additive only: preserve every requested feature and constraint without removing, simplifying, replacing, or reprioritizing any part of the request. The user's explicit request takes priority over the defaults below.
+        - Should expand the user's request with specific product intent, core features, expected interactions, layout and visual design direction, and useful states such as empty, loading, complete, or error states when relevant.
+        - Must preserve whether the generated app is a window app or menu bar app.
+        - For menu bar apps, describe a compact menu bar popover utility with concise controls, short labels, bounded size, and a focused quick workflow. Do not expand the request into a full-size desktop app, dashboard, sidebar layout, multi-pane workflow, or large complicated UI unless explicitly requested.
+        - For window apps, describe a normal native macOS window app layout when appropriate.
+        - Prefer one polished primary workflow over many secondary workflows while preserving all requested features.
+        - If a requested feature can be implemented with a native Apple framework such as Vision for OCR, PDFKit for PDFs, or AVFoundation for media, explicitly call it out.
+        - Must describe a self-contained Mac app unless the user explicitly requests external services.
+        - May include local persistence, local files, import/export, and open/save flows when they make sense.
+        - Must not add or imply a separate backend service, custom server component, account system, iCloud, CloudKit, push notifications, analytics, subscriptions, or cross-device sync unless explicitly requested.
+        - Should emphasize a native macOS feel using appropriate SwiftUI macOS patterns and system controls.
+        - For games, drawing canvases, and highly visual toys, the refined prompt may describe custom graphics and game-like UI, but it should keep the app local-only unless the user requests network features and remain sensible for macOS pointer, keyboard, and window behavior.
+        """
+
+    nonisolated private static let sparkPromptRefinementInstructions = """
         You refine a user's app request into a compact build prompt for a macOS SwiftUI AI coding agent.
         Return only the refined prompt as plain text.
         Do not return JSON, code, markdown, bullets, labels, commentary, code, or file names.
@@ -429,7 +462,6 @@ struct ToolPromptRefinementClient: Sendable {
         - If the user lists many features, preserve the most important ones and explicitly simplify or omit the rest.
         - Prefer one polished primary workflow over many secondary workflows.
         - If a requested feature can be implemented with a native Apple framework such as Vision for OCR, PDFKit for PDFs, AVFoundation for media etc., explicitly call it out.
-        - The request states whether the generated app uses the app sandbox. Treat that as runtime context, not a reason to reduce useful scope. If sandboxed, preserve the useful workflow and phrase it with sandbox-compatible macOS patterns. If not sandboxed, the app may use what it needs to complete the user's ask, but must not make changes to the user's system unless the user asks for them or the request requires them.
         - Must describe a self-contained Mac app, with direct internet requests allowed only when the user's request requires them.
         - May include local persistence, local files, import/export, and open/save flows when they make sense.
         - Must not mention or imply a separate backend service, custom server component, account system, iCloud, CloudKit, push notifications, analytics, subscriptions, or cross-device sync.

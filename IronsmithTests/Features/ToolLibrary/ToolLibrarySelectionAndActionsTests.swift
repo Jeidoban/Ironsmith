@@ -112,7 +112,7 @@ extension ToolLibraryTests {
         toolLibraryState.initializeNextGenerationSettingsIfNeeded(defaults)
         toolLibraryState.appKind = .menuBar
         toolLibraryState.sandboxEnabled = false
-        toolLibraryState.sandboxPermissions = GeneratedAppSandboxPermissions([.internet])
+        toolLibraryState.sandboxPermissions = GeneratedAppSandboxPermissions([.outgoingConnections])
         toolLibraryState.resourcePermissions = GeneratedAppResourcePermissions([.camera])
         toolLibraryState.rememberCurrentGenerationSettingsForNextGeneration()
 
@@ -129,7 +129,7 @@ extension ToolLibraryTests {
         #expect(!(toolLibraryState.isSelected(tool)))
         #expect(toolLibraryState.appKind == .menuBar)
         #expect(!(toolLibraryState.sandboxEnabled))
-        #expect(toolLibraryState.sandboxPermissions.enabled == [.internet])
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.outgoingConnections])
         #expect(toolLibraryState.resourcePermissions.enabled == [.camera])
     }
 
@@ -142,7 +142,7 @@ extension ToolLibraryTests {
             sandboxEnabled: false,
             appKind: .menuBar,
             menuBarSystemImage: "timer",
-            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections]),
             resourcePermissions: GeneratedAppResourcePermissions([.camera]),
             packageRootPath: "/tmp/menu-tool"
         )
@@ -162,7 +162,7 @@ extension ToolLibraryTests {
         #expect(toolLibraryState.appKind == .menuBar)
         #expect(toolLibraryState.menuBarSystemImage == "timer")
         #expect(toolLibraryState.sandboxEnabled)
-        #expect(toolLibraryState.sandboxPermissions.enabled == [.internet])
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.outgoingConnections])
         #expect(toolLibraryState.resourcePermissions.enabled == [.microphone])
     }
 
@@ -175,7 +175,7 @@ extension ToolLibraryTests {
             resourcePermissions: GeneratedAppResourcePermissions([.location])
         )
         let updatedDefaults = ToolGenerationSettings(
-            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections]),
             resourcePermissions: GeneratedAppResourcePermissions([.camera])
         )
 
@@ -184,14 +184,14 @@ extension ToolLibraryTests {
         #expect(toolLibraryState.resourcePermissions.enabled == [.location])
 
         toolLibraryState.initializeNextGenerationSettingsIfNeeded(updatedDefaults)
-        #expect(toolLibraryState.sandboxPermissions.enabled == [.internet])
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.outgoingConnections])
         #expect(toolLibraryState.resourcePermissions.enabled == [.camera])
 
         toolLibraryState.resourcePermissions = GeneratedAppResourcePermissions([.microphone])
         toolLibraryState.rememberCurrentGenerationSettingsForNextGeneration()
         toolLibraryState.initializeNextGenerationSettingsIfNeeded(initialDefaults)
 
-        #expect(toolLibraryState.sandboxPermissions.enabled == [.internet])
+        #expect(toolLibraryState.sandboxPermissions.enabled == [.outgoingConnections])
         #expect(toolLibraryState.resourcePermissions.enabled == [.microphone])
     }
 
@@ -222,7 +222,7 @@ extension ToolLibraryTests {
             packageRootPath: "/tmp/menu-timer"
         )
         let defaults = ToolGenerationSettings(
-            sandboxPermissions: GeneratedAppSandboxPermissions([.internet, .userSelectedFiles]),
+            sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections, .userSelectedFiles]),
             resourcePermissions: GeneratedAppResourcePermissions([.location])
         )
 
@@ -249,7 +249,7 @@ extension ToolLibraryTests {
         )
         let entitlementsData = try PropertyListSerialization.data(
             fromPropertyList: [
-                GeneratedAppSandboxPermission.internet.entitlementKey: true
+                GeneratedAppSandboxPermission.outgoingConnections.entitlementKey: true
             ],
             format: .xml,
             options: 0
@@ -484,7 +484,7 @@ extension ToolLibraryTests {
             appKind: .menuBar,
             menuBarSystemImage: "timer",
             sandboxEnabled: false,
-            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections]),
             resourcePermissions: GeneratedAppResourcePermissions([.microphone])
         )
         try #"Text("previous")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
@@ -571,7 +571,7 @@ extension ToolLibraryTests {
             appKind: .menuBar,
             menuBarSystemImage: "timer",
             sandboxEnabled: false,
-            sandboxPermissions: GeneratedAppSandboxPermissions([.internet]),
+            sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections]),
             resourcePermissions: GeneratedAppResourcePermissions([.microphone])
         )
 
@@ -619,7 +619,7 @@ extension ToolLibraryTests {
         #expect(tool.appKind == .menuBar)
         #expect(tool.validatedMenuBarSystemImage == "timer")
         #expect(!(tool.sandboxEnabled))
-        #expect(tool.storedSandboxPermissions?.enabled == [.internet])
+        #expect(tool.storedSandboxPermissions?.enabled == [.outgoingConnections])
         #expect(tool.storedResourcePermissions?.enabled == [.microphone])
         #expect(rebuiltAppEntrySource.contains("MenuBarExtra"))
         #expect(!(rebuiltAppEntrySource.contains("WindowGroup")))
