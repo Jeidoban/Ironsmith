@@ -678,6 +678,11 @@ extension AgentPipelineTests {
         {"type":"item.started","item":{"id":"item_4","type":"todo_list","items":[{"text":"Create ContentView.swift","completed":false},{"text":"Build and verify","completed":false}]}}
         {"type":"item.updated","item":{"id":"item_4","type":"todo_list","items":[{"text":"Create ContentView.swift","completed":true},{"text":"Build and verify","completed":false}]}}
         {"type":"item.completed","item":{"id":"item_4","type":"todo_list","items":[{"text":"Create ContentView.swift","completed":true},{"text":"Build and verify","completed":true}]}}
+        {"type":"item.started","item":{"id":"item_5","type":"mcp_tool_call","server":"codex_apps","tool":"github.search","arguments":{"topn":5,"query":"SwiftUI"},"result":null,"error":null,"status":"in_progress"}}
+        {"type":"item.completed","item":{"id":"item_5","type":"mcp_tool_call","server":"codex_apps","tool":"github.search","arguments":{"topn":5,"query":"SwiftUI"},"result":{"content":[]},"error":null,"status":"completed"}}
+        {"type":"item.completed","item":{"id":"item_6","type":"reasoning","text":"I should verify the generated source."}}
+        {"type":"item.completed","item":{"id":"item_7","type":"reasoning","encrypted_content":"encrypted-payload"}}
+        {"type":"item.completed","item":{"id":"item_8","type":"error","message":"MCP request failed"}}
         {"type":"error","message":"apply_patch failed"}
         {"type":"turn.completed"}
         """
@@ -723,6 +728,16 @@ extension AgentPipelineTests {
                 ],
                 status: "completed"
             ),
+            .mcpToolCall(
+                call: CodexAgentMCPToolCall(
+                    server: "codex_apps",
+                    tool: "github.search",
+                    arguments: #"{"query":"SwiftUI","topn":5}"#
+                ),
+                status: "completed"
+            ),
+            .reasoning("I should verify the generated source."),
+            .error("MCP request failed"),
             .error("apply_patch failed"),
             .turnCompleted,
         ])
@@ -838,6 +853,29 @@ extension AgentPipelineTests {
                 status: "completed"
             ).diagnosticSummary == "Codex todo list Completed: 2/2 completed"
         )
+        #expect(
+            CodexAgentEvent.mcpToolCall(
+                id: "item_5",
+                call: CodexAgentMCPToolCall(
+                    server: "codex_apps",
+                    tool: "github.search",
+                    arguments: #"{"query":"SwiftUI"}"#
+                ),
+                status: "in_progress"
+            ).diagnosticSummary == nil
+        )
+        #expect(
+            CodexAgentEvent.mcpToolCall(
+                id: "item_5",
+                call: CodexAgentMCPToolCall(
+                    server: "codex_apps",
+                    tool: "github.search",
+                    arguments: #"{"query":"SwiftUI"}"#
+                ),
+                status: "completed"
+            ).diagnosticSummary == "Codex MCP tool call Completed: codex_apps.github.search"
+        )
+        #expect(CodexAgentEvent.reasoning("private thought").diagnosticSummary == nil)
     }
 
     @Test
@@ -1039,6 +1077,7 @@ extension AgentPipelineTests {
         let invocationCapture = LanguageModelInvocationCapture()
         let attachmentID = UUID()
         let persistedAttachmentCapture = PersistedAttachmentCapture()
+        let phaseCapture = ToolGenerationPhaseCapture()
         let generatedSource = """
         import SwiftUI
 
@@ -1065,6 +1104,7 @@ extension AgentPipelineTests {
                 encoding: .utf8
             )
             await request.onEvent(.commandExecution(id: nil, command: "swift build", status: "completed", exitCode: 0))
+            await request.onEvent(.reasoning("The build passed, so I should finish."))
             return CodexAgentResult(
                 stdout: "",
                 stderr: "",
@@ -1118,6 +1158,9 @@ extension AgentPipelineTests {
             lifecycle: ToolGenerationLifecycle(
                 didPersistAttachments: { ids in
                     await persistedAttachmentCapture.record(ids)
+                },
+                updatePhase: { _, phase, _ in
+                    await phaseCapture.record(phase)
                 }
             )
         )
@@ -1130,6 +1173,9 @@ extension AgentPipelineTests {
         #expect(contentView == generatedSource)
         #expect(await invocationCapture.count == 1)
         #expect(await persistedAttachmentCapture.ids == [attachmentID])
+        let phases = await phaseCapture.phases
+        let firstRepairIndex = try #require(phases.firstIndex(of: .repairing))
+        #expect(!phases[phases.index(after: firstRepairIndex)...].contains(.generatingSource))
         #expect(result.packageRootURL.lastPathComponent == "codex-demo")
         #expect(!FileManager.default.fileExists(
             atPath: toolsDirectory.appendingPathComponent("new-app").path
@@ -1356,6 +1402,15 @@ private actor PersistedAttachmentCapture {
 
     func record(_ ids: [UUID]) {
         self.ids = ids
+    }
+}
+
+private actor ToolGenerationPhaseCapture {
+    private(set) var phases: [ToolGenerationPhase] = []
+
+    func record(_ phase: ToolGenerationPhase?) {
+        guard let phase else { return }
+        phases.append(phase)
     }
 }
 

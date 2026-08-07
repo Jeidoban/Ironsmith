@@ -700,7 +700,7 @@ struct SingleFileToolGenerationRuntime {
 
         do {
             switch event {
-            case .commandExecution, .fileChange, .webSearch, .todoList:
+            case .commandExecution, .fileChange, .webSearch, .todoList, .mcpToolCall:
                 try await lifecycle.updatePhase(.generating, .repairing, nil)
             case .agentMessage:
                 try await lifecycle.updatePhase(.generating, .generatingSource, nil)
@@ -708,7 +708,7 @@ struct SingleFileToolGenerationRuntime {
                 try await lifecycle.updatePhase(.generating, .repairing, nil)
             case .error(let message):
                 try await lifecycle.updatePhase(.generating, .generatingSource, message)
-            case .threadStarted, .turnStarted:
+            case .threadStarted, .turnStarted, .reasoning:
                 break
             }
         } catch {

@@ -185,6 +185,8 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
     case fileChange(id: String?, changes: [CodexAgentFileChange], status: String?)
     case webSearch(id: String?, search: CodexAgentWebSearch, status: String?)
     case todoList(id: String?, items: [CodexAgentTodoItem], status: String?)
+    case mcpToolCall(id: String?, call: CodexAgentMCPToolCall, status: String?)
+    case reasoning(String)
     case error(String)
 
     var diagnosticSummary: String? {
@@ -237,6 +239,15 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
                 summary += " \(status)"
             }
             return "\(summary): \(completedCount)/\(items.count) completed"
+        case .mcpToolCall(_, let call, let status):
+            guard status != "in_progress" else { return nil }
+            var summary = "Codex MCP tool call"
+            if let status = CodexAgentStatusFormatter.displayText(status) {
+                summary += " \(status)"
+            }
+            return "\(summary): \(AgentDiagnosticsLog.compact(call.displayName, limit: 500))"
+        case .reasoning:
+            return nil
         case .error(let message):
             return "Codex error: \(AgentDiagnosticsLog.compact(message, limit: 500))"
         }
@@ -317,6 +328,26 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
                 items: items,
                 status: stringValue(in: item, keys: ["status"]) ?? status(fromEnvelope: object)
             )
+        case "mcp_tool_call":
+            guard let server = stringValue(in: item, keys: ["server"]),
+                let tool = stringValue(in: item, keys: ["tool"])
+            else {
+                return nil
+            }
+            return .mcpToolCall(
+                id: stringValue(in: item, keys: ["id"]),
+                call: CodexAgentMCPToolCall(
+                    server: server,
+                    tool: tool,
+                    arguments: jsonText(item["arguments"])
+                ),
+                status: stringValue(in: item, keys: ["status"]) ?? status(fromEnvelope: object)
+            )
+        case "reasoning":
+            guard let text = stringValue(in: item, keys: ["text"]) else { return nil }
+            return .reasoning(text)
+        case "error":
+            return .error(message(in: item) ?? "Codex reported an error.")
         default:
             return nil
         }
@@ -391,11 +422,30 @@ nonisolated enum CodexAgentEvent: Equatable, Sendable {
             return nil
         }
     }
+
+    private static func jsonText(_ value: Any?) -> String? {
+        guard let value, JSONSerialization.isValidJSONObject(value),
+            let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+        else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
 }
 
 nonisolated struct CodexAgentTodoItem: Equatable, Sendable {
     let text: String
     let completed: Bool
+}
+
+nonisolated struct CodexAgentMCPToolCall: Equatable, Sendable {
+    let server: String
+    let tool: String
+    let arguments: String?
+
+    var displayName: String {
+        "\(server).\(tool)"
+    }
 }
 
 nonisolated struct CodexAgentFileChange: Equatable, Sendable {
