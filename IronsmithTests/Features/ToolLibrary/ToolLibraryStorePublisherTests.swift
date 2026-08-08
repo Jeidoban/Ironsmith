@@ -197,6 +197,7 @@ extension ToolLibraryTests {
             return publishedDetail
         }
         let buildCapture = PublisherBuildCapture()
+        let parentVersionId = "00000000-0000-4000-8000-000000000299"
         let publisher = ToolLibraryStorePublisher(
             storeClient: storeClient,
             iconClient: .noOp,
@@ -212,6 +213,7 @@ extension ToolLibraryTests {
             executableName: "ClipboardCleaner",
             packageRootPath: root.appendingPathComponent("ClipboardCleaner").path
         )
+        tool.storeRemixedFromVersionId = parentVersionId
         try Self.writeSource(Self.publisherSource, to: tool)
         try FileManager.default.createDirectory(
             at: tool.packageLayout.packageMetadataDirectoryURL,
@@ -243,9 +245,12 @@ extension ToolLibraryTests {
         let updatedNames = await profileCapture.updatedNames
         let publicationCount = await publicationCapture.count
         let publishedName = await publicationCapture.lastName
+        let remixedFromVersionId = await publicationCapture.lastRemixedFromVersionId
         #expect(updatedNames == ["Jade Westover"])
         #expect(publicationCount == 1)
         #expect(publishedName == tool.name)
+        #expect(remixedFromVersionId == parentVersionId)
+        #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.id)
         #expect(tool.storeVersionNumber == 1)
         #expect(await buildCapture.versionNumbers == [1])
         #expect(publisher.errorMessage == nil)
@@ -349,8 +354,12 @@ extension ToolLibraryTests {
             category: .finance,
             source: changedSource
         )
+        let versionCapture = PublisherVersionCapture()
         var storeClient = IronsmithStoreClient.unconfigured
-        storeClient.publishVersion = { _ in publishedDetail }
+        storeClient.publishVersion = { request in
+            await versionCapture.record(request)
+            return publishedDetail
+        }
         let buildCapture = PublisherBuildCapture()
         let publisher = ToolLibraryStorePublisher(
             storeClient: storeClient,
@@ -377,6 +386,7 @@ extension ToolLibraryTests {
             storeVersionId: previousDetail.currentVersion.id,
             storeVersionNumber: 1
         )
+        tool.storeRemixedFromVersionId = previousDetail.currentVersion.id
         try Self.writeSource(changedSource, to: tool)
         try FileManager.default.createDirectory(
             at: tool.packageLayout.packageMetadataDirectoryURL,
@@ -408,6 +418,8 @@ extension ToolLibraryTests {
         #expect(tool.storeVersionNumber == 2)
         #expect(await buildCapture.categories == [.finance])
         #expect(await buildCapture.versionNumbers == [2])
+        #expect(await versionCapture.lastRemixedFromVersionId == nil)
+        #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.remixedFromVersionId)
         #expect(publisher.errorMessage == nil)
         #expect(!publisher.isShowingPublishSheet)
     }
@@ -687,10 +699,20 @@ private actor PublisherProfileCapture {
 private actor PublisherPublicationCapture {
     private(set) var count = 0
     private(set) var lastName: String?
+    private(set) var lastRemixedFromVersionId: String?
 
     func record(_ request: StorePublicationRequest) {
         count += 1
         lastName = request.name
+        lastRemixedFromVersionId = request.remixedFromVersionId
+    }
+}
+
+private actor PublisherVersionCapture {
+    private(set) var lastRemixedFromVersionId: String?
+
+    func record(_ request: StoreVersionPublicationRequest) {
+        lastRemixedFromVersionId = request.remixedFromVersionId
     }
 }
 

@@ -8,6 +8,11 @@ import Testing
 @testable import Ironsmith
 
 struct StoreImportTests {
+    @Test
+    func freshStoreInstallUsesDownloadTitle() {
+        #expect(StoreAppInstallDisposition.createCopy.buttonTitle == "Download")
+    }
+
     @MainActor
     @Test
     func unsignedStoreDownloadRequiresAnAccountBeforeFetchingAppDetails() async throws {
@@ -365,7 +370,7 @@ struct StoreImportTests {
 
     @MainActor
     @Test
-    func ownAppImportLinksPublishedAppWithoutRemixAttribution() async throws {
+    func ownAppImportRetainsParentAttributionAcrossAccountSwitches() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
@@ -383,8 +388,7 @@ struct StoreImportTests {
                 StoreToolImportRequest(
                     app: app,
                     version: version,
-                    mode: .get,
-                    isOwnApp: true
+                    mode: .get
                 ),
                 context
             )
@@ -394,7 +398,7 @@ struct StoreImportTests {
         #expect(result.tool.storeVersionId == version.id)
         #expect(result.tool.storeVersionNumber == version.versionNumber)
         #expect(result.tool.storeSourceSha256 == version.sourceSha256)
-        #expect(result.tool.storeRemixedFromVersionId == nil)
+        #expect(result.tool.storeRemixedFromVersionId == version.id)
     }
 
     @MainActor

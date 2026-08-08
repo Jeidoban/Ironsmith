@@ -11,7 +11,7 @@ enum StoreAppInstallDisposition {
         switch self {
         case .openExisting: "Open"
         case .updateExisting: "Update"
-        case .createCopy: "Get"
+        case .createCopy: "Download"
         }
     }
 
@@ -390,10 +390,6 @@ final class StoreWindowStore {
         }
     }
 
-    func isOwnPublishedApp(_ app: StoreAppDetail) -> Bool {
-        publishedApps.contains { $0.id == app.id }
-    }
-
     func installDisposition(
         for app: StoreAppSummary,
         tools: [Tool]
@@ -486,7 +482,6 @@ final class StoreWindowStore {
             if inferenceStore.ironsmithSession != nil {
                 await refreshPublished(showLoadingIndicator: false)
             }
-            let isOwnApp = isOwnPublishedApp(app)
             if mode == .get {
                 switch installDisposition(for: app, tools: tools) {
                 case .openExisting(let tool):
@@ -496,7 +491,6 @@ final class StoreWindowStore {
                     try await updateExistingTool(
                         tool,
                         from: app,
-                        isOwnApp: isOwnApp,
                         modelContext: modelContext,
                         routeStore: routeStore,
                         inferenceStore: inferenceStore
@@ -517,7 +511,6 @@ final class StoreWindowStore {
                 app: app,
                 mode: mode,
                 displayName: nil,
-                isOwnApp: isOwnApp,
                 modelContext: modelContext,
                 routeStore: routeStore
             )
@@ -592,7 +585,6 @@ final class StoreWindowStore {
                 app: app,
                 mode: .get,
                 displayName: displayName,
-                isOwnApp: isOwnPublishedApp(app),
                 modelContext: modelContext,
                 routeStore: routeStore
             )
@@ -625,7 +617,6 @@ final class StoreWindowStore {
     private func updateExistingTool(
         _ tool: Tool,
         from app: StoreAppDetail,
-        isOwnApp: Bool,
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore,
         inferenceStore: InferenceStore
@@ -659,7 +650,7 @@ final class StoreWindowStore {
                 app.currentVersion.versionNumber
             )
             try IronsmithStoreClient.verifySourceHash(version)
-            try writeStoreVersion(version, app: app, isOwnApp: isOwnApp, to: tool)
+            try writeStoreVersion(version, app: app, to: tool)
             try await StoreToolImportClient.cacheIconIfAvailable(
                 app: app,
                 layout: tool.packageLayout
@@ -751,7 +742,6 @@ final class StoreWindowStore {
         app: StoreAppDetail,
         mode: StoreToolImportMode,
         displayName: String?,
-        isOwnApp: Bool,
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore
     ) async throws {
@@ -761,7 +751,6 @@ final class StoreWindowStore {
                 version: version,
                 mode: mode,
                 displayName: displayName,
-                isOwnApp: isOwnApp,
                 initialGenerationState: mode == .get ? .generating : .ready
             ),
             modelContext
@@ -792,7 +781,6 @@ final class StoreWindowStore {
     private func writeStoreVersion(
         _ version: StoreVersionDownload,
         app: StoreAppDetail,
-        isOwnApp: Bool,
         to tool: Tool
     ) throws {
         let layout = tool.packageLayout
@@ -805,7 +793,7 @@ final class StoreWindowStore {
             settings: settings
         )
         tool.applyGenerationSettings(settings)
-        applyStoreLinkage(app, version: version, isOwnApp: isOwnApp, to: tool)
+        applyStoreLinkage(app, version: version, to: tool)
     }
 
     private func restoreToolSource(
@@ -844,7 +832,6 @@ final class StoreWindowStore {
     private func applyStoreLinkage(
         _ app: StoreAppDetail,
         version: StoreVersionDownload,
-        isOwnApp: Bool,
         to tool: Tool
     ) {
         tool.storeId = app.storeId
@@ -853,7 +840,7 @@ final class StoreWindowStore {
         tool.storeVersionNumber = version.versionNumber
         tool.storeSourceSha256 = version.sourceSha256
         tool.storeImportedAt = Date()
-        tool.storeRemixedFromVersionId = isOwnApp ? nil : version.id
+        tool.storeRemixedFromVersionId = version.id
         tool.updatedAt = Date()
     }
 

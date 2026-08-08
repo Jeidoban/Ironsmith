@@ -75,7 +75,8 @@ struct StoreWindowView: View {
                             modelContext: modelContext,
                             routeStore: routeStore,
                             inferenceStore: inferenceStore,
-                            onOpenCreator: openCreator
+                            onOpenCreator: openCreator,
+                            onOpenRemix: openRemix
                         )
                     case .section(let section):
                         StoreSectionAppsView(
@@ -201,6 +202,13 @@ struct StoreWindowView: View {
         )
     }
 
+    private func openRemix(_ remix: StoreRemixMetadata) {
+        store.select(storeID: remix.storeId, appID: remix.appId)
+        path.append(
+            .app(StoreAppRoute(appID: remix.appId, storeID: remix.storeId))
+        )
+    }
+
     private func install(_ app: StoreAppSummary, mode: StoreToolImportMode = .get) {
         Task {
             await store.install(
@@ -299,6 +307,11 @@ private struct StoreAppRoute: Hashable {
     init(app: StoreAppSummary) {
         appID = app.id
         storeID = app.storeId
+    }
+
+    init(appID: String, storeID: String) {
+        self.appID = appID
+        self.storeID = storeID
     }
 }
 
@@ -904,6 +917,7 @@ private struct StoreAppDetailDestinationView: View {
     let routeStore: IronsmithRouteStore
     let inferenceStore: InferenceStore
     let onOpenCreator: (String, String) -> Void
+    let onOpenRemix: (StoreRemixMetadata) -> Void
 
     var body: some View {
         StoreAppDetailView(
@@ -914,7 +928,6 @@ private struct StoreAppDetailDestinationView: View {
             installDisposition: detail.map {
                 store.installDisposition(for: $0, tools: tools)
             } ?? .createCopy,
-            canRemix: detail.map { !store.isOwnPublishedApp($0) } ?? false,
             versionInstallDisposition: { app, version in
                 store.installDisposition(for: version, of: app, tools: tools)
             },
@@ -930,18 +943,7 @@ private struct StoreAppDetailDestinationView: View {
                     )
                 }
             },
-            onRemix: { app in
-                Task {
-                    await store.install(
-                        app,
-                        mode: .remix,
-                        tools: tools,
-                        modelContext: modelContext,
-                        routeStore: routeStore,
-                        inferenceStore: inferenceStore
-                    )
-                }
-            },
+            onOpenRemix: onOpenRemix,
             onOpenCreator: onOpenCreator,
             onInstallVersion: { app, version in
                 Task {

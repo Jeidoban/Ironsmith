@@ -194,7 +194,12 @@ final class ToolLibraryStorePublisher {
                 contentsOf: tool.packageLayout.cachedAppIconThumbnailJPEGURL
             )
             let app: StoreAppDetail
-            if let linkedApp = linkedPublishedApp(for: tool) {
+            let linkedApp = linkedPublishedApp(for: tool)
+            if let linkedApp {
+                let remixedFromVersionId =
+                    tool.storeRemixedFromVersionId == tool.storeVersionId
+                    ? nil
+                    : tool.storeRemixedFromVersionId
                 app = try await storeClient.publishVersion(
                     StoreVersionPublicationRequest(
                         storeId: linkedApp.storeId,
@@ -209,7 +214,7 @@ final class ToolLibraryStorePublisher {
                         iconThumbnailJPEG: iconThumbnailJPEG,
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         replaceScreenshots: publishScreenshotData != nil,
-                        remixedFromVersionId: tool.storeRemixedFromVersionId
+                        remixedFromVersionId: remixedFromVersionId
                     )
                 )
             } else {
@@ -235,6 +240,9 @@ final class ToolLibraryStorePublisher {
             await finishSuccessfulPublication(
                 app,
                 for: tool,
+                localRemixedFromVersionId: linkedApp == nil
+                    ? app.currentVersion.id
+                    : app.currentVersion.remixedFromVersionId,
                 modelContext: modelContext,
                 routeStore: routeStore
             )
@@ -306,7 +314,11 @@ final class ToolLibraryStorePublisher {
         )
     }
 
-    private func applyPublishedStoreLinkage(_ app: StoreAppDetail, to tool: Tool) {
+    private func applyPublishedStoreLinkage(
+        _ app: StoreAppDetail,
+        to tool: Tool,
+        localRemixedFromVersionId: String?
+    ) {
         tool.storeId = app.storeId
         tool.storeAppId = app.id
         tool.category = app.category
@@ -314,17 +326,22 @@ final class ToolLibraryStorePublisher {
         tool.storeVersionNumber = app.currentVersion.versionNumber
         tool.storeSourceSha256 = app.currentVersion.sourceSha256
         tool.storeImportedAt = Date()
-        tool.storeRemixedFromVersionId = app.currentVersion.remixedFromVersionId
+        tool.storeRemixedFromVersionId = localRemixedFromVersionId
         tool.updatedAt = Date()
     }
 
     private func finishSuccessfulPublication(
         _ app: StoreAppDetail,
         for tool: Tool,
+        localRemixedFromVersionId: String?,
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore
     ) async {
-        applyPublishedStoreLinkage(app, to: tool)
+        applyPublishedStoreLinkage(
+            app,
+            to: tool,
+            localRemixedFromVersionId: localRemixedFromVersionId
+        )
 
         let persistenceError: Error?
         do {
