@@ -75,7 +75,8 @@ struct StoreWindowView: View {
                             modelContext: modelContext,
                             routeStore: routeStore,
                             inferenceStore: inferenceStore,
-                            onOpenCreator: openCreator
+                            onOpenCreator: openCreator,
+                            onOpenRemix: openRemix
                         )
                     case .section(let section):
                         StoreSectionAppsView(
@@ -119,6 +120,10 @@ struct StoreWindowView: View {
             } else if selection == .published {
                 Task { await store.refreshPublished() }
             }
+        }
+        .onChange(of: path) { _, path in
+            guard case .app(let appRoute) = path.last else { return }
+            store.select(storeID: appRoute.storeID, appID: appRoute.appID)
         }
         .onChange(of: store.contentRevision) { _, _ in
             Task { await refreshStoreContent() }
@@ -198,6 +203,13 @@ struct StoreWindowView: View {
     private func openCreator(displayName: String, handle: String) {
         path.append(
             .section(StoreSectionRoute(creatorDisplayName: displayName, handle: handle))
+        )
+    }
+
+    private func openRemix(_ remix: StoreRemixMetadata) {
+        store.select(storeID: remix.storeId, appID: remix.appId)
+        path.append(
+            .app(StoreAppRoute(appID: remix.appId, storeID: remix.storeId))
         )
     }
 
@@ -299,6 +311,11 @@ private struct StoreAppRoute: Hashable {
     init(app: StoreAppSummary) {
         appID = app.id
         storeID = app.storeId
+    }
+
+    init(appID: String, storeID: String) {
+        self.appID = appID
+        self.storeID = storeID
     }
 }
 
@@ -904,6 +921,7 @@ private struct StoreAppDetailDestinationView: View {
     let routeStore: IronsmithRouteStore
     let inferenceStore: InferenceStore
     let onOpenCreator: (String, String) -> Void
+    let onOpenRemix: (StoreRemixMetadata) -> Void
 
     var body: some View {
         StoreAppDetailView(
@@ -914,7 +932,6 @@ private struct StoreAppDetailDestinationView: View {
             installDisposition: detail.map {
                 store.installDisposition(for: $0, tools: tools)
             } ?? .createCopy,
-            canRemix: detail.map { !store.isOwnPublishedApp($0) } ?? false,
             versionInstallDisposition: { app, version in
                 store.installDisposition(for: version, of: app, tools: tools)
             },
@@ -930,18 +947,7 @@ private struct StoreAppDetailDestinationView: View {
                     )
                 }
             },
-            onRemix: { app in
-                Task {
-                    await store.install(
-                        app,
-                        mode: .remix,
-                        tools: tools,
-                        modelContext: modelContext,
-                        routeStore: routeStore,
-                        inferenceStore: inferenceStore
-                    )
-                }
-            },
+            onOpenRemix: onOpenRemix,
             onOpenCreator: onOpenCreator,
             onInstallVersion: { app, version in
                 Task {

@@ -6,10 +6,9 @@ struct StoreAppDetailView: View {
     let isWorking: Bool
     let workingVersionID: String?
     let installDisposition: StoreAppInstallDisposition
-    let canRemix: Bool
     let versionInstallDisposition: (StoreAppDetail, StoreVersionMetadata) -> StoreAppInstallDisposition
     let onGet: (StoreAppDetail) -> Void
-    let onRemix: (StoreAppDetail) -> Void
+    let onOpenRemix: (StoreRemixMetadata) -> Void
     let onOpenCreator: (String, String) -> Void
     let onInstallVersion: (StoreAppDetail, StoreVersionMetadata) -> Void
 
@@ -24,12 +23,14 @@ struct StoreAppDetailView: View {
                             app: app,
                             isWorking: isWorking,
                             installDisposition: installDisposition,
-                            canRemix: canRemix,
-                            onGet: { onGet(app) },
-                            onRemix: { onRemix(app) }
+                            onGet: { onGet(app) }
                         )
 
-                        StoreDetailMetadataStrip(app: app, onOpenCreator: onOpenCreator)
+                        StoreDetailMetadataStrip(
+                            app: app,
+                            onOpenCreator: onOpenCreator,
+                            onOpenRemix: onOpenRemix
+                        )
 
                         if let screenshot = app.screenshots.first {
                             StoreDetailScreenshot(asset: screenshot)
@@ -73,9 +74,7 @@ private struct StoreDetailHeroView: View {
     let app: StoreAppDetail
     let isWorking: Bool
     let installDisposition: StoreAppInstallDisposition
-    let canRemix: Bool
     let onGet: () -> Void
-    let onRemix: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 18) {
@@ -93,13 +92,6 @@ private struct StoreDetailHeroView: View {
                         .buttonBorderShape(.capsule)
                         .controlSize(.small)
 
-                    if canRemix {
-                        Button("Remix", action: onRemix)
-                            .buttonStyle(.bordered)
-                            .buttonBorderShape(.capsule)
-                            .controlSize(.small)
-                    }
-
                     if isWorking {
                         ProgressView()
                             .controlSize(.small)
@@ -116,9 +108,13 @@ private struct StoreDetailHeroView: View {
 private struct StoreDetailMetadataStrip: View {
     let app: StoreAppDetail
     let onOpenCreator: (String, String) -> Void
+    let onOpenRemix: (StoreRemixMetadata) -> Void
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 140), spacing: 16, alignment: .top)]
+        if app.remix != nil {
+            return [GridItem(.adaptive(minimum: 128), spacing: 12, alignment: .top)]
+        }
+        return [GridItem(.adaptive(minimum: 140), spacing: 16, alignment: .top)]
     }
 
     var body: some View {
@@ -131,6 +127,13 @@ private struct StoreDetailMetadataStrip: View {
                 )
             } else {
                 StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
+            }
+            if let remix = app.remix {
+                StoreDetailLinkedMetadataItem(
+                    title: "Remixed From",
+                    value: remix.appName,
+                    action: { onOpenRemix(remix) }
+                )
             }
             StoreDetailMetadataItem(
                 title: "Version",
@@ -161,6 +164,38 @@ private struct StoreDetailCreatorMetadataItem: View {
             Button(action: action) {
                 Text("\(Text(displayName).bold()) · @\(handle)")
                     .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isHovering ? Color.primary.opacity(0.08) : Color.clear)
+                    }
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+        }
+    }
+}
+
+private struct StoreDetailLinkedMetadataItem: View {
+    let title: String
+    let value: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            Button(action: action) {
+                Text(value)
+                    .font(.callout.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .padding(.horizontal, 4)

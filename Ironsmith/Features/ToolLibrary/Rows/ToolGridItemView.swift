@@ -231,6 +231,7 @@ enum ToolGridIconAction: Equatable {
         canRevert: false,
         showsStoreActions: false,
         canUpdateStoreVersion: false,
+        hasStoreSourceChanges: true,
         activeCodingAgent: nil,
         canShowAgentOutput: false
     )

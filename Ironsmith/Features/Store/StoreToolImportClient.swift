@@ -11,7 +11,6 @@ struct StoreToolImportRequest: Sendable {
     let version: StoreVersionDownload
     let mode: StoreToolImportMode
     var displayName: String? = nil
-    var isOwnApp = false
     var initialGenerationState: ToolGenerationState = .ready
 }
 
@@ -92,7 +91,7 @@ extension StoreToolImportClient {
                 storeVersionNumber: request.version.versionNumber,
                 storeSourceSha256: request.version.sourceSha256,
                 storeImportedAt: now,
-                storeRemixedFromVersionId: request.isOwnApp ? nil : request.version.id,
+                storeRemixedFromVersionId: request.version.id,
                 createdAt: now,
                 updatedAt: now
             )

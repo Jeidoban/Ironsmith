@@ -14,6 +14,7 @@ final class ToolLibraryStorePublisher {
     var publishScreenshotName: String?
     var isShowingPublishSheet = false
     var isPublishing = false
+    var isUpdatingPublishedListing = false
     var errorMessage: String?
     var pendingSignInToolID: UUID?
     var pendingCreatorProfileToolID: UUID?
@@ -21,6 +22,7 @@ final class ToolLibraryStorePublisher {
     var creatorHandle = ""
     var isShowingCreatorProfileSheet = false
     var isSavingCreatorProfile = false
+    private(set) var storeSourceChangesByToolID: [UUID: Bool] = [:]
 
     @ObservationIgnored private let storeClient: IronsmithStoreClient
     @ObservationIgnored private let iconClient: ToolIconClient
@@ -50,6 +52,49 @@ final class ToolLibraryStorePublisher {
     func canUpdateStoreVersion(for tool: Tool) -> Bool {
         guard let storeAppId = tool.storeAppId else { return false }
         return publishedStoreAppsByID[storeAppId] != nil
+    }
+
+    func hasStoreSourceChanges(for tool: Tool) -> Bool {
+        storeSourceChangesByToolID[tool.id] ?? (tool.storeSourceSha256 == nil)
+    }
+
+    func refreshStoreSourceChanges(for tools: [Tool]) async {
+        let inputs = tools.map { tool in
+            StoreSourceChangeInput(
+                toolID: tool.id,
+                sourceURL: try? tool.packageLayout.packageFileURL(
+                    for: tool.contentViewSourcePath
+                ),
+                storeSourceSha256: tool.storeSourceSha256?.lowercased()
+            )
+        }
+        let changesByToolID = await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: inputs.map { input in
+                let hasChanges: Bool
+                if let storeSourceSha256 = input.storeSourceSha256,
+                    let sourceURL = input.sourceURL,
+                    let source = try? String(contentsOf: sourceURL, encoding: .utf8)
+                {
+                    hasChanges =
+                        IronsmithStoreClient.sha256Hex(for: source) != storeSourceSha256
+                } else {
+                    hasChanges = input.storeSourceSha256 == nil
+                }
+                return (input.toolID, hasChanges)
+            })
+        }.value
+        guard !Task.isCancelled else { return }
+        storeSourceChangesByToolID = changesByToolID
+    }
+
+    private func sourceHasStoreChanges(for tool: Tool) -> Bool {
+        guard let storeSourceSha256 = tool.storeSourceSha256?.lowercased() else {
+            return true
+        }
+        guard let source = try? sourceCode(for: tool) else {
+            return true
+        }
+        return IronsmithStoreClient.sha256Hex(for: source) != storeSourceSha256
     }
 
     func refreshPublishedStoreApps(
@@ -129,6 +174,10 @@ final class ToolLibraryStorePublisher {
             return
         }
         pendingCreatorProfileToolID = nil
+        guard sourceHasStoreChanges(for: tool) else {
+            present(IronsmithStoreClientError.unchangedStoreVersion)
+            return
+        }
         await refreshPublishedStoreApps(
             isSignedIn: true,
             tools: tools
@@ -158,6 +207,7 @@ final class ToolLibraryStorePublisher {
             publishCategory = tool.category
             currentPublishedSourceSha256 = nil
         }
+        isUpdatingPublishedListing = linkedApp != nil
         publishingToolID = tool.id
         publishScreenshotData = nil
         publishScreenshotName = nil
@@ -194,7 +244,12 @@ final class ToolLibraryStorePublisher {
                 contentsOf: tool.packageLayout.cachedAppIconThumbnailJPEGURL
             )
             let app: StoreAppDetail
-            if let linkedApp = linkedPublishedApp(for: tool) {
+            let linkedApp = linkedPublishedApp(for: tool)
+            if let linkedApp {
+                let remixedFromVersionId =
+                    tool.storeRemixedFromVersionId == tool.storeVersionId
+                    ? nil
+                    : tool.storeRemixedFromVersionId
                 app = try await storeClient.publishVersion(
                     StoreVersionPublicationRequest(
                         storeId: linkedApp.storeId,
@@ -209,7 +264,7 @@ final class ToolLibraryStorePublisher {
                         iconThumbnailJPEG: iconThumbnailJPEG,
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         replaceScreenshots: publishScreenshotData != nil,
-                        remixedFromVersionId: tool.storeRemixedFromVersionId
+                        remixedFromVersionId: remixedFromVersionId
                     )
                 )
             } else {
@@ -235,6 +290,9 @@ final class ToolLibraryStorePublisher {
             await finishSuccessfulPublication(
                 app,
                 for: tool,
+                localRemixedFromVersionId: linkedApp == nil
+                    ? app.currentVersion.id
+                    : app.currentVersion.remixedFromVersionId,
                 modelContext: modelContext,
                 routeStore: routeStore
             )
@@ -306,7 +364,11 @@ final class ToolLibraryStorePublisher {
         )
     }
 
-    private func applyPublishedStoreLinkage(_ app: StoreAppDetail, to tool: Tool) {
+    private func applyPublishedStoreLinkage(
+        _ app: StoreAppDetail,
+        to tool: Tool,
+        localRemixedFromVersionId: String?
+    ) {
         tool.storeId = app.storeId
         tool.storeAppId = app.id
         tool.category = app.category
@@ -314,17 +376,22 @@ final class ToolLibraryStorePublisher {
         tool.storeVersionNumber = app.currentVersion.versionNumber
         tool.storeSourceSha256 = app.currentVersion.sourceSha256
         tool.storeImportedAt = Date()
-        tool.storeRemixedFromVersionId = app.currentVersion.remixedFromVersionId
+        tool.storeRemixedFromVersionId = localRemixedFromVersionId
         tool.updatedAt = Date()
     }
 
     private func finishSuccessfulPublication(
         _ app: StoreAppDetail,
         for tool: Tool,
+        localRemixedFromVersionId: String?,
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore
     ) async {
-        applyPublishedStoreLinkage(app, to: tool)
+        applyPublishedStoreLinkage(
+            app,
+            to: tool,
+            localRemixedFromVersionId: localRemixedFromVersionId
+        )
 
         let persistenceError: Error?
         do {
@@ -359,6 +426,12 @@ final class ToolLibraryStorePublisher {
             IronsmithErrorPresentation.message(for: error)
             ?? error.localizedDescription
     }
+}
+
+private struct StoreSourceChangeInput: Sendable {
+    let toolID: UUID
+    let sourceURL: URL?
+    let storeSourceSha256: String?
 }
 
 private enum ToolLibraryStorePublishingError: LocalizedError {

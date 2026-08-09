@@ -59,6 +59,7 @@ extension ToolLibraryTests {
 
         #expect(publisher.publishShortDescription.isEmpty)
         #expect(publisher.publishDescription.isEmpty)
+        #expect(!publisher.isUpdatingPublishedListing)
         #expect(publisher.isShowingPublishSheet)
     }
 
@@ -104,6 +105,7 @@ extension ToolLibraryTests {
 
         #expect(publisher.publishShortDescription == detail.shortDescription)
         #expect(publisher.publishDescription == detail.description)
+        #expect(publisher.isUpdatingPublishedListing)
         #expect(publisher.isShowingPublishSheet)
     }
 
@@ -147,6 +149,53 @@ extension ToolLibraryTests {
 
         #expect(publisher.errorMessage?.contains("currently published version") == true)
         #expect(tool.storeVersionNumber == 1)
+        #expect(!publisher.isShowingPublishSheet)
+    }
+
+    @MainActor
+    @Test
+    func storePublisherRejectsUnchangedDownloadedAppBeforeOpeningSheet() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, _, _, _, _, _, _ in
+            StoreAppPage(apps: [], hasMore: false)
+        }
+        client.fetchApp = { _, _ in
+            Issue.record("An unowned unchanged download must not fetch listing details.")
+            throw IronsmithStoreClientError.notConfigured
+        }
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(
+                accountClient: Self.ironsmithAccountClient(balanceCredits: 100)
+            )
+        )
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: client,
+            iconClient: .live()
+        )
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            executableName: "ClipboardCleaner",
+            packageRootPath: root.path,
+            storeId: "00000000-0000-4000-8000-000000000011",
+            storeAppId: "00000000-0000-4000-8000-000000000101"
+        )
+        try Self.writeSource(Self.publisherSource, to: tool)
+        tool.storeSourceSha256 = IronsmithStoreClient.sha256Hex(for: Self.publisherSource)
+
+        await publisher.refreshStoreSourceChanges(for: [tool])
+        #expect(!publisher.hasStoreSourceChanges(for: tool))
+
+        await publisher.beginPublishing(
+            tool,
+            inferenceStore: inferenceStore,
+            tools: [tool]
+        )
+
+        #expect(publisher.errorMessage?.contains("currently published version") == true)
         #expect(!publisher.isShowingPublishSheet)
     }
 
@@ -197,6 +246,7 @@ extension ToolLibraryTests {
             return publishedDetail
         }
         let buildCapture = PublisherBuildCapture()
+        let parentVersionId = "00000000-0000-4000-8000-000000000299"
         let publisher = ToolLibraryStorePublisher(
             storeClient: storeClient,
             iconClient: .noOp,
@@ -212,6 +262,7 @@ extension ToolLibraryTests {
             executableName: "ClipboardCleaner",
             packageRootPath: root.appendingPathComponent("ClipboardCleaner").path
         )
+        tool.storeRemixedFromVersionId = parentVersionId
         try Self.writeSource(Self.publisherSource, to: tool)
         try FileManager.default.createDirectory(
             at: tool.packageLayout.packageMetadataDirectoryURL,
@@ -243,11 +294,15 @@ extension ToolLibraryTests {
         let updatedNames = await profileCapture.updatedNames
         let publicationCount = await publicationCapture.count
         let publishedName = await publicationCapture.lastName
+        let remixedFromVersionId = await publicationCapture.lastRemixedFromVersionId
         #expect(updatedNames == ["Jade Westover"])
         #expect(publicationCount == 1)
         #expect(publishedName == tool.name)
+        #expect(remixedFromVersionId == parentVersionId)
+        #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.id)
         #expect(tool.storeVersionNumber == 1)
         #expect(await buildCapture.versionNumbers == [1])
+        #expect(!publisher.isUpdatingPublishedListing)
         #expect(publisher.errorMessage == nil)
     }
 
@@ -349,8 +404,12 @@ extension ToolLibraryTests {
             category: .finance,
             source: changedSource
         )
+        let versionCapture = PublisherVersionCapture()
         var storeClient = IronsmithStoreClient.unconfigured
-        storeClient.publishVersion = { _ in publishedDetail }
+        storeClient.publishVersion = { request in
+            await versionCapture.record(request)
+            return publishedDetail
+        }
         let buildCapture = PublisherBuildCapture()
         let publisher = ToolLibraryStorePublisher(
             storeClient: storeClient,
@@ -377,6 +436,7 @@ extension ToolLibraryTests {
             storeVersionId: previousDetail.currentVersion.id,
             storeVersionNumber: 1
         )
+        tool.storeRemixedFromVersionId = previousDetail.currentVersion.id
         try Self.writeSource(changedSource, to: tool)
         try FileManager.default.createDirectory(
             at: tool.packageLayout.packageMetadataDirectoryURL,
@@ -408,6 +468,8 @@ extension ToolLibraryTests {
         #expect(tool.storeVersionNumber == 2)
         #expect(await buildCapture.categories == [.finance])
         #expect(await buildCapture.versionNumbers == [2])
+        #expect(await versionCapture.lastRemixedFromVersionId == nil)
+        #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.remixedFromVersionId)
         #expect(publisher.errorMessage == nil)
         #expect(!publisher.isShowingPublishSheet)
     }
@@ -687,10 +749,20 @@ private actor PublisherProfileCapture {
 private actor PublisherPublicationCapture {
     private(set) var count = 0
     private(set) var lastName: String?
+    private(set) var lastRemixedFromVersionId: String?
 
     func record(_ request: StorePublicationRequest) {
         count += 1
         lastName = request.name
+        lastRemixedFromVersionId = request.remixedFromVersionId
+    }
+}
+
+private actor PublisherVersionCapture {
+    private(set) var lastRemixedFromVersionId: String?
+
+    func record(_ request: StoreVersionPublicationRequest) {
+        lastRemixedFromVersionId = request.remixedFromVersionId
     }
 }
 
