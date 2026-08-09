@@ -11,6 +11,7 @@ struct ToolItemPresentationState {
     let canRevert: Bool
     let showsStoreActions: Bool
     let canUpdateStoreVersion: Bool
+    let hasStoreSourceChanges: Bool
     let activeCodingAgent: ToolCodingAgent?
     let canShowAgentOutput: Bool
 
@@ -93,7 +94,9 @@ struct ToolItemActionsMenu: View {
             .disabled(!tool.isGenerationReady || state.isBusy)
         if state.showsStoreActions {
             Button(storePublishActionTitle, action: actions.onPublishToStore)
-                .disabled(!tool.isGenerationReady || state.isBusy)
+                .disabled(
+                    !tool.isGenerationReady || state.isBusy || !state.hasStoreSourceChanges
+                )
         }
         Button("Go Back to Previous Version", action: actions.onRevert)
             .disabled(!tool.isGenerationReady || !state.canRevert || state.isBusy)

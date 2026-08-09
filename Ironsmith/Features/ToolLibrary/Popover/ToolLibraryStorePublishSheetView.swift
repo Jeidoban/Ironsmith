@@ -35,12 +35,27 @@ struct ToolLibraryStorePublishSheetView: View {
                     }
             }
             field("Description") {
-                TextField(
-                    "Describe what your app does and how people can use it",
-                    text: $publishDescription,
-                    axis: .vertical
-                )
-                    .lineLimit(3...5)
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $publishDescription)
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(4)
+
+                    if publishDescription.isEmpty {
+                        Text("Describe what your app does and how people can use it")
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .frame(minHeight: 100, maxHeight: 160)
+                .background(.background, in: RoundedRectangle(cornerRadius: 5))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(.quaternary)
+                }
             }
             if !isUpdatingPublishedListing {
                 field("Category") {

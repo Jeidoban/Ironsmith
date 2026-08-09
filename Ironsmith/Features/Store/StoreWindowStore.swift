@@ -385,6 +385,7 @@ final class StoreWindowStore {
         }
         selectedAppID = appID
         selectedAppDetail = nil
+        isLoadingDetail = true
         Task {
             await loadDetail(storeID: storeID, appID: appID)
         }
@@ -813,7 +814,6 @@ final class StoreWindowStore {
     }
 
     private func loadDetail(storeID: String, appID: String) async {
-        isLoadingDetail = true
         defer {
             if selectedAppID == appID {
                 isLoadingDetail = false

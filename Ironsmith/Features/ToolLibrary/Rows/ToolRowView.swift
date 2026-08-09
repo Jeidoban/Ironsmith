@@ -186,6 +186,7 @@ struct ToolRowView: View {
             canRevert: true,
             showsStoreActions: true,
             canUpdateStoreVersion: false,
+            hasStoreSourceChanges: true,
             activeCodingAgent: nil,
             canShowAgentOutput: false
         ),

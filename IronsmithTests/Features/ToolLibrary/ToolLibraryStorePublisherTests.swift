@@ -59,6 +59,7 @@ extension ToolLibraryTests {
 
         #expect(publisher.publishShortDescription.isEmpty)
         #expect(publisher.publishDescription.isEmpty)
+        #expect(!publisher.isUpdatingPublishedListing)
         #expect(publisher.isShowingPublishSheet)
     }
 
@@ -104,6 +105,7 @@ extension ToolLibraryTests {
 
         #expect(publisher.publishShortDescription == detail.shortDescription)
         #expect(publisher.publishDescription == detail.description)
+        #expect(publisher.isUpdatingPublishedListing)
         #expect(publisher.isShowingPublishSheet)
     }
 
@@ -147,6 +149,53 @@ extension ToolLibraryTests {
 
         #expect(publisher.errorMessage?.contains("currently published version") == true)
         #expect(tool.storeVersionNumber == 1)
+        #expect(!publisher.isShowingPublishSheet)
+    }
+
+    @MainActor
+    @Test
+    func storePublisherRejectsUnchangedDownloadedAppBeforeOpeningSheet() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, _, _, _, _, _, _ in
+            StoreAppPage(apps: [], hasMore: false)
+        }
+        client.fetchApp = { _, _ in
+            Issue.record("An unowned unchanged download must not fetch listing details.")
+            throw IronsmithStoreClientError.notConfigured
+        }
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(
+                accountClient: Self.ironsmithAccountClient(balanceCredits: 100)
+            )
+        )
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: client,
+            iconClient: .live()
+        )
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            executableName: "ClipboardCleaner",
+            packageRootPath: root.path,
+            storeId: "00000000-0000-4000-8000-000000000011",
+            storeAppId: "00000000-0000-4000-8000-000000000101"
+        )
+        try Self.writeSource(Self.publisherSource, to: tool)
+        tool.storeSourceSha256 = IronsmithStoreClient.sha256Hex(for: Self.publisherSource)
+
+        await publisher.refreshStoreSourceChanges(for: [tool])
+        #expect(!publisher.hasStoreSourceChanges(for: tool))
+
+        await publisher.beginPublishing(
+            tool,
+            inferenceStore: inferenceStore,
+            tools: [tool]
+        )
+
+        #expect(publisher.errorMessage?.contains("currently published version") == true)
         #expect(!publisher.isShowingPublishSheet)
     }
 
@@ -253,6 +302,7 @@ extension ToolLibraryTests {
         #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.id)
         #expect(tool.storeVersionNumber == 1)
         #expect(await buildCapture.versionNumbers == [1])
+        #expect(!publisher.isUpdatingPublishedListing)
         #expect(publisher.errorMessage == nil)
     }
 

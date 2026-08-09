@@ -611,6 +611,44 @@ struct StoreImportTests {
 
     @MainActor
     @Test
+    func storeDetailSelectionCanReturnToPreviouslyVisitedApp() async {
+        let first = Self.appListing(
+            sourceCode: Self.sourceCode("first"),
+            appId: "00000000-0000-4000-8000-000000000101",
+            name: "First App"
+        )
+        let remix = Self.appListing(
+            sourceCode: Self.sourceCode("remix"),
+            appId: "00000000-0000-4000-8000-000000000102",
+            name: "Remix App"
+        )
+        var client = IronsmithStoreClient.unconfigured
+        client.fetchApp = { _, appID in
+            appID == first.id ? first : remix
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        store.select(storeID: first.storeId, appID: first.id)
+        #expect(store.isLoadingDetail)
+        await Self.waitForStoreDetail(first.id, in: store)
+        store.select(storeID: remix.storeId, appID: remix.id)
+        await Self.waitForStoreDetail(remix.id, in: store)
+        store.select(storeID: first.storeId, appID: first.id)
+        #expect(store.isLoadingDetail)
+        await Self.waitForStoreDetail(first.id, in: store)
+
+        #expect(store.selectedAppDetail?.id == first.id)
+        #expect(!store.isLoadingDetail)
+    }
+
+    @MainActor
+    @Test
     func searchPaginationAppendsUniqueResultsAndAdvancesOffset() async {
         let first = Self.appSummary(id: "app-one")
         let second = Self.appSummary(id: "app-two")
@@ -1157,10 +1195,11 @@ struct StoreImportTests {
         versions suppliedVersions: [StoreVersionMetadata]? = nil,
         icon: StoreAsset? = nil,
         iconMaster: StoreAsset? = nil,
-        authorHandle: String? = nil
+        authorHandle: String? = nil,
+        appId: String = "00000000-0000-4000-8000-000000000101",
+        name: String = "Clipboard Cleaner"
     ) -> StoreAppDetail {
         let storeId = "00000000-0000-4000-8000-000000000011"
-        let appId = "00000000-0000-4000-8000-000000000101"
         let version = StoreVersionMetadata(
             id: "00000000-0000-4000-8000-000000000201",
             appId: appId,
@@ -1181,7 +1220,7 @@ struct StoreImportTests {
             storeVisibility: "public",
             authorDisplayName: "Jade",
             authorHandle: authorHandle,
-            name: "Clipboard Cleaner",
+            name: name,
             shortDescription: "Clipboard cleanup",
             description: "Cleans clipboard text.",
             category: .utilities,
@@ -1196,6 +1235,19 @@ struct StoreImportTests {
             versions: versions,
             remix: nil
         )
+    }
+
+    @MainActor
+    private static func waitForStoreDetail(
+        _ appID: String,
+        in store: StoreWindowStore
+    ) async {
+        for _ in 0..<100 {
+            if store.selectedAppDetail?.id == appID, !store.isLoadingDetail {
+                return
+            }
+            await Task.yield()
+        }
     }
 
     private static func versionMetadata(

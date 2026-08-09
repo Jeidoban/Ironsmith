@@ -121,6 +121,10 @@ struct StoreWindowView: View {
                 Task { await store.refreshPublished() }
             }
         }
+        .onChange(of: path) { _, path in
+            guard case .app(let appRoute) = path.last else { return }
+            store.select(storeID: appRoute.storeID, appID: appRoute.appID)
+        }
         .onChange(of: store.contentRevision) { _, _ in
             Task { await refreshStoreContent() }
         }

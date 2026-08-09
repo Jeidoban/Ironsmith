@@ -86,6 +86,10 @@ struct ToolLibraryPopoverView: View {
         .task(id: restoreAvailabilityRefreshID) {
             await toolLibraryStore.refreshRestoreAvailability(for: tools)
         }
+        .task(id: storeSourceChangesRefreshID) {
+            guard isStoreFeatureEnabled else { return }
+            await storePublisher.refreshStoreSourceChanges(for: tools)
+        }
         .task(id: publishedStoreLinkRefreshID) {
             guard isStoreFeatureEnabled else {
                 await storePublisher.refreshPublishedStoreApps(
@@ -438,6 +442,7 @@ struct ToolLibraryPopoverView: View {
             canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
             showsStoreActions: isStoreFeatureEnabled,
             canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
+            hasStoreSourceChanges: storePublisher.hasStoreSourceChanges(for: tool),
             activeCodingAgent: toolLibraryStore.activeCodingAgent(for: tool),
             canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool)
         )
@@ -582,7 +587,7 @@ struct ToolLibraryPopoverView: View {
         if let tool = tools.first(where: { $0.id == storePublisher.publishingToolID }) {
             ToolLibraryStorePublishSheetView(
                 tool: tool,
-                isUpdatingPublishedListing: canUpdateStoreVersion(for: tool),
+                isUpdatingPublishedListing: storePublisher.isUpdatingPublishedListing,
                 publishShortDescription: $storePublisher.publishShortDescription,
                 publishDescription: $storePublisher.publishDescription,
                 publishCategory: $storePublisher.publishCategory,
@@ -642,6 +647,13 @@ struct ToolLibraryPopoverView: View {
     private var runningApplicationsRefreshID: String {
         let toolIDs = tools.map(\.id.uuidString).sorted().joined(separator: "|")
         return "\(menuBarPopoverPresentationStore.showCount)|\(toolIDs)"
+    }
+
+    private var storeSourceChangesRefreshID: [String] {
+        [isStoreFeatureEnabled ? "store-on" : "store-off"]
+            + tools.map {
+                "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)-\($0.storeSourceSha256 ?? "")"
+            }
     }
 
     private var publishedStoreLinkRefreshID: String {
