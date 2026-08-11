@@ -92,9 +92,11 @@ extension ToolLibraryTests {
         let idleState = Self.toolItemState()
         let runningState = Self.toolItemState(isRunning: true)
         let launchingState = Self.toolItemState(isLaunching: true)
+        let preparingGenerationState = Self.toolItemState(isPreparingGeneration: true)
 
-        #expect(ToolGridItemInteraction.canSelect(tool: readyTool))
-        #expect(!ToolGridItemInteraction.canSelect(tool: stoppedTool))
+        #expect(ToolGridItemInteraction.canSelect(tool: readyTool, state: idleState))
+        #expect(!ToolGridItemInteraction.canSelect(tool: stoppedTool, state: idleState))
+        #expect(!ToolGridItemInteraction.canSelect(tool: readyTool, state: preparingGenerationState))
         #expect(ToolGridItemInteraction.iconAction(tool: readyTool, state: idleState) == .run)
         #expect(ToolGridItemInteraction.iconAction(tool: readyTool, state: runningState) == .run)
         #expect(ToolGridItemInteraction.iconAction(tool: readyTool, state: launchingState) == nil)
@@ -113,11 +115,20 @@ extension ToolLibraryTests {
             ToolGridItemInteraction.iconAction(tool: generatingTool, state: idleState)
                 == .pauseGeneration
         )
+        #expect(
+            ToolGridItemInteraction.iconAction(tool: readyTool, state: preparingGenerationState)
+                == .pauseGeneration
+        )
+        #expect(
+            ToolItemLaunchAction.resolve(tool: readyTool, state: preparingGenerationState)
+                == .pauseGeneration
+        )
     }
 
     private static func toolItemState(
         isRunning: Bool = false,
-        isLaunching: Bool = false
+        isLaunching: Bool = false,
+        isPreparingGeneration: Bool = false
     ) -> ToolItemPresentationState {
         ToolItemPresentationState(
             isSelected: false,
@@ -127,6 +138,7 @@ extension ToolLibraryTests {
             isRebuilding: false,
             isRestoring: false,
             isEditingDetails: false,
+            isPreparingGeneration: isPreparingGeneration,
             canRevert: false,
             showsStoreActions: false,
             canUpdateStoreVersion: false,

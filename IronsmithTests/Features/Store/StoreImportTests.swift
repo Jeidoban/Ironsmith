@@ -37,7 +37,6 @@ struct StoreImportTests {
 
         await store.install(
             app,
-            mode: .get,
             tools: [],
             modelContext: context,
             routeStore: IronsmithRouteStore(openSettingsWindow: {}),
@@ -48,7 +47,7 @@ struct StoreImportTests {
         #expect(store.workingAppID == nil)
         #expect(store.errorMessage == nil)
         #expect(try context.fetch(FetchDescriptor<Tool>()).isEmpty)
-        guard case .appSummary(let pendingApp, mode: .get) = store.pendingDownloadRequest else {
+        guard case .appSummary(let pendingApp) = store.pendingDownloadRequest else {
             Issue.record("Expected the Get request to remain pending for sign-in.")
             return
         }
@@ -100,14 +99,14 @@ struct StoreImportTests {
 
     @MainActor
     @Test
-    func unsignedRemixRequiresAnAccountAndPreservesThePendingAction() async throws {
+    func unsignedDownloadRequiresAnAccountAndPreservesThePendingAction() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
         let app = Self.appListing(sourceCode: Self.sourceCode("remix"))
         let store = StoreWindowStore(
             client: .unconfigured,
             importClient: StoreToolImportClient(importTool: { _, _ in
-                Issue.record("An unsigned remix must not import an app.")
+                Issue.record("An unsigned download must not import an app.")
                 throw IronsmithStoreClientError.notConfigured
             }),
             buildClient: ToolBuildClient(buildTool: { _ in })
@@ -115,7 +114,6 @@ struct StoreImportTests {
 
         await store.install(
             app,
-            mode: .remix,
             tools: [],
             modelContext: context,
             routeStore: IronsmithRouteStore(openSettingsWindow: {}),
@@ -123,8 +121,8 @@ struct StoreImportTests {
         )
 
         #expect(store.isDownloadSignInRequired)
-        guard case .appDetail(let pendingApp, mode: .remix) = store.pendingDownloadRequest else {
-            Issue.record("Expected the Remix request to remain pending for sign-in.")
+        guard case .appDetail(let pendingApp) = store.pendingDownloadRequest else {
+            Issue.record("Expected the download request to remain pending for sign-in.")
             return
         }
         #expect(pendingApp.id == app.id)
@@ -146,7 +144,7 @@ struct StoreImportTests {
         )
         let importer = StoreToolImportClient.live(toolsDirectoryURL: root)
         let installed = try await importer.importTool(
-            StoreToolImportRequest(app: app, version: version, mode: .get),
+            StoreToolImportRequest(app: app, version: version),
             context
         ).tool
         let store = StoreWindowStore(
@@ -157,7 +155,6 @@ struct StoreImportTests {
 
         await store.install(
             app,
-            mode: .get,
             tools: [installed],
             modelContext: context,
             routeStore: IronsmithRouteStore(openSettingsWindow: {}),
@@ -240,7 +237,7 @@ struct StoreImportTests {
         )
 
         let result = try await StoreToolImportClient.live(toolsDirectoryURL: root)
-            .importTool(StoreToolImportRequest(app: app, version: version, mode: .get), context)
+            .importTool(StoreToolImportRequest(app: app, version: version), context)
 
         let tool = result.tool
         let sourceOnDisk = try String(
@@ -248,7 +245,6 @@ struct StoreImportTests {
             encoding: .utf8)
         let tools = try context.fetch(FetchDescriptor<Tool>())
 
-        #expect(result.mode == .get)
         #expect(tools.map(\.id) == [tool.id])
         #expect(sourceOnDisk == source)
         #expect(tool.generationState == .ready)
@@ -317,7 +313,7 @@ struct StoreImportTests {
         )
 
         let result = try await client.importTool(
-            StoreToolImportRequest(app: app, version: version, mode: .get),
+            StoreToolImportRequest(app: app, version: version),
             context
         )
         let layout = result.tool.packageLayout
@@ -342,7 +338,7 @@ struct StoreImportTests {
 
     @MainActor
     @Test
-    func remixImportTracksParentVersionWithoutLinkingOriginalAppForUpdates() async throws {
+    func downloadImportTracksParentVersionForFutureRemixAttribution() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
@@ -356,9 +352,9 @@ struct StoreImportTests {
         )
 
         let result = try await StoreToolImportClient.live(toolsDirectoryURL: root)
-            .importTool(StoreToolImportRequest(app: app, version: version, mode: .remix), context)
+            .importTool(StoreToolImportRequest(app: app, version: version), context)
 
-        #expect(result.tool.name == "\(app.name) Remix")
+        #expect(result.tool.name == app.name)
         #expect(result.tool.storeId == app.storeId)
         #expect(result.tool.storeAppId == app.id)
         #expect(result.tool.storeVersionId == version.id)
@@ -388,7 +384,6 @@ struct StoreImportTests {
                 StoreToolImportRequest(
                     app: app,
                     version: version,
-                    mode: .get
                 ),
                 context
             )
@@ -418,9 +413,9 @@ struct StoreImportTests {
         let client = StoreToolImportClient.live(toolsDirectoryURL: root)
 
         let first = try await client.importTool(
-            StoreToolImportRequest(app: app, version: version, mode: .get), context)
+            StoreToolImportRequest(app: app, version: version), context)
         let second = try await client.importTool(
-            StoreToolImportRequest(app: app, version: version, mode: .get), context)
+            StoreToolImportRequest(app: app, version: version), context)
         let tools = try context.fetch(FetchDescriptor<Tool>())
 
         #expect(tools.count == 2)
@@ -456,7 +451,7 @@ struct StoreImportTests {
         )
 
         let imported = try await StoreToolImportClient.live(toolsDirectoryURL: root)
-            .importTool(StoreToolImportRequest(app: app, version: oldVersion, mode: .get), context)
+            .importTool(StoreToolImportRequest(app: app, version: oldVersion), context)
 
         guard
             case .updateExisting(let updatableTool) = store.installDisposition(
@@ -531,7 +526,6 @@ struct StoreImportTests {
                     sourceCode: oldSource,
                     sourceSha256: oldMetadata.sourceSha256
                 ),
-                mode: .get
             ),
             context
         )
@@ -557,7 +551,6 @@ struct StoreImportTests {
                     sourceCode: currentSource,
                     sourceSha256: currentMetadata.sourceSha256
                 ),
-                mode: .get
             ),
             context
         )
@@ -920,7 +913,7 @@ struct StoreImportTests {
         )
         let importer = StoreToolImportClient.live(toolsDirectoryURL: root)
         let existing = try await importer.importTool(
-            StoreToolImportRequest(app: app, version: currentDownload, mode: .get),
+            StoreToolImportRequest(app: app, version: currentDownload),
             context
         ).tool
         var client = IronsmithStoreClient.unconfigured

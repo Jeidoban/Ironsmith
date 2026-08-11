@@ -1,22 +1,15 @@
 import Foundation
 import SwiftData
 
-enum StoreToolImportMode: Equatable, Sendable {
-    case get
-    case remix
-}
-
 struct StoreToolImportRequest: Sendable {
     let app: StoreAppDetail
     let version: StoreVersionDownload
-    let mode: StoreToolImportMode
     var displayName: String? = nil
     var initialGenerationState: ToolGenerationState = .ready
 }
 
 struct StoreToolImportResult {
     let tool: Tool
-    let mode: StoreToolImportMode
 }
 
 struct StoreToolImportClient {
@@ -42,11 +35,7 @@ extension StoreToolImportClient {
         StoreToolImportClient { request, modelContext in
             try IronsmithStoreClient.verifySourceHash(request.version)
 
-            let displayName =
-                request.displayName
-                ?? (request.mode == .remix
-                    ? "\(request.app.name) Remix"
-                    : request.app.name)
+            let displayName = request.displayName ?? request.app.name
             let packageRootURL = try packageMaterializer.makeUniquePackageRoot(
                 displayName: displayName,
                 toolsDirectoryURL: toolsDirectoryURL
@@ -104,7 +93,7 @@ extension StoreToolImportClient {
                 throw error
             }
 
-            return StoreToolImportResult(tool: tool, mode: request.mode)
+            return StoreToolImportResult(tool: tool)
         }
     }
 
@@ -150,7 +139,7 @@ extension StoreToolImportClient {
         }
     }
 
-    private static func downloadImage(from url: URL) async throws -> Data {
+    static func downloadImage(from url: URL) async throws -> Data {
         let (data, response) = try await URLSession.shared.data(from: url)
         guard let httpResponse = response as? HTTPURLResponse,
             (200...299).contains(httpResponse.statusCode),

@@ -8,6 +8,70 @@ import Testing
 extension ToolLibraryTests {
     @MainActor
     @Test
+    func downloadedAppFirstEditUsesExistingStoreAttributionAndSourceHash() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"Original\") } }\n"
+        let tool = Tool(
+            name: "Tiny Notes",
+            executableName: "TinyNotes",
+            packageRootPath: root.path,
+            storeAppId: "00000000-0000-4000-8000-000000000101",
+            storeSourceSha256: IronsmithStoreClient.sha256Hex(for: source),
+            storeRemixedFromVersionId: "00000000-0000-4000-8000-000000000201"
+        )
+        let sourceURL = try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath)
+        try FileManager.default.createDirectory(
+            at: sourceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try source.write(to: sourceURL, atomically: true, encoding: .utf8)
+        let store = ToolLibraryStore()
+
+        #expect(store.isFirstEditOfDownloadedApp(tool))
+        #expect(
+            store.remixIdentitySubmissionAction(
+                for: tool,
+                generatesIdentity: true,
+                hasPresentedNotice: false
+            ) == .presentNotice
+        )
+        #expect(
+            store.remixIdentitySubmissionAction(
+                for: tool,
+                generatesIdentity: true,
+                hasPresentedNotice: true
+            ) == .generateIdentity
+        )
+        #expect(
+            store.remixIdentitySubmissionAction(
+                for: tool,
+                generatesIdentity: false,
+                hasPresentedNotice: false
+            ) == .submit
+        )
+        try (source + "// changed\n").write(
+            to: sourceURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        #expect(!store.isFirstEditOfDownloadedApp(tool))
+        #expect(
+            store.remixIdentitySubmissionAction(
+                for: tool,
+                generatesIdentity: true,
+                hasPresentedNotice: false
+            ) == .submit
+        )
+
+        try source.write(to: sourceURL, atomically: true, encoding: .utf8)
+        tool.generationState = .stopped
+        tool.generationMode = .edit
+        #expect(!store.isFirstEditOfDownloadedApp(tool))
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStoreSuppressesGenerationCancellationErrors() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)

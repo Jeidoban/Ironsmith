@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -8,9 +9,13 @@ struct ToolLibraryStorePublishSheetView: View {
     @Binding var publishDescription: String
     @Binding var publishCategory: StoreAppCategory
     let publishScreenshotName: String?
+    let publishIconPreviewData: Data?
+    let publishNameMatchesOriginal: Bool
+    let isUsingOriginalRemixIcon: Bool
     let isPublishing: Bool
     let onChooseScreenshot: (URL) -> Void
     let onCancel: () -> Void
+    let onEditDetails: () -> Void
     let onPublish: () -> Void
     @State private var isChoosingScreenshot = false
 
@@ -22,6 +27,8 @@ struct ToolLibraryStorePublishSheetView: View {
                     : "Publish \(tool.name) to Ironsmith Store"
             )
                 .font(.headline)
+
+            appIdentitySection
 
             field("Short Description") {
                 TextField(
@@ -92,7 +99,7 @@ struct ToolLibraryStorePublishSheetView: View {
             }
         }
         .padding(18)
-        .frame(width: 390)
+        .frame(width: 460)
         .fileImporter(
             isPresented: $isChoosingScreenshot,
             allowedContentTypes: [.image],
@@ -101,6 +108,60 @@ struct ToolLibraryStorePublishSheetView: View {
             if case .success(let urls) = result, let url = urls.first {
                 onChooseScreenshot(url)
             }
+        }
+    }
+
+    private var appIdentitySection: some View {
+        field("App Identity") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    identityIcon(localData: publishIconPreviewData)
+                    Text(tool.name)
+                        .font(.body.weight(.medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Edit Details", action: onEditDetails)
+                        .disabled(isPublishing)
+                }
+
+                if isUsingOriginalRemixIcon {
+                    Label(
+                        "This app still uses the original icon. Consider using Edit Details to choose a new one.",
+                        systemImage: "info.circle"
+                    )
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if publishNameMatchesOriginal {
+                    Label(
+                        "Current app name is the same as the original. Change the app name in Edit Details before publishing.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .foregroundStyle(.red)
+                    .font(.callout)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(10)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    @ViewBuilder
+    private func identityIcon(localData: Data?) -> some View {
+        if let localData, let image = NSImage(data: localData) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 48, height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        } else {
+            StoreIconView(url: nil, size: 48)
         }
     }
 
@@ -118,6 +179,7 @@ struct ToolLibraryStorePublishSheetView: View {
     private var canPublish: Bool {
         listingFieldsAreValid
             && !tool.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !publishNameMatchesOriginal
     }
 
     private var listingFieldsAreValid: Bool {

@@ -94,7 +94,7 @@ struct ToolGridItemView: View {
     }
 
     private var busyAccessibilityLabel: String? {
-        if tool.generationState == .generating {
+        if tool.generationState == .generating || state.isPreparingGeneration {
             return "Generating \(tool.name)"
         }
         if state.isLaunching {
@@ -116,7 +116,7 @@ struct ToolGridItemView: View {
     }
 
     private var accessibilityHint: String {
-        if tool.isGenerationReady {
+        if tool.isGenerationReady, !state.isPreparingGeneration {
             return "Selects the app for editing. Hover over its icon to run it."
         }
         if tool.generationState == .stopped || tool.generationState == .failed {
@@ -136,7 +136,7 @@ struct ToolGridItemView: View {
     }
 
     private func selectIfAvailable() {
-        guard ToolGridItemInteraction.canSelect(tool: tool) else { return }
+        guard ToolGridItemInteraction.canSelect(tool: tool, state: state) else { return }
         actions.onSelect()
     }
 
@@ -154,15 +154,15 @@ struct ToolGridItemView: View {
 
 @MainActor
 enum ToolGridItemInteraction {
-    static func canSelect(tool: Tool) -> Bool {
-        tool.isGenerationReady
+    static func canSelect(tool: Tool, state: ToolItemPresentationState) -> Bool {
+        tool.isGenerationReady && !state.isPreparingGeneration
     }
 
     static func iconAction(
         tool: Tool,
         state: ToolItemPresentationState
     ) -> ToolGridIconAction? {
-        if tool.generationState == .generating {
+        if tool.generationState == .generating || state.isPreparingGeneration {
             return .pauseGeneration
         }
         guard !state.isBusy else { return nil }
@@ -228,6 +228,7 @@ enum ToolGridIconAction: Equatable {
         isRebuilding: false,
         isRestoring: false,
         isEditingDetails: false,
+        isPreparingGeneration: false,
         canRevert: false,
         showsStoreActions: false,
         canUpdateStoreVersion: false,
