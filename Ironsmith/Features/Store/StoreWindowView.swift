@@ -213,11 +213,10 @@ struct StoreWindowView: View {
         )
     }
 
-    private func install(_ app: StoreAppSummary, mode: StoreToolImportMode = .get) {
+    private func install(_ app: StoreAppSummary) {
         Task {
             await store.install(
                 app,
-                mode: mode,
                 tools: tools,
                 modelContext: modelContext,
                 routeStore: routeStore,
@@ -393,7 +392,7 @@ private struct StoreDiscoverHomeView: View {
     let inferenceStore: InferenceStore
     let onOpen: (StoreAppSummary) -> Void
     let onSeeAll: (StoreHomeSection) -> Void
-    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+    let onGet: (StoreAppSummary) -> Void
 
     private var isSearching: Bool {
         !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -451,7 +450,7 @@ private struct StoreSearchResultsView: View {
     let tools: [Tool]
     let inferenceStore: InferenceStore
     let onOpen: (StoreAppSummary) -> Void
-    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+    let onGet: (StoreAppSummary) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -474,7 +473,7 @@ private struct StoreSearchResultsView: View {
                         store.installDisposition(for: $0, tools: tools).buttonTitle
                     },
                     onOpen: onOpen,
-                    onAction: { onGet($0, .get) },
+                    onAction: onGet,
                     onApproachingEnd: {
                         await store.loadMoreSearchResults()
                     }
@@ -495,7 +494,7 @@ private struct StoreHomeSectionView: View {
     let actionTitle: (StoreAppSummary) -> String
     let onOpen: (StoreAppSummary) -> Void
     let onSeeAll: () -> Void
-    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+    let onGet: (StoreAppSummary) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -519,7 +518,7 @@ private struct StoreHomeSectionView: View {
                             actionTitle: actionTitle(app),
                             isWorking: workingAppID == app.id,
                             onOpen: { onOpen(app) },
-                            onAction: { onGet(app, .get) }
+                            onAction: { onGet(app) }
                         )
                         Divider()
                             .padding(.leading, 88)
@@ -538,7 +537,7 @@ private struct StoreSectionAppsView: View {
     let tools: [Tool]
     let inferenceStore: InferenceStore
     let onOpen: (StoreAppSummary) -> Void
-    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+    let onGet: (StoreAppSummary) -> Void
     @State private var apps: [StoreAppSummary] = []
     @State private var nextOffset = 0
     @State private var hasMore = false
@@ -600,7 +599,7 @@ private struct StoreSectionAppsView: View {
                             store.installDisposition(for: $0, tools: tools).buttonTitle
                         },
                         onOpen: onOpen,
-                        onAction: { onGet($0, .get) },
+                        onAction: onGet,
                         onApproachingEnd: loadMore
                     )
                     .padding(.horizontal, 28)
@@ -939,7 +938,6 @@ private struct StoreAppDetailDestinationView: View {
                 Task {
                     await store.install(
                         app,
-                        mode: .get,
                         tools: tools,
                         modelContext: modelContext,
                         routeStore: routeStore,

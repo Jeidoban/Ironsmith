@@ -8,6 +8,7 @@ struct ToolItemPresentationState {
     let isRebuilding: Bool
     let isRestoring: Bool
     let isEditingDetails: Bool
+    let isPreparingGeneration: Bool
     let canRevert: Bool
     let showsStoreActions: Bool
     let canUpdateStoreVersion: Bool
@@ -17,6 +18,7 @@ struct ToolItemPresentationState {
 
     var isBusy: Bool {
         isLaunching || isExporting || isRebuilding || isRestoring || isEditingDetails
+            || isPreparingGeneration
     }
 }
 
@@ -71,7 +73,7 @@ struct ToolItemActionsMenu: View {
                 actions.onEdit()
             }
         }
-        .disabled(!(state.isSelected || tool.isGenerationReady))
+        .disabled(state.isPreparingGeneration || !(state.isSelected || tool.isGenerationReady))
 
         Button(launchAction.title) {
             switch launchAction {
@@ -85,7 +87,10 @@ struct ToolItemActionsMenu: View {
                 actions.onRun()
             }
         }
-        .disabled(state.isBusy || !(tool.isGenerationReady || canContinue || isGenerating))
+        .disabled(
+            (state.isBusy && !isGenerating)
+                || !(tool.isGenerationReady || canContinue || isGenerating)
+        )
 
         Divider()
         Button("Edit App Details...", action: actions.onEditDetails)
@@ -134,7 +139,7 @@ struct ToolItemActionsMenu: View {
     }
 
     private var isGenerating: Bool {
-        tool.generationState == .generating
+        tool.generationState == .generating || state.isPreparingGeneration
     }
 
     private var shouldDiscardFromMenu: Bool {
@@ -153,7 +158,7 @@ enum ToolItemLaunchAction: Equatable {
         tool: Tool,
         state: ToolItemPresentationState
     ) -> ToolItemLaunchAction {
-        if tool.generationState == .generating {
+        if tool.generationState == .generating || state.isPreparingGeneration {
             return .pauseGeneration
         }
         if tool.generationState == .stopped || tool.generationState == .failed {

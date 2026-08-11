@@ -433,6 +433,57 @@ struct ToolImageAssetEncoderTests {
 
     @MainActor
     @Test
+    func generatedRemixIdentityRenamesReiconsAndPreservesStoreSourceBaseline() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tool = Tool(
+            name: "Tiny Notes",
+            executableName: "TinyNotes",
+            packageRootPath: root.appendingPathComponent("TinyNotes").path,
+            storeAppId: "00000000-0000-4000-8000-000000000101",
+            storeSourceSha256: "downloaded-source-hash",
+            storeRemixedFromVersionId: "00000000-0000-4000-8000-000000000201"
+        )
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+        let generatedImage = try Self.solidImage(width: 1024, height: 1024)
+        let iconClient = ToolIconEditingClient.live(
+            imageClient: ToolImageGenerationClient { _, _ in generatedImage }
+        )
+        let buildCapture = IconEditorBuildCapture()
+        let store = ToolAppDetailsEditorStore(
+            iconClient: iconClient,
+            buildClient: ToolBuildClient { tool in
+                await buildCapture.record(name: tool.name)
+            }
+        )
+
+        let saved = await store.generateAndSaveRemixIdentity(
+            for: tool,
+            name: "Pocket Pages",
+            iconPrompt: "A playful stack of colorful note cards",
+            provider: .imagePlayground,
+            in: context,
+            rename: { proposedName in
+                tool.name = proposedName
+                try? context.save()
+                return nil
+            }
+        )
+
+        #expect(saved)
+        #expect(tool.name == "Pocket Pages")
+        #expect(tool.storeSourceSha256 == "downloaded-source-hash")
+        #expect(await buildCapture.names == ["Pocket Pages"])
+        #expect(FileManager.default.fileExists(
+            atPath: tool.packageLayout.cachedAppIconThumbnailJPEGURL.path
+        ))
+    }
+
+    @MainActor
+    @Test
     func appDetailsEditorRestoresThePreviousNameWhenTheStagedBuildFails() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

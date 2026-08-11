@@ -42,7 +42,7 @@ struct ToolRowView: View {
             .background(backgroundStyle, in: RoundedRectangle(cornerRadius: 14))
             .contentShape(RoundedRectangle(cornerRadius: 14))
             .onTapGesture {
-                guard tool.isGenerationReady else { return }
+                guard tool.isGenerationReady, !state.isPreparingGeneration else { return }
                 actions.onSelect()
             }
             .contextMenu {
@@ -73,7 +73,7 @@ struct ToolRowView: View {
             ToolIconImageView(tool: tool)
                 .frame(width: 42, height: 42)
 
-            if tool.generationState == .generating && isHoveringRow {
+            if isGenerating && isHoveringRow {
                 Button(action: actions.onStop) {
                     Image(systemName: "pause.fill")
                         .font(.system(size: 15, weight: .bold))
@@ -83,7 +83,7 @@ struct ToolRowView: View {
                 .help("Pause \(tool.name)")
                 .accessibilityLabel("Pause \(tool.name)")
                 .accessibilityIdentifier("pause-tool-\(tool.id.uuidString)")
-            } else if tool.generationState == .generating {
+            } else if isGenerating {
                 iconProgressOverlay("Generating \(tool.name)")
             } else if state.isLaunching {
                 iconProgressOverlay("Running \(tool.name)")
@@ -124,6 +124,9 @@ struct ToolRowView: View {
     }
 
     private var generationStatusText: String? {
+        if state.isPreparingGeneration {
+            return "Creating remix identity"
+        }
         switch tool.generationState {
         case .ready:
             return nil
@@ -142,6 +145,10 @@ struct ToolRowView: View {
 
     private var canContinue: Bool {
         tool.generationState == .stopped || tool.generationState == .failed
+    }
+
+    private var isGenerating: Bool {
+        tool.generationState == .generating || state.isPreparingGeneration
     }
 
     private var statusStyle: some ShapeStyle {
@@ -183,6 +190,7 @@ struct ToolRowView: View {
             isRebuilding: false,
             isRestoring: false,
             isEditingDetails: false,
+            isPreparingGeneration: false,
             canRevert: true,
             showsStoreActions: true,
             canUpdateStoreVersion: false,

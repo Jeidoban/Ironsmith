@@ -11,6 +11,12 @@ enum ToolLibraryPresentedErrorAction: Equatable {
     case buyIronsmithCredits
 }
 
+enum ToolRemixIdentitySubmissionAction: Equatable {
+    case submit
+    case presentNotice
+    case generateIdentity
+}
+
 private enum ToolLibraryGenerationError: LocalizedError {
     case missingPreparedTool
 
@@ -1064,6 +1070,29 @@ final class ToolLibraryStore {
         tool.applyGenerationSettings(result.settings)
         tool.packageRootPath = result.packageRootURL.path
         clearPendingGeneration(on: tool)
+    }
+
+    func isFirstEditOfDownloadedApp(_ tool: Tool) -> Bool {
+        guard tool.storeAppId != nil,
+              tool.storeRemixedFromVersionId != nil,
+              tool.isGenerationReady,
+              let storeSourceSha256 = tool.storeSourceSha256?.lowercased(),
+              let source = try? String(
+                  contentsOf: Self.contentViewURL(for: tool),
+                  encoding: .utf8
+              ),
+              IronsmithStoreClient.sha256Hex(for: source) == storeSourceSha256
+        else { return false }
+        return true
+    }
+
+    func remixIdentitySubmissionAction(
+        for tool: Tool,
+        generatesIdentity: Bool,
+        hasPresentedNotice: Bool
+    ) -> ToolRemixIdentitySubmissionAction {
+        guard isFirstEditOfDownloadedApp(tool), generatesIdentity else { return .submit }
+        return hasPresentedNotice ? .generateIdentity : .presentNotice
     }
 
     private func clearPendingGeneration(on tool: Tool) {

@@ -65,6 +65,127 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func remixPublishingShowsCurrentLegacyIconAndRequiresDistinctName() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceIcon = try ToolImageAssetEncoder.decodeImage(
+            Self.publisherLegacyIconPNG(),
+            applyingOrientation: true
+        )
+        let originalIconData = try ToolImageAssetEncoder.iconAssets(
+            from: sourceIcon
+        ).thumbnailData
+        let importedIcon = try ToolImageAssetEncoder.iconAssets(
+            from: ToolImageAssetEncoder.decodeImage(
+                originalIconData,
+                applyingOrientation: true
+            )
+        ).thumbnailData
+        let original = Self.publisherAppDetail(
+            icon: StoreAsset(
+                id: "00000000-0000-4000-8000-000000000301",
+                kind: .icon,
+                sortOrder: 0,
+                width: 256,
+                height: 256,
+                byteSize: originalIconData.count,
+                url: URL(string: "https://example.com/icon.jpg")
+            )
+        )
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, _, _, _, _, _, _ in
+            StoreAppPage(apps: [], hasMore: false)
+        }
+        client.fetchApp = { _, _ in original }
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: client,
+            iconClient: .noOp,
+            originalIconDataLoader: { _ in originalIconData }
+        )
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            executableName: "ClipboardCleaner",
+            packageRootPath: root.path,
+            storeId: original.storeId,
+            storeAppId: original.id,
+            storeRemixedFromVersionId: original.currentVersion.id
+        )
+        try Self.writeSource(
+            Self.publisherSource.replacingOccurrences(of: "Published", with: "Remixed"),
+            to: tool
+        )
+        try FileManager.default.createDirectory(
+            at: tool.packageLayout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try importedIcon.write(to: tool.packageLayout.cachedAppIconPNGURL)
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(
+                accountClient: Self.ironsmithAccountClient(balanceCredits: 100)
+            )
+        )
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
+
+        await publisher.beginPublishing(tool, inferenceStore: inferenceStore, tools: [tool])
+
+        #expect(publisher.originalRemixApp?.id == original.id)
+        #expect(publisher.publishNameMatchesOriginal(for: tool))
+        #expect(publisher.isUsingOriginalRemixIcon)
+        #expect(!publisher.canPublishRemixIdentity(for: tool))
+        tool.name = "clipboard cleaner"
+        #expect(publisher.publishNameMatchesOriginal(for: tool))
+        tool.name = "Clip Forge"
+        #expect(!publisher.publishNameMatchesOriginal(for: tool))
+        #expect(publisher.canPublishRemixIdentity(for: tool))
+
+        let editedIconData = Data([9, 8, 7])
+        try editedIconData.write(to: tool.packageLayout.cachedAppIconThumbnailJPEGURL)
+        publisher.refreshPublishIdentity(for: tool)
+        #expect(publisher.publishIconPreviewData == editedIconData)
+        #expect(!publisher.isUsingOriginalRemixIcon)
+    }
+
+    @MainActor
+    @Test
+    func remixPublishingRejectsOriginalNameBeforeUploading() async throws {
+        let original = Self.publisherAppDetail()
+        let publicationCapture = PublisherPublicationCapture()
+        var client = IronsmithStoreClient.unconfigured
+        client.publishApp = { request in
+            await publicationCapture.record(request)
+            return original
+        }
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: client,
+            iconClient: .noOp
+        )
+        publisher.originalRemixApp = original
+        let tool = Tool(
+            name: "  clipboard cleaner  ",
+            packageRootPath: "/tmp/ClipboardCleaner"
+        )
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        let inferenceStore = InferenceStore(dependencies: Self.inferenceDependencies())
+
+        await publisher.publish(
+            tool,
+            modelContext: context,
+            inferenceStore: inferenceStore,
+            defaultSettings: .default,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {})
+        )
+
+        #expect(await publicationCapture.count == 0)
+        #expect(
+            publisher.errorMessage
+                == "Current app name is the same as the original. Change the app name in Edit Details before publishing."
+        )
+    }
+
+    @MainActor
+    @Test
     func storePublisherPrefillsDescriptionsForVersionUpdates() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -662,7 +783,8 @@ extension ToolLibraryTests {
     private static func publisherAppDetail(
         versionNumber: Int = 1,
         category: StoreAppCategory = .utilities,
-        source: String = publisherSource
+        source: String = publisherSource,
+        icon: StoreAsset? = nil
     ) -> StoreAppDetail {
         let appID = "00000000-0000-4000-8000-000000000101"
         let version = StoreVersionMetadata(
@@ -691,7 +813,7 @@ extension ToolLibraryTests {
             publishedAt: "2026-07-28T00:00:00.000Z",
             createdAt: "2026-07-28T00:00:00.000Z",
             updatedAt: "2026-07-28T00:00:00.000Z",
-            icon: nil,
+            icon: icon,
             iconMaster: nil,
             screenshots: [],
             currentVersion: version,
