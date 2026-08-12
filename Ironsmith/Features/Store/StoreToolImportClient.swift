@@ -41,6 +41,14 @@ extension StoreToolImportClient {
     ) -> Self {
         StoreToolImportClient { request, modelContext in
             try IronsmithStoreClient.verifySourceHash(request.version)
+            let licenses = [request.version.license]
+                + request.version.legalAttributions.map(\.license)
+            if let unsupportedLicense = licenses.first(where: {
+                !$0.isSupportedForPublication
+            }) {
+                throw IronsmithStoreClientError.unsupportedLicense(
+                    unsupportedLicense.rawValue)
+            }
 
             let displayName =
                 request.displayName
@@ -61,6 +69,15 @@ extension StoreToolImportClient {
                 displayName: displayName,
                 settings: settings,
                 contentViewSource: request.version.sourceCode
+            )
+            try StoreLegalPackageWriter.write(
+                StoreLegalDocumentRenderer.render(
+                    appName: request.app.name,
+                    currentVersionId: request.version.id,
+                    primaryLicense: request.version.license,
+                    attributions: request.version.legalAttributions
+                ),
+                to: layout
             )
             try await cacheIconIfAvailable(
                 app: request.app,

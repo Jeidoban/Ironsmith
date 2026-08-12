@@ -7,6 +7,7 @@ struct ToolLibraryStorePublishSheetView: View {
     @Binding var publishShortDescription: String
     @Binding var publishDescription: String
     @Binding var publishCategory: StoreAppCategory
+    @Binding var publishLicense: StoreLicenseIdentifier
     let publishScreenshotName: String?
     let isPublishing: Bool
     let onChooseScreenshot: (URL) -> Void
@@ -65,6 +66,24 @@ struct ToolLibraryStorePublishSheetView: View {
                         }
                     }
                     .labelsHidden()
+                }
+                field("License") {
+                    Picker("License", selection: $publishLicense) {
+                        ForEach(StoreLicenseIdentifier.supported) { license in
+                            Text(license.title).tag(license)
+                        }
+                    }
+                    .labelsHidden()
+                    Text(publishLicense.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                field("License") {
+                    Text(publishLicense.title)
+                    Text("The license is fixed for all versions of this Store app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 

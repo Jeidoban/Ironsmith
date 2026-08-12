@@ -295,15 +295,22 @@ extension ToolLibraryTests {
         let publicationCount = await publicationCapture.count
         let publishedName = await publicationCapture.lastName
         let remixedFromVersionId = await publicationCapture.lastRemixedFromVersionId
+        let license = await publicationCapture.lastLicense
         #expect(updatedNames == ["Jade Westover"])
         #expect(publicationCount == 1)
         #expect(publishedName == tool.name)
         #expect(remixedFromVersionId == parentVersionId)
+        #expect(license == .mit)
         #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.id)
         #expect(tool.storeVersionNumber == 1)
         #expect(await buildCapture.versionNumbers == [1])
         #expect(!publisher.isUpdatingPublishedListing)
         #expect(publisher.errorMessage == nil)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: tool.packageLayout.legalDirectoryURL
+                    .appendingPathComponent("LICENSE.txt").path)
+        )
     }
 
     @MainActor
@@ -672,7 +679,17 @@ extension ToolLibraryTests {
             sourceSha256: IronsmithStoreClient.sha256Hex(for: source),
             generationSettings: StoreGenerationSettingsDTO(settings: .default),
             runtimeVersion: "ironsmith-macos-v1",
-            license: "MIT",
+            license: .mit,
+            legalAttributions: [
+                StoreLegalAttribution(
+                    versionId: "00000000-0000-4000-8000-000000000201",
+                    appName: "Clipboard Cleaner",
+                    creatorHandle: "jade",
+                    creatorDisplayName: "Jade",
+                    publicationYear: 2026,
+                    license: .mit
+                )
+            ],
             scannerVersion: "swift-execution-blocklist-v1",
             remixedFromVersionId: nil,
             publishedAt: "2026-07-28T00:00:00.000Z"
@@ -750,11 +767,13 @@ private actor PublisherPublicationCapture {
     private(set) var count = 0
     private(set) var lastName: String?
     private(set) var lastRemixedFromVersionId: String?
+    private(set) var lastLicense: StoreLicenseIdentifier?
 
     func record(_ request: StorePublicationRequest) {
         count += 1
         lastName = request.name
         lastRemixedFromVersionId = request.remixedFromVersionId
+        lastLicense = request.license
     }
 }
 

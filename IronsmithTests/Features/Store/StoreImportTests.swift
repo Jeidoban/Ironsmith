@@ -331,6 +331,18 @@ struct StoreImportTests {
                 == iconAssets.thumbnailData
         )
         #expect(FileManager.default.fileExists(atPath: layout.cachedAppIconICNSURL.path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: layout.legalDirectoryURL.appendingPathComponent("LICENSE.txt").path)
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: layout.legalDirectoryURL.appendingPathComponent("NOTICE.txt").path)
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: layout.legalDirectoryURL.appendingPathComponent("ATTRIBUTIONS.txt").path)
+        )
         let importedICNS = try ToolImageAssetEncoder.largestImage(
             at: layout.cachedAppIconICNSURL
         )
@@ -1190,6 +1202,38 @@ struct StoreImportTests {
         )
     }
 
+    @MainActor
+    @Test
+    func storeImportRejectsLicensesThisVersionCannotMaterialize() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let source = Self.sourceCode("future-license")
+        let license = StoreLicenseIdentifier(rawValue: "Future-License-1.0")
+        let version = Self.versionDownload(
+            sourceCode: source,
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: source),
+            license: license
+        )
+
+        await #expect(
+            throws: IronsmithStoreClientError.unsupportedLicense(license.rawValue)
+        ) {
+            try await StoreToolImportClient.live(toolsDirectoryURL: root)
+                .importTool(
+                    StoreToolImportRequest(
+                        app: Self.appListing(sourceCode: source),
+                        version: version,
+                        mode: .remix
+                    ),
+                    context
+                )
+        }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<Tool>()).isEmpty)
+    }
+
     private static func appListing(
         sourceCode: String,
         versions suppliedVersions: [StoreVersionMetadata]? = nil,
@@ -1207,7 +1251,17 @@ struct StoreImportTests {
             sourceSha256: IronsmithStoreClient.sha256Hex(for: sourceCode),
             generationSettings: StoreGenerationSettingsDTO(settings: .default),
             runtimeVersion: "ironsmith-macos-v1",
-            license: "MIT",
+            license: .mit,
+            legalAttributions: [
+                StoreLegalAttribution(
+                    versionId: "00000000-0000-4000-8000-000000000201",
+                    appName: name,
+                    creatorHandle: "creator",
+                    creatorDisplayName: "Creator",
+                    publicationYear: 2026,
+                    license: .mit
+                )
+            ],
             scannerVersion: "swift-execution-blocklist-v1",
             remixedFromVersionId: nil,
             publishedAt: "2026-06-27T00:00:00.000Z"
@@ -1264,7 +1318,17 @@ struct StoreImportTests {
             sourceSha256: IronsmithStoreClient.sha256Hex(for: sourceCode),
             generationSettings: StoreGenerationSettingsDTO(settings: settings),
             runtimeVersion: "ironsmith-macos-v1",
-            license: "MIT",
+            license: .mit,
+            legalAttributions: [
+                StoreLegalAttribution(
+                    versionId: id,
+                    appName: "Clipboard Cleaner",
+                    creatorHandle: "creator",
+                    creatorDisplayName: "Creator",
+                    publicationYear: 2026,
+                    license: .mit
+                )
+            ],
             scannerVersion: "swift-execution-blocklist-v1",
             remixedFromVersionId: nil,
             publishedAt: publishedAt
@@ -1297,7 +1361,8 @@ struct StoreImportTests {
         versionNumber: Int = 1,
         appId: String = "00000000-0000-4000-8000-000000000101",
         sourceCode: String,
-        sourceSha256: String
+        sourceSha256: String,
+        license: StoreLicenseIdentifier = .mit
     ) -> StoreVersionDownload {
         StoreVersionDownload(
             id: id,
@@ -1308,7 +1373,17 @@ struct StoreImportTests {
             sourceSha256: sourceSha256,
             generationSettings: StoreGenerationSettingsDTO(settings: .default),
             runtimeVersion: "ironsmith-macos-v1",
-            license: "MIT",
+            license: license,
+            legalAttributions: [
+                StoreLegalAttribution(
+                    versionId: id,
+                    appName: "Clipboard Cleaner",
+                    creatorHandle: "creator",
+                    creatorDisplayName: "Creator",
+                    publicationYear: 2026,
+                    license: license
+                )
+            ],
             scannerVersion: "swift-execution-blocklist-v1",
             remixedFromVersionId: nil,
             publishedAt: "2026-06-27T00:00:00.000Z",

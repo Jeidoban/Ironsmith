@@ -382,6 +382,10 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
             .appendingPathComponent(executableName, isDirectory: true)
     }
 
+    nonisolated var legalDirectoryURL: URL {
+        packageRootURL.appendingPathComponent("Legal", isDirectory: true)
+    }
+
     nonisolated var appEntryFileName: String {
         "\(executableName).swift"
     }

@@ -591,6 +591,7 @@ struct ToolLibraryPopoverView: View {
                 publishShortDescription: $storePublisher.publishShortDescription,
                 publishDescription: $storePublisher.publishDescription,
                 publishCategory: $storePublisher.publishCategory,
+                publishLicense: $storePublisher.publishLicense,
                 publishScreenshotName: storePublisher.publishScreenshotName,
                 isPublishing: storePublisher.isPublishing,
                 onChooseScreenshot: { url in

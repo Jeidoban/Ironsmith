@@ -150,6 +150,12 @@ struct ToolAppBundleClient {
             iconClient: iconClient
         )
 
+        try copyLegalDocumentsIfAvailable(
+            request: request,
+            resourcesURL: resourcesURL,
+            fileManager: fileManager
+        )
+
         let infoPlistURL = contentsURL.appendingPathComponent("Info.plist")
         try writeInfoPlist(
             for: request,
@@ -216,6 +222,17 @@ struct ToolAppBundleClient {
         )
         try layout.fixedAppEntrySource(displayName: request.displayName, settings: request.settings)
             .write(to: appEntryURL, atomically: true, encoding: .utf8)
+    }
+
+    private static func copyLegalDocumentsIfAvailable(
+        request: ToolAppBundleRequest,
+        resourcesURL: URL,
+        fileManager: FileManager
+    ) throws {
+        let sourceURL = request.layout.legalDirectoryURL
+        guard fileManager.fileExists(atPath: sourceURL.path) else { return }
+        let destinationURL = resourcesURL.appendingPathComponent("Legal", isDirectory: true)
+        try fileManager.copyItem(at: sourceURL, to: destinationURL)
     }
 
     private static func temporarySiblingAppBundleURL(for destinationAppURL: URL, label: String) -> URL {
