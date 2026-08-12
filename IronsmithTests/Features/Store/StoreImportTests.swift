@@ -13,6 +13,25 @@ struct StoreImportTests {
         #expect(StoreAppInstallDisposition.createCopy.buttonTitle == "Download")
     }
 
+    @Test
+    func storeRemixMetadataDecodesDeletedMarkerWithLegacyFallback() throws {
+        let deleted = try JSONDecoder().decode(
+            StoreRemixMetadata.self,
+            from: Data(
+                #"{"storeId":"store","appId":"app","appName":"[Deleted]","versionId":"version","versionNumber":2,"isDeleted":true}"#.utf8
+            )
+        )
+        let legacy = try JSONDecoder().decode(
+            StoreRemixMetadata.self,
+            from: Data(
+                #"{"storeId":"store","appId":"app","appName":"Original","versionId":"version","versionNumber":1}"#.utf8
+            )
+        )
+
+        #expect(deleted.isDeleted)
+        #expect(!legacy.isDeleted)
+    }
+
     @MainActor
     @Test
     func unsignedStoreDownloadRequiresAnAccountBeforeFetchingAppDetails() async throws {
@@ -607,6 +626,113 @@ struct StoreImportTests {
         await store.setStatus(StoreAppSummary(detail: app), status: .unlisted)
 
         #expect(store.contentRevision == 1)
+    }
+
+    @MainActor
+    @Test
+    func deletingStoreListingUnlinksLocalCopiesButPreservesRemixOrigin() async throws {
+        let app = Self.appListing(sourceCode: Self.sourceCode("published"))
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let linkedTool = Tool(
+            name: "Published Copy",
+            packageRootPath: "/tmp/published-copy",
+            storeId: app.storeId,
+            storeAppId: app.id,
+            storeVersionId: app.currentVersion.id,
+            storeVersionNumber: app.currentVersion.versionNumber,
+            storeSourceSha256: app.currentVersion.sourceSha256,
+            storeImportedAt: .now,
+            storeRemixedFromVersionId: "00000000-0000-4000-8000-000000000299"
+        )
+        context.insert(linkedTool)
+        try context.save()
+
+        let recorder = StoreDeletionRecorder()
+        var client = IronsmithStoreClient.unconfigured
+        client.deleteApp = { storeID, appID in
+            await recorder.record(storeID: storeID, appID: appID)
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+        let summary = StoreAppSummary(detail: app)
+        store.publishedApps = [summary]
+        store.selectedAppID = app.id
+        store.selectedAppDetail = app
+
+        await store.deleteFromStore(
+            summary,
+            tools: [linkedTool],
+            modelContext: context
+        )
+
+        #expect(
+            await recorder.requests
+                == [StoreDeletionRecorder.Request(storeID: app.storeId, appID: app.id)]
+        )
+        #expect(store.publishedApps.isEmpty)
+        #expect(store.selectedAppID == nil)
+        #expect(store.contentRevision == 1)
+        #expect(linkedTool.storeId == nil)
+        #expect(linkedTool.storeAppId == nil)
+        #expect(linkedTool.storeVersionId == nil)
+        #expect(linkedTool.storeVersionNumber == nil)
+        #expect(linkedTool.storeSourceSha256 == nil)
+        #expect(linkedTool.storeImportedAt == nil)
+        #expect(
+            linkedTool.storeRemixedFromVersionId
+                == "00000000-0000-4000-8000-000000000299"
+        )
+        #expect(store.errorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func failedLocalUnlinkKeepsPublishedListingAvailableForRetry() async throws {
+        let app = Self.appListing(sourceCode: Self.sourceCode("published"))
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let linkedTool = Tool(
+            name: "Published Copy",
+            packageRootPath: "/tmp/published-copy",
+            storeId: app.storeId,
+            storeAppId: app.id,
+            storeVersionId: app.currentVersion.id,
+            storeVersionNumber: app.currentVersion.versionNumber,
+            storeSourceSha256: app.currentVersion.sourceSha256,
+            storeImportedAt: .now
+        )
+        context.insert(linkedTool)
+        try context.save()
+
+        var client = IronsmithStoreClient.unconfigured
+        client.deleteApp = { _, _ in }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in }),
+            saveModelContext: { _ in throw StoreDeletionPersistenceError.failed }
+        )
+        let summary = StoreAppSummary(detail: app)
+        store.publishedApps = [summary]
+        store.selectedAppID = app.id
+        store.selectedAppDetail = app
+
+        await store.deleteFromStore(summary, tools: [linkedTool], modelContext: context)
+
+        #expect(store.publishedApps == [summary])
+        #expect(store.selectedAppID == app.id)
+        #expect(store.contentRevision == 0)
+        #expect(linkedTool.storeId == app.storeId)
+        #expect(linkedTool.storeAppId == app.id)
+        #expect(store.errorMessage?.contains("could not unlink") == true)
     }
 
     @MainActor
@@ -1359,6 +1485,27 @@ private actor StoreListRequestRecorder {
                 creatorHandle: creatorHandle
             )
         )
+    }
+}
+
+private actor StoreDeletionRecorder {
+    struct Request: Equatable, Sendable {
+        let storeID: String
+        let appID: String
+    }
+
+    private(set) var requests: [Request] = []
+
+    func record(storeID: String, appID: String) {
+        requests.append(Request(storeID: storeID, appID: appID))
+    }
+}
+
+private enum StoreDeletionPersistenceError: LocalizedError {
+    case failed
+
+    var errorDescription: String? {
+        "The test Store unlink could not be saved."
     }
 }
 

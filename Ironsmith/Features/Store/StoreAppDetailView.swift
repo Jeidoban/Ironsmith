@@ -129,11 +129,15 @@ private struct StoreDetailMetadataStrip: View {
                 StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
             }
             if let remix = app.remix {
-                StoreDetailLinkedMetadataItem(
-                    title: "Remixed From",
-                    value: remix.appName,
-                    action: { onOpenRemix(remix) }
-                )
+                if remix.isDeleted {
+                    StoreDetailMetadataItem(title: "Remixed From", value: "[Deleted]")
+                } else {
+                    StoreDetailLinkedMetadataItem(
+                        title: "Remixed From",
+                        value: remix.appName,
+                        action: { onOpenRemix(remix) }
+                    )
+                }
             }
             StoreDetailMetadataItem(
                 title: "Version",

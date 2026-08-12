@@ -62,6 +62,7 @@ final class StoreWindowStore {
     @ObservationIgnored private let importClient: StoreToolImportClient
     @ObservationIgnored private let buildClient: ToolBuildClient
     @ObservationIgnored private let packageMaterializer: ToolPackageMaterializer
+    @ObservationIgnored private let saveModelContext: (ModelContext) throws -> Void
     @ObservationIgnored private var searchPaginationRevision = 0
     @ObservationIgnored private var publishedPaginationRevision = 0
 
@@ -70,18 +71,21 @@ final class StoreWindowStore {
         self.importClient = .live
         self.buildClient = .live()
         self.packageMaterializer = .live
+        self.saveModelContext = { try $0.save() }
     }
 
     init(
         client: IronsmithStoreClient,
         importClient: StoreToolImportClient,
         buildClient: ToolBuildClient,
-        packageMaterializer: ToolPackageMaterializer = .live
+        packageMaterializer: ToolPackageMaterializer = .live,
+        saveModelContext: @escaping (ModelContext) throws -> Void = { try $0.save() }
     ) {
         self.client = client
         self.importClient = importClient
         self.buildClient = buildClient
         self.packageMaterializer = packageMaterializer
+        self.saveModelContext = saveModelContext
     }
 
     var selectedAppSummary: StoreAppSummary? {
@@ -613,6 +617,55 @@ final class StoreWindowStore {
         } catch {
             present(error)
         }
+    }
+
+    func deleteFromStore(
+        _ app: StoreAppSummary,
+        tools: [Tool],
+        modelContext: ModelContext
+    ) async {
+        guard workingAppID == nil else { return }
+        workingAppID = app.id
+        defer { workingAppID = nil }
+        do {
+            try await client.deleteApp(app.storeId, app.id)
+        } catch {
+            present(error)
+            return
+        }
+
+        let linkedTools = tools.filter { $0.storeId == app.storeId && $0.storeAppId == app.id }
+        let previousLinkages = linkedTools.map {
+            ($0, StoreToolLinkageSnapshot(tool: $0), $0.updatedAt)
+        }
+        for tool in linkedTools {
+            tool.storeId = nil
+            tool.storeAppId = nil
+            tool.storeVersionId = nil
+            tool.storeVersionNumber = nil
+            tool.storeSourceSha256 = nil
+            tool.storeImportedAt = nil
+            tool.updatedAt = .now
+        }
+        do {
+            try saveModelContext(modelContext)
+        } catch {
+            modelContext.rollback()
+            for (tool, linkage, updatedAt) in previousLinkages {
+                linkage.apply(to: tool)
+                tool.updatedAt = updatedAt
+            }
+            errorMessage =
+                "The Store listing was deleted, but Ironsmith could not unlink its local app copies: \(error.localizedDescription)"
+            return
+        }
+
+        publishedApps.removeAll { $0.id == app.id }
+        if selectedAppID == app.id {
+            selectedAppID = nil
+            selectedAppDetail = nil
+        }
+        contentRevision += 1
     }
 
     private func updateExistingTool(
