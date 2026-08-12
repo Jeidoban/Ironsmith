@@ -108,6 +108,7 @@ extension ToolLibraryTests {
             packageRootPath: root.path,
             storeId: original.storeId,
             storeAppId: original.id,
+            storeVersionId: original.currentVersion.id,
             storeRemixedFromVersionId: original.currentVersion.id
         )
         try Self.writeSource(
