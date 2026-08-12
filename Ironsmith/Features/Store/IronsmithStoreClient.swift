@@ -146,6 +146,37 @@ nonisolated struct StoreRemixMetadata: Decodable, Equatable, Sendable {
     let appName: String
     let versionId: String
     let versionNumber: Int
+    let isDeleted: Bool
+
+    init(
+        storeId: String,
+        appId: String,
+        appName: String,
+        versionId: String,
+        versionNumber: Int,
+        isDeleted: Bool = false
+    ) {
+        self.storeId = storeId
+        self.appId = appId
+        self.appName = appName
+        self.versionId = versionId
+        self.versionNumber = versionNumber
+        self.isDeleted = isDeleted
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case storeId, appId, appName, versionId, versionNumber, isDeleted
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        storeId = try container.decode(String.self, forKey: .storeId)
+        appId = try container.decode(String.self, forKey: .appId)
+        appName = try container.decode(String.self, forKey: .appName)
+        versionId = try container.decode(String.self, forKey: .versionId)
+        versionNumber = try container.decode(Int.self, forKey: .versionNumber)
+        isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+    }
 }
 
 nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable {
@@ -342,6 +373,7 @@ nonisolated struct IronsmithStoreClient {
         @Sendable (_ storeId: String, _ appId: String, _ update: StoreListingUpdateRequest)
             async throws
             -> StoreAppDetail
+    var deleteApp: @Sendable (_ storeId: String, _ appId: String) async throws -> Void
 }
 
 extension IronsmithStoreClient {
@@ -515,6 +547,13 @@ extension IronsmithStoreClient {
                     authentication: .required
                 )
                 return response.data
+            },
+            deleteApp: { storeId, appId in
+                let _: StoreDataEnvelope<StoreDeletionResponse> = try await api.request(
+                    "api/v1/stores/\(storeId)/apps/\(appId)",
+                    method: "DELETE",
+                    authentication: .required
+                )
             }
         )
     }
@@ -528,7 +567,8 @@ extension IronsmithStoreClient {
             fetchVersion: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
             publishApp: { _ in throw IronsmithStoreClientError.notConfigured },
             publishVersion: { _ in throw IronsmithStoreClientError.notConfigured },
-            patchListing: { _, _, _ in throw IronsmithStoreClientError.notConfigured }
+            patchListing: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
+            deleteApp: { _, _ in throw IronsmithStoreClientError.notConfigured }
         )
     }
 
@@ -668,6 +708,10 @@ nonisolated private struct StoreBackendErrorEnvelope: Decodable {
 nonisolated private struct StoreBackendError: Decodable {
     let code: String
     let message: String
+}
+
+nonisolated private struct StoreDeletionResponse: Decodable {
+    let deleted: Bool
 }
 
 nonisolated private struct StorePublicationMetadataPayload: Encodable {

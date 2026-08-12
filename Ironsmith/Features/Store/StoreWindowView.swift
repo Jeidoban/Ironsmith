@@ -18,6 +18,7 @@ struct StoreWindowView: View {
     @State private var categoryRefreshToken = 0
     @State private var searchTask: Task<Void, Never>?
     @State private var isSigningInToIronsmith = false
+    @State private var appPendingDeletion: StoreAppSummary?
 
     var body: some View {
         @Bindable var store = store
@@ -59,7 +60,8 @@ struct StoreWindowView: View {
                             onOpen: openApp,
                             onUpdateVersion: { tool in
                                 routeStore.open(.toolLibrary(.publishTool(tool.id)))
-                            }
+                            },
+                            onDelete: { appPendingDeletion = $0 }
                         )
                     }
                 }
@@ -188,6 +190,33 @@ struct StoreWindowView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(inferenceStore.presentedErrorMessage ?? "")
+        }
+        .confirmationDialog(
+            appPendingDeletion.map { "Delete \($0.name) from Store?" }
+                ?? "Delete from Store?",
+            isPresented: Binding(
+                get: { appPendingDeletion != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        appPendingDeletion = nil
+                    }
+                }
+            )
+        ) {
+            Button("Delete from Store", role: .destructive) {
+                guard let app = appPendingDeletion else { return }
+                appPendingDeletion = nil
+                Task {
+                    await store.deleteFromStore(app, tools: tools, modelContext: modelContext)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                appPendingDeletion = nil
+            }
+        } message: {
+            Text(
+                "This app's source and downloads will no longer be available. Existing installed copies and remixes will not be deleted. This can't be undone."
+            )
         }
     }
 
@@ -787,6 +816,7 @@ private struct StorePublishedListView: View {
     let inferenceStore: InferenceStore
     let onOpen: (StoreAppSummary) -> Void
     let onUpdateVersion: (Tool) -> Void
+    let onDelete: (StoreAppSummary) -> Void
 
     var body: some View {
         ScrollView {
@@ -830,7 +860,8 @@ private struct StorePublishedListView: View {
                                                     ? .unlisted : .published
                                             )
                                         }
-                                    }
+                                    },
+                                    onDelete: { onDelete(app) }
                                 )
                                 Divider()
                                     .padding(.leading, 72)
@@ -866,6 +897,7 @@ private struct StorePublishedRowView: View {
     let onSelect: () -> Void
     let onUpdateVersion: (Tool) -> Void
     let onToggleStatus: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -902,10 +934,15 @@ private struct StorePublishedRowView: View {
                 Button(app.status == .published ? "Unlist" : "Relist") {
                     onToggleStatus()
                 }
+                Divider()
+                Button("Delete from Store...", role: .destructive) {
+                    onDelete()
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
+            .disabled(isWorking)
         }
         .frame(minHeight: 76)
     }

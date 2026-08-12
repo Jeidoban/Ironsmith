@@ -286,10 +286,6 @@ final class ToolLibraryStorePublisher {
             let app: StoreAppDetail
             let linkedApp = linkedPublishedApp(for: tool)
             if let linkedApp {
-                let remixedFromVersionId =
-                    tool.storeRemixedFromVersionId == tool.storeVersionId
-                    ? nil
-                    : tool.storeRemixedFromVersionId
                 app = try await storeClient.publishVersion(
                     StoreVersionPublicationRequest(
                         storeId: linkedApp.storeId,
@@ -304,7 +300,7 @@ final class ToolLibraryStorePublisher {
                         iconThumbnailJPEG: iconThumbnailJPEG,
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         replaceScreenshots: publishScreenshotData != nil,
-                        remixedFromVersionId: remixedFromVersionId
+                        remixedFromVersionId: tool.storeRemixedFromVersionId
                     )
                 )
             } else {
@@ -322,7 +318,8 @@ final class ToolLibraryStorePublisher {
                         iconMasterJPEG: iconMasterJPEG,
                         iconThumbnailJPEG: iconThumbnailJPEG,
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
-                        remixedFromVersionId: tool.storeRemixedFromVersionId
+                        remixedFromVersionId: tool.storeVersionId
+                            ?? tool.storeRemixedFromVersionId
                     )
                 )
             }
@@ -330,9 +327,7 @@ final class ToolLibraryStorePublisher {
             await finishSuccessfulPublication(
                 app,
                 for: tool,
-                localRemixedFromVersionId: linkedApp == nil
-                    ? app.currentVersion.id
-                    : app.currentVersion.remixedFromVersionId,
+                localRemixedFromVersionId: app.currentVersion.remixedFromVersionId,
                 modelContext: modelContext,
                 routeStore: routeStore
             )
@@ -406,7 +401,7 @@ final class ToolLibraryStorePublisher {
         originalRemixIconData = nil
 
         guard linkedApp == nil,
-            tool.storeRemixedFromVersionId != nil,
+            tool.storeVersionId != nil,
             let storeId = tool.storeId,
             let appId = tool.storeAppId
         else { return }

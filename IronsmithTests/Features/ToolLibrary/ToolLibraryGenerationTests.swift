@@ -16,9 +16,11 @@ extension ToolLibraryTests {
             name: "Tiny Notes",
             executableName: "TinyNotes",
             packageRootPath: root.path,
+            storeId: IronsmithStoreConstants.communityStoreId,
             storeAppId: "00000000-0000-4000-8000-000000000101",
+            storeVersionId: "00000000-0000-4000-8000-000000000201",
             storeSourceSha256: IronsmithStoreClient.sha256Hex(for: source),
-            storeRemixedFromVersionId: "00000000-0000-4000-8000-000000000201"
+            storeRemixedFromVersionId: nil
         )
         let sourceURL = try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath)
         try FileManager.default.createDirectory(

@@ -108,6 +108,7 @@ extension ToolLibraryTests {
             packageRootPath: root.path,
             storeId: original.storeId,
             storeAppId: original.id,
+            storeVersionId: original.currentVersion.id,
             storeRemixedFromVersionId: original.currentVersion.id
         )
         try Self.writeSource(
@@ -360,14 +361,16 @@ extension ToolLibraryTests {
         inferenceStore.ironsmithSession = session
         await inferenceStore.refreshIronsmithAccountSummary()
         let publicationCapture = PublisherPublicationCapture()
-        let publishedDetail = Self.publisherAppDetail()
+        let parentVersionId = "00000000-0000-4000-8000-000000000299"
+        let publishedDetail = Self.publisherAppDetail(
+            remixedFromVersionId: parentVersionId
+        )
         var storeClient = IronsmithStoreClient.unconfigured
         storeClient.publishApp = { request in
             await publicationCapture.record(request)
             return publishedDetail
         }
         let buildCapture = PublisherBuildCapture()
-        let parentVersionId = "00000000-0000-4000-8000-000000000299"
         let publisher = ToolLibraryStorePublisher(
             storeClient: storeClient,
             iconClient: .noOp,
@@ -420,7 +423,7 @@ extension ToolLibraryTests {
         #expect(publicationCount == 1)
         #expect(publishedName == tool.name)
         #expect(remixedFromVersionId == parentVersionId)
-        #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.id)
+        #expect(tool.storeRemixedFromVersionId == parentVersionId)
         #expect(tool.storeVersionNumber == 1)
         #expect(await buildCapture.versionNumbers == [1])
         #expect(!publisher.isUpdatingPublishedListing)
@@ -510,6 +513,65 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func differentAccountPublishesDownloadedVersionAsDirectParent() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let copiedVersionID = "00000000-0000-4000-8000-000000000201"
+        let copiedAppsParentID = "00000000-0000-4000-8000-000000000299"
+        let publishedDetail = Self.publisherAppDetail(
+            remixedFromVersionId: copiedVersionID
+        )
+        let publicationCapture = PublisherPublicationCapture()
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.publishApp = { request in
+            await publicationCapture.record(request)
+            return publishedDetail
+        }
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: storeClient,
+            iconClient: .noOp,
+            buildClient: ToolBuildClient { _ in }
+        )
+        publisher.publishShortDescription = "Clean copied text"
+        publisher.publishDescription = "Cleans and reformats text."
+        let tool = Tool(
+            name: "Clipboard Cleaner Copy",
+            executableName: "ClipboardCleanerCopy",
+            packageRootPath: root.appendingPathComponent("ClipboardCleanerCopy").path,
+            storeId: IronsmithStoreConstants.communityStoreId,
+            storeAppId: "00000000-0000-4000-8000-000000000199",
+            storeVersionId: copiedVersionID,
+            storeVersionNumber: 1,
+            storeRemixedFromVersionId: copiedAppsParentID
+        )
+        try Self.writeSource(Self.publisherSource, to: tool)
+        try FileManager.default.createDirectory(
+            at: tool.packageLayout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try Data([1]).write(to: tool.packageLayout.cachedAppIconMasterJPEGURL)
+        try Data([2]).write(to: tool.packageLayout.cachedAppIconThumbnailJPEGURL)
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+        try context.save()
+
+        await publisher.publish(
+            tool,
+            modelContext: context,
+            inferenceStore: InferenceStore(),
+            defaultSettings: .default,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {})
+        )
+
+        #expect(await publicationCapture.lastRemixedFromVersionId == copiedVersionID)
+        #expect(tool.storeVersionId == publishedDetail.currentVersion.id)
+        #expect(tool.storeRemixedFromVersionId == copiedVersionID)
+        #expect(publisher.errorMessage == nil)
+    }
+
+    @MainActor
+    @Test
     func successfulVersionPublicationPersistsReturnedCategoryAndRebuildsAtReturnedVersion()
         async throws
     {
@@ -519,11 +581,15 @@ extension ToolLibraryTests {
             of: "Published",
             with: "Version Two"
         )
-        let previousDetail = Self.publisherAppDetail()
+        let parentVersionId = "00000000-0000-4000-8000-000000000299"
+        let previousDetail = Self.publisherAppDetail(
+            remixedFromVersionId: parentVersionId
+        )
         let publishedDetail = Self.publisherAppDetail(
             versionNumber: 2,
             category: .finance,
-            source: changedSource
+            source: changedSource,
+            remixedFromVersionId: parentVersionId
         )
         let versionCapture = PublisherVersionCapture()
         var storeClient = IronsmithStoreClient.unconfigured
@@ -557,7 +623,7 @@ extension ToolLibraryTests {
             storeVersionId: previousDetail.currentVersion.id,
             storeVersionNumber: 1
         )
-        tool.storeRemixedFromVersionId = previousDetail.currentVersion.id
+        tool.storeRemixedFromVersionId = parentVersionId
         try Self.writeSource(changedSource, to: tool)
         try FileManager.default.createDirectory(
             at: tool.packageLayout.packageMetadataDirectoryURL,
@@ -589,7 +655,7 @@ extension ToolLibraryTests {
         #expect(tool.storeVersionNumber == 2)
         #expect(await buildCapture.categories == [.finance])
         #expect(await buildCapture.versionNumbers == [2])
-        #expect(await versionCapture.lastRemixedFromVersionId == nil)
+        #expect(await versionCapture.lastRemixedFromVersionId == parentVersionId)
         #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.remixedFromVersionId)
         #expect(publisher.errorMessage == nil)
         #expect(!publisher.isShowingPublishSheet)
@@ -784,6 +850,7 @@ extension ToolLibraryTests {
         versionNumber: Int = 1,
         category: StoreAppCategory = .utilities,
         source: String = publisherSource,
+        remixedFromVersionId: String? = nil,
         icon: StoreAsset? = nil
     ) -> StoreAppDetail {
         let appID = "00000000-0000-4000-8000-000000000101"
@@ -796,7 +863,7 @@ extension ToolLibraryTests {
             runtimeVersion: "ironsmith-macos-v1",
             license: "MIT",
             scannerVersion: "swift-execution-blocklist-v1",
-            remixedFromVersionId: nil,
+            remixedFromVersionId: remixedFromVersionId,
             publishedAt: "2026-07-28T00:00:00.000Z"
         )
         return StoreAppDetail(

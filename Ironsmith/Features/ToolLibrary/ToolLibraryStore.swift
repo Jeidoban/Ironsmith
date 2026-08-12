@@ -1074,7 +1074,7 @@ final class ToolLibraryStore {
 
     func isFirstEditOfDownloadedApp(_ tool: Tool) -> Bool {
         guard tool.storeAppId != nil,
-              tool.storeRemixedFromVersionId != nil,
+              tool.storeVersionId != nil,
               tool.isGenerationReady,
               let storeSourceSha256 = tool.storeSourceSha256?.lowercased(),
               let source = try? String(
