@@ -91,7 +91,7 @@ extension StoreToolImportClient {
                 storeVersionNumber: request.version.versionNumber,
                 storeSourceSha256: request.version.sourceSha256,
                 storeImportedAt: now,
-                storeRemixedFromVersionId: request.version.id,
+                storeRemixedFromVersionId: request.version.remixedFromVersionId,
                 createdAt: now,
                 updatedAt: now
             )

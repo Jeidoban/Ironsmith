@@ -280,7 +280,7 @@ struct StoreImportTests {
         #expect(tool.category == app.category)
         #expect(tool.storeSourceSha256 == version.sourceSha256)
         #expect(tool.storeImportedAt != nil)
-        #expect(tool.storeRemixedFromVersionId == version.id)
+        #expect(tool.storeRemixedFromVersionId == nil)
     }
 
     @MainActor
@@ -368,10 +368,12 @@ struct StoreImportTests {
         let context = ModelContext(container)
         let source = Self.sourceCode("remix")
         let app = Self.appListing(sourceCode: source)
+        let parentVersionID = "00000000-0000-4000-8000-000000000299"
         let version = Self.versionDownload(
             appId: app.id,
             sourceCode: source,
-            sourceSha256: IronsmithStoreClient.sha256Hex(for: source)
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: source),
+            remixedFromVersionId: parentVersionID
         )
 
         let result = try await StoreToolImportClient.live(toolsDirectoryURL: root)
@@ -384,7 +386,7 @@ struct StoreImportTests {
         #expect(result.tool.storeVersionNumber == version.versionNumber)
         #expect(result.tool.storeSourceSha256 == version.sourceSha256)
         #expect(result.tool.storeImportedAt != nil)
-        #expect(result.tool.storeRemixedFromVersionId == version.id)
+        #expect(result.tool.storeRemixedFromVersionId == parentVersionID)
     }
 
     @MainActor
@@ -396,10 +398,12 @@ struct StoreImportTests {
         let context = ModelContext(container)
         let source = Self.sourceCode("own")
         let app = Self.appListing(sourceCode: source)
+        let parentVersionID = "00000000-0000-4000-8000-000000000299"
         let version = Self.versionDownload(
             appId: app.id,
             sourceCode: source,
-            sourceSha256: IronsmithStoreClient.sha256Hex(for: source)
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: source),
+            remixedFromVersionId: parentVersionID
         )
 
         let result = try await StoreToolImportClient.live(toolsDirectoryURL: root)
@@ -417,7 +421,7 @@ struct StoreImportTests {
         #expect(result.tool.storeVersionId == version.id)
         #expect(result.tool.storeVersionNumber == version.versionNumber)
         #expect(result.tool.storeSourceSha256 == version.sourceSha256)
-        #expect(result.tool.storeRemixedFromVersionId == version.id)
+        #expect(result.tool.storeRemixedFromVersionId == parentVersionID)
     }
 
     @MainActor
@@ -445,8 +449,8 @@ struct StoreImportTests {
         #expect(tools.count == 2)
         #expect(first.tool.id != second.tool.id)
         #expect(first.tool.packageRootPath != second.tool.packageRootPath)
-        #expect(first.tool.storeRemixedFromVersionId == version.id)
-        #expect(second.tool.storeRemixedFromVersionId == version.id)
+        #expect(first.tool.storeRemixedFromVersionId == nil)
+        #expect(second.tool.storeRemixedFromVersionId == nil)
         #expect(first.tool.storeAppId == app.id)
         #expect(second.tool.storeAppId == app.id)
     }
@@ -1084,7 +1088,7 @@ struct StoreImportTests {
         #expect(installed.storeVersionId == historicalMetadata.id)
         #expect(installed.storeVersionNumber == 1)
         #expect(installed.storeSourceSha256 == historicalMetadata.sourceSha256)
-        #expect(installed.storeRemixedFromVersionId == historicalMetadata.id)
+        #expect(installed.storeRemixedFromVersionId == historicalMetadata.remixedFromVersionId)
         #expect(store.workingVersionID == nil)
 
         guard
@@ -1190,7 +1194,7 @@ struct StoreImportTests {
         let failedTool = try #require(context.fetch(FetchDescriptor<Tool>()).first)
         #expect(failedTool.generationState == .failed)
         #expect(failedTool.storeVersionId == metadata.id)
-        #expect(failedTool.storeRemixedFromVersionId == metadata.id)
+        #expect(failedTool.storeRemixedFromVersionId == metadata.remixedFromVersionId)
         #expect(store.errorMessage != nil)
     }
 
@@ -1423,7 +1427,8 @@ struct StoreImportTests {
         versionNumber: Int = 1,
         appId: String = "00000000-0000-4000-8000-000000000101",
         sourceCode: String,
-        sourceSha256: String
+        sourceSha256: String,
+        remixedFromVersionId: String? = nil
     ) -> StoreVersionDownload {
         StoreVersionDownload(
             id: id,
@@ -1436,7 +1441,7 @@ struct StoreImportTests {
             runtimeVersion: "ironsmith-macos-v1",
             license: "MIT",
             scannerVersion: "swift-execution-blocklist-v1",
-            remixedFromVersionId: nil,
+            remixedFromVersionId: remixedFromVersionId,
             publishedAt: "2026-06-27T00:00:00.000Z",
             sourceCode: sourceCode
         )
