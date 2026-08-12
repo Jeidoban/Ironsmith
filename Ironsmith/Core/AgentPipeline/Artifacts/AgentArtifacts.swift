@@ -407,8 +407,13 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
     }
 
     nonisolated var cachedAppIconPreviewURL: URL {
-        if FileManager.default.fileExists(atPath: cachedAppIconThumbnailJPEGURL.path) {
-            return cachedAppIconThumbnailJPEGURL
+        let candidates = [
+            cachedAppIconThumbnailJPEGURL,
+            cachedAppIconPNGURL,
+            cachedAppIconICNSURL,
+        ]
+        for url in candidates where FileManager.default.fileExists(atPath: url.path) {
+            return url
         }
         return cachedAppIconPNGURL
     }

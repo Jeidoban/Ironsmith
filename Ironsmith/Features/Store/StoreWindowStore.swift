@@ -25,8 +25,8 @@ enum StoreAppInstallDisposition {
 }
 
 enum StorePendingDownloadRequest {
-    case appSummary(StoreAppSummary, mode: StoreToolImportMode)
-    case appDetail(StoreAppDetail, mode: StoreToolImportMode)
+    case appSummary(StoreAppSummary)
+    case appDetail(StoreAppDetail)
     case version(StoreVersionMetadata, app: StoreAppDetail)
 }
 
@@ -264,22 +264,19 @@ final class StoreWindowStore {
 
     func install(
         _ app: StoreAppSummary,
-        mode: StoreToolImportMode,
         tools: [Tool],
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore,
         inferenceStore: InferenceStore
     ) async {
         selectedAppID = app.id
-        if mode == .get,
-            case .openExisting(let tool) = installDisposition(for: app, tools: tools)
-        {
+        if case .openExisting(let tool) = installDisposition(for: app, tools: tools) {
             routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
             return
         }
         guard
             requireAccountForDownload(
-                .appSummary(app, mode: mode),
+                .appSummary(app),
                 inferenceStore: inferenceStore
             )
         else { return }
@@ -295,7 +292,6 @@ final class StoreWindowStore {
             }
             await install(
                 detail,
-                mode: mode,
                 tools: tools,
                 modelContext: modelContext,
                 routeStore: routeStore,
@@ -458,22 +454,19 @@ final class StoreWindowStore {
 
     func install(
         _ app: StoreAppDetail,
-        mode: StoreToolImportMode,
         tools: [Tool],
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore,
         inferenceStore: InferenceStore
     ) async {
         guard workingAppID == nil else { return }
-        if mode == .get,
-            case .openExisting(let tool) = installDisposition(for: app, tools: tools)
-        {
+        if case .openExisting(let tool) = installDisposition(for: app, tools: tools) {
             routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
             return
         }
         guard
             requireAccountForDownload(
-                .appDetail(app, mode: mode),
+                .appDetail(app),
                 inferenceStore: inferenceStore
             )
         else { return }
@@ -487,24 +480,22 @@ final class StoreWindowStore {
             if inferenceStore.ironsmithSession != nil {
                 await refreshPublished(showLoadingIndicator: false)
             }
-            if mode == .get {
-                switch installDisposition(for: app, tools: tools) {
-                case .openExisting(let tool):
-                    routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
-                    return
-                case .updateExisting(let tool):
-                    try await updateExistingTool(
-                        tool,
-                        from: app,
-                        modelContext: modelContext,
-                        routeStore: routeStore,
-                        inferenceStore: inferenceStore
-                    )
-                    contentRevision += 1
-                    return
-                case .createCopy:
-                    break
-                }
+            switch installDisposition(for: app, tools: tools) {
+            case .openExisting(let tool):
+                routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+                return
+            case .updateExisting(let tool):
+                try await updateExistingTool(
+                    tool,
+                    from: app,
+                    modelContext: modelContext,
+                    routeStore: routeStore,
+                    inferenceStore: inferenceStore
+                )
+                contentRevision += 1
+                return
+            case .createCopy:
+                break
             }
             let version = try await client.fetchVersion(
                 app.storeId,
@@ -514,7 +505,6 @@ final class StoreWindowStore {
             try await importAndBuild(
                 version,
                 app: app,
-                mode: mode,
                 displayName: nil,
                 modelContext: modelContext,
                 routeStore: routeStore
@@ -588,7 +578,6 @@ final class StoreWindowStore {
             try await importAndBuild(
                 download,
                 app: app,
-                mode: .get,
                 displayName: displayName,
                 modelContext: modelContext,
                 routeStore: routeStore
@@ -749,19 +738,17 @@ final class StoreWindowStore {
         inferenceStore: InferenceStore
     ) async {
         switch request {
-        case .appSummary(let app, let mode):
+        case .appSummary(let app):
             await install(
                 app,
-                mode: mode,
                 tools: tools,
                 modelContext: modelContext,
                 routeStore: routeStore,
                 inferenceStore: inferenceStore
             )
-        case .appDetail(let app, let mode):
+        case .appDetail(let app):
             await install(
                 app,
-                mode: mode,
                 tools: tools,
                 modelContext: modelContext,
                 routeStore: routeStore,
@@ -794,7 +781,6 @@ final class StoreWindowStore {
     private func importAndBuild(
         _ version: StoreVersionDownload,
         app: StoreAppDetail,
-        mode: StoreToolImportMode,
         displayName: String?,
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore
@@ -803,18 +789,12 @@ final class StoreWindowStore {
             StoreToolImportRequest(
                 app: app,
                 version: version,
-                mode: mode,
                 displayName: displayName,
-                initialGenerationState: mode == .get ? .generating : .ready
+                initialGenerationState: .generating
             ),
             modelContext
         )
-        routeStore.open(
-            .toolLibrary(
-                .selectTool(id: result.tool.id, focusPrompt: mode == .remix)
-            )
-        )
-        guard mode == .get else { return }
+        routeStore.open(.toolLibrary(.selectTool(id: result.tool.id, focusPrompt: false)))
 
         do {
             try await buildClient.buildTool(result.tool)

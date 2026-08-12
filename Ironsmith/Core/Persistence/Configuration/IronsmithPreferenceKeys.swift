@@ -10,6 +10,10 @@ enum IronsmithPreferenceKeys {
     nonisolated static let recentHostedIconPaletteIndices = "icon.recentHostedPaletteIndices"
     nonisolated static let toolLibraryViewMode = "toolLibrary.viewMode"
     nonisolated static let toolLibrarySortOrder = "toolLibrary.sortOrder"
+    nonisolated static let generatesIdentityForNewRemixes =
+        "store.generatesIdentityForNewRemixes"
+    nonisolated static let hasPresentedRemixIdentityNotice =
+        "store.hasPresentedRemixIdentityNotice"
 
     #if DEBUG
     nonisolated static let debugAlwaysShowWelcomeOnboarding = "debug.alwaysShowWelcomeOnboarding"
