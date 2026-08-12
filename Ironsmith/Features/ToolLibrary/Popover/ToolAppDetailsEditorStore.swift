@@ -107,6 +107,37 @@ final class ToolAppDetailsEditorStore {
         }
     }
 
+    func generateAndSaveRemixIdentity(
+        for tool: Tool,
+        name: String,
+        iconPrompt: String,
+        provider: ToolImageGenerationProvider,
+        in modelContext: ModelContext,
+        rename: (String) -> String?
+    ) async -> Bool {
+        guard tool.isGenerationReady, !isWorking else { return false }
+        editingToolID = tool.id
+        self.name = name
+        prompt = iconPrompt
+        candidate = nil
+        errorMessage = nil
+        currentPreviewData = currentPreviewData(for: tool.packageLayout)
+        isShowingSheet = false
+
+        await generate(for: tool, provider: provider)
+        guard !Task.isCancelled else { return false }
+        guard candidate != nil else {
+            isShowingSheet = true
+            return false
+        }
+
+        let didSave = await save(tool, in: modelContext, rename: rename)
+        if !didSave {
+            isShowingSheet = true
+        }
+        return didSave
+    }
+
     @discardableResult
     func save(
         _ tool: Tool,

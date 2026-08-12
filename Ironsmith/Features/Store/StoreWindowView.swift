@@ -18,6 +18,7 @@ struct StoreWindowView: View {
     @State private var categoryRefreshToken = 0
     @State private var searchTask: Task<Void, Never>?
     @State private var isSigningInToIronsmith = false
+    @State private var appPendingDeletion: StoreAppSummary?
 
     var body: some View {
         @Bindable var store = store
@@ -59,7 +60,8 @@ struct StoreWindowView: View {
                             onOpen: openApp,
                             onUpdateVersion: { tool in
                                 routeStore.open(.toolLibrary(.publishTool(tool.id)))
-                            }
+                            },
+                            onDelete: { appPendingDeletion = $0 }
                         )
                     }
                 }
@@ -189,6 +191,33 @@ struct StoreWindowView: View {
         } message: {
             Text(inferenceStore.presentedErrorMessage ?? "")
         }
+        .confirmationDialog(
+            appPendingDeletion.map { "Delete \($0.name) from Store?" }
+                ?? "Delete from Store?",
+            isPresented: Binding(
+                get: { appPendingDeletion != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        appPendingDeletion = nil
+                    }
+                }
+            )
+        ) {
+            Button("Delete from Store", role: .destructive) {
+                guard let app = appPendingDeletion else { return }
+                appPendingDeletion = nil
+                Task {
+                    await store.deleteFromStore(app, tools: tools, modelContext: modelContext)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                appPendingDeletion = nil
+            }
+        } message: {
+            Text(
+                "This app's source and downloads will no longer be available. Existing installed copies and remixes will not be deleted. This can't be undone."
+            )
+        }
     }
 
     private func openApp(_ app: StoreAppSummary) {
@@ -213,11 +242,10 @@ struct StoreWindowView: View {
         )
     }
 
-    private func install(_ app: StoreAppSummary, mode: StoreToolImportMode = .get) {
+    private func install(_ app: StoreAppSummary) {
         Task {
             await store.install(
                 app,
-                mode: mode,
                 tools: tools,
                 modelContext: modelContext,
                 routeStore: routeStore,
@@ -393,7 +421,7 @@ private struct StoreDiscoverHomeView: View {
     let inferenceStore: InferenceStore
     let onOpen: (StoreAppSummary) -> Void
     let onSeeAll: (StoreHomeSection) -> Void
-    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+    let onGet: (StoreAppSummary) -> Void
 
     private var isSearching: Bool {
         !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -451,7 +479,7 @@ private struct StoreSearchResultsView: View {
     let tools: [Tool]
     let inferenceStore: InferenceStore
     let onOpen: (StoreAppSummary) -> Void
-    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+    let onGet: (StoreAppSummary) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -474,7 +502,7 @@ private struct StoreSearchResultsView: View {
                         store.installDisposition(for: $0, tools: tools).buttonTitle
                     },
                     onOpen: onOpen,
-                    onAction: { onGet($0, .get) },
+                    onAction: onGet,
                     onApproachingEnd: {
                         await store.loadMoreSearchResults()
                     }
@@ -495,7 +523,7 @@ private struct StoreHomeSectionView: View {
     let actionTitle: (StoreAppSummary) -> String
     let onOpen: (StoreAppSummary) -> Void
     let onSeeAll: () -> Void
-    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+    let onGet: (StoreAppSummary) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -519,7 +547,7 @@ private struct StoreHomeSectionView: View {
                             actionTitle: actionTitle(app),
                             isWorking: workingAppID == app.id,
                             onOpen: { onOpen(app) },
-                            onAction: { onGet(app, .get) }
+                            onAction: { onGet(app) }
                         )
                         Divider()
                             .padding(.leading, 88)
@@ -538,7 +566,7 @@ private struct StoreSectionAppsView: View {
     let tools: [Tool]
     let inferenceStore: InferenceStore
     let onOpen: (StoreAppSummary) -> Void
-    let onGet: (StoreAppSummary, StoreToolImportMode) -> Void
+    let onGet: (StoreAppSummary) -> Void
     @State private var apps: [StoreAppSummary] = []
     @State private var nextOffset = 0
     @State private var hasMore = false
@@ -600,7 +628,7 @@ private struct StoreSectionAppsView: View {
                             store.installDisposition(for: $0, tools: tools).buttonTitle
                         },
                         onOpen: onOpen,
-                        onAction: { onGet($0, .get) },
+                        onAction: onGet,
                         onApproachingEnd: loadMore
                     )
                     .padding(.horizontal, 28)
@@ -788,6 +816,7 @@ private struct StorePublishedListView: View {
     let inferenceStore: InferenceStore
     let onOpen: (StoreAppSummary) -> Void
     let onUpdateVersion: (Tool) -> Void
+    let onDelete: (StoreAppSummary) -> Void
 
     var body: some View {
         ScrollView {
@@ -831,7 +860,8 @@ private struct StorePublishedListView: View {
                                                     ? .unlisted : .published
                                             )
                                         }
-                                    }
+                                    },
+                                    onDelete: { onDelete(app) }
                                 )
                                 Divider()
                                     .padding(.leading, 72)
@@ -867,6 +897,7 @@ private struct StorePublishedRowView: View {
     let onSelect: () -> Void
     let onUpdateVersion: (Tool) -> Void
     let onToggleStatus: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -903,10 +934,15 @@ private struct StorePublishedRowView: View {
                 Button(app.status == .published ? "Unlist" : "Relist") {
                     onToggleStatus()
                 }
+                Divider()
+                Button("Delete from Store...", role: .destructive) {
+                    onDelete()
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
+            .disabled(isWorking)
         }
         .frame(minHeight: 76)
     }
@@ -939,7 +975,6 @@ private struct StoreAppDetailDestinationView: View {
                 Task {
                     await store.install(
                         app,
-                        mode: .get,
                         tools: tools,
                         modelContext: modelContext,
                         routeStore: routeStore,

@@ -13,6 +13,8 @@ final class ToolLibraryStorePublisher {
     var publishLicense: StoreLicenseIdentifier = .mit
     var publishScreenshotData: Data?
     var publishScreenshotName: String?
+    var publishIconPreviewData: Data?
+    var originalRemixApp: StoreAppDetail?
     var isShowingPublishSheet = false
     var isPublishing = false
     var isUpdatingPublishedListing = false
@@ -27,13 +29,16 @@ final class ToolLibraryStorePublisher {
 
     @ObservationIgnored private let storeClient: IronsmithStoreClient
     @ObservationIgnored private let iconClient: ToolIconClient
+    @ObservationIgnored private let originalIconDataLoader: @Sendable (URL) async throws -> Data
     @ObservationIgnored private let buildClient: ToolBuildClient
     @ObservationIgnored private let saveModelContext: (ModelContext) throws -> Void
     @ObservationIgnored private var currentPublishedSourceSha256: String?
+    @ObservationIgnored private var originalRemixIconData: Data?
 
     init() {
         self.storeClient = .live
         self.iconClient = .live()
+        self.originalIconDataLoader = { try await StoreToolImportClient.downloadImage(from: $0) }
         self.buildClient = .live()
         self.saveModelContext = { try $0.save() }
     }
@@ -41,11 +46,15 @@ final class ToolLibraryStorePublisher {
     init(
         storeClient: IronsmithStoreClient,
         iconClient: ToolIconClient,
+        originalIconDataLoader: (@Sendable (URL) async throws -> Data)? = nil,
         buildClient: ToolBuildClient? = nil,
         saveModelContext: ((ModelContext) throws -> Void)? = nil
     ) {
         self.storeClient = storeClient
         self.iconClient = iconClient
+        self.originalIconDataLoader = originalIconDataLoader ?? {
+            try await StoreToolImportClient.downloadImage(from: $0)
+        }
         self.buildClient = buildClient ?? .live()
         self.saveModelContext = saveModelContext ?? { try $0.save() }
     }
@@ -57,6 +66,24 @@ final class ToolLibraryStorePublisher {
 
     func hasStoreSourceChanges(for tool: Tool) -> Bool {
         storeSourceChangesByToolID[tool.id] ?? (tool.storeSourceSha256 == nil)
+    }
+
+    func publishNameMatchesOriginal(for tool: Tool) -> Bool {
+        guard let originalRemixApp else { return false }
+        return StoreAppNameComparison.matches(tool.name, originalRemixApp.name)
+    }
+
+    var isUsingOriginalRemixIcon: Bool {
+        guard let originalRemixIconData, let publishIconPreviewData else { return false }
+        return originalRemixIconData == publishIconPreviewData
+    }
+
+    func canPublishRemixIdentity(for tool: Tool) -> Bool {
+        originalRemixApp == nil || !publishNameMatchesOriginal(for: tool)
+    }
+
+    func refreshPublishIdentity(for tool: Tool) {
+        publishIconPreviewData = try? Data(contentsOf: tool.packageLayout.cachedAppIconPreviewURL)
     }
 
     func refreshStoreSourceChanges(for tools: [Tool]) async {
@@ -210,6 +237,12 @@ final class ToolLibraryStorePublisher {
             publishLicense = .mit
             currentPublishedSourceSha256 = nil
         }
+        do {
+            try await preparePublishIdentity(for: tool, linkedApp: linkedApp)
+        } catch {
+            present(error)
+            return
+        }
         isUpdatingPublishedListing = linkedApp != nil
         publishingToolID = tool.id
         publishScreenshotData = nil
@@ -229,6 +262,13 @@ final class ToolLibraryStorePublisher {
         defer { isPublishing = false }
 
         do {
+            let publicationName = tool.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !publicationName.isEmpty else {
+                throw ToolLibraryStorePublishingError.invalidAppName
+            }
+            guard canPublishRemixIdentity(for: tool) else {
+                throw ToolLibraryStorePublishingError.remixNameMatchesOriginal
+            }
             let source = try sourceCode(for: tool)
             if linkedPublishedApp(for: tool) != nil,
                 let currentPublishedSourceSha256,
@@ -249,10 +289,6 @@ final class ToolLibraryStorePublisher {
             let app: StoreAppDetail
             let linkedApp = linkedPublishedApp(for: tool)
             if let linkedApp {
-                let remixedFromVersionId =
-                    tool.storeRemixedFromVersionId == tool.storeVersionId
-                    ? nil
-                    : tool.storeRemixedFromVersionId
                 app = try await storeClient.publishVersion(
                     StoreVersionPublicationRequest(
                         storeId: linkedApp.storeId,
@@ -267,14 +303,14 @@ final class ToolLibraryStorePublisher {
                         iconThumbnailJPEG: iconThumbnailJPEG,
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         replaceScreenshots: publishScreenshotData != nil,
-                        remixedFromVersionId: remixedFromVersionId
+                        remixedFromVersionId: tool.storeRemixedFromVersionId
                     )
                 )
             } else {
                 app = try await storeClient.publishApp(
                     StorePublicationRequest(
                         storeId: tool.storeId ?? IronsmithStoreConstants.communityStoreId,
-                        name: tool.name,
+                        name: publicationName,
                         shortDescription: publishShortDescription.trimmingCharacters(
                             in: .whitespacesAndNewlines),
                         description: publishDescription.trimmingCharacters(
@@ -286,7 +322,8 @@ final class ToolLibraryStorePublisher {
                         iconMasterJPEG: iconMasterJPEG,
                         iconThumbnailJPEG: iconThumbnailJPEG,
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
-                        remixedFromVersionId: tool.storeRemixedFromVersionId
+                        remixedFromVersionId: tool.storeVersionId
+                            ?? tool.storeRemixedFromVersionId
                     )
                 )
             }
@@ -294,9 +331,7 @@ final class ToolLibraryStorePublisher {
             await finishSuccessfulPublication(
                 app,
                 for: tool,
-                localRemixedFromVersionId: linkedApp == nil
-                    ? app.currentVersion.id
-                    : app.currentVersion.remixedFromVersionId,
+                localRemixedFromVersionId: app.currentVersion.remixedFromVersionId,
                 modelContext: modelContext,
                 routeStore: routeStore
             )
@@ -359,6 +394,48 @@ final class ToolLibraryStorePublisher {
     private func linkedPublishedApp(for tool: Tool) -> StoreAppSummary? {
         guard let storeAppId = tool.storeAppId else { return nil }
         return publishedStoreAppsByID[storeAppId]
+    }
+
+    private func preparePublishIdentity(
+        for tool: Tool,
+        linkedApp: StoreAppSummary?
+    ) async throws {
+        refreshPublishIdentity(for: tool)
+        originalRemixApp = nil
+        originalRemixIconData = nil
+
+        guard linkedApp == nil,
+            tool.storeVersionId != nil,
+            let storeId = tool.storeId,
+            let appId = tool.storeAppId
+        else { return }
+
+        let originalApp = try await storeClient.fetchApp(storeId, appId)
+        originalRemixApp = originalApp
+        if let url = originalApp.iconAsset?.url {
+            if let downloadedIconData = try? await originalIconDataLoader(url) {
+                originalRemixIconData = comparableOriginalIconData(
+                    downloadedIconData,
+                    app: originalApp
+                )
+            }
+        }
+    }
+
+    private func comparableOriginalIconData(
+        _ downloadedIconData: Data,
+        app: StoreAppDetail
+    ) -> Data {
+        guard app.iconMaster == nil,
+            let decodedIcon = try? ToolImageAssetEncoder.decodeImage(
+                downloadedIconData,
+                applyingOrientation: true
+            ),
+            let normalizedIcon = try? ToolImageAssetEncoder.iconAssets(from: decodedIcon)
+        else {
+            return downloadedIconData
+        }
+        return normalizedIcon.thumbnailData
     }
 
     private func sourceCode(for tool: Tool) throws -> String {
@@ -457,8 +534,10 @@ private struct StoreSourceChangeInput: Sendable {
 }
 
 private enum ToolLibraryStorePublishingError: LocalizedError {
+    case invalidAppName
     case invalidDisplayName
     case invalidHandle
+    case remixNameMatchesOriginal
     case localFinalizationFailed(String)
 
     static func localFinalizationWarning(
@@ -488,10 +567,14 @@ private enum ToolLibraryStorePublishingError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .invalidAppName:
+            "Enter an app name before publishing."
         case .invalidDisplayName:
             "Enter a display name between 1 and 80 characters."
         case .invalidHandle:
             "Enter a handle using 3–30 letters, numbers, or underscores that begins and ends with a letter or number."
+        case .remixNameMatchesOriginal:
+            "Current app name is the same as the original. Change the app name in Edit Details before publishing."
         case .localFinalizationFailed(let detail):
             """
             This app was published successfully, but Ironsmith could not finish updating its \

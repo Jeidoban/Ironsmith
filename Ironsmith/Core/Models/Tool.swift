@@ -5,6 +5,19 @@
 
 import Foundation
 
+enum StoreAppNameComparison {
+    static func matches(_ lhs: String, _ rhs: String) -> Bool {
+        normalized(lhs) == normalized(rhs)
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCompatibilityMapping
+            .lowercased(with: Locale(identifier: "en_US_POSIX"))
+    }
+}
+
 enum ToolGenerationState: String, Codable, CaseIterable, Equatable, Sendable {
     case ready
     case generating

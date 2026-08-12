@@ -25,8 +25,8 @@ enum StoreAppInstallDisposition {
 }
 
 enum StorePendingDownloadRequest {
-    case appSummary(StoreAppSummary, mode: StoreToolImportMode)
-    case appDetail(StoreAppDetail, mode: StoreToolImportMode)
+    case appSummary(StoreAppSummary)
+    case appDetail(StoreAppDetail)
     case version(StoreVersionMetadata, app: StoreAppDetail)
 }
 
@@ -62,6 +62,7 @@ final class StoreWindowStore {
     @ObservationIgnored private let importClient: StoreToolImportClient
     @ObservationIgnored private let buildClient: ToolBuildClient
     @ObservationIgnored private let packageMaterializer: ToolPackageMaterializer
+    @ObservationIgnored private let saveModelContext: (ModelContext) throws -> Void
     @ObservationIgnored private var searchPaginationRevision = 0
     @ObservationIgnored private var publishedPaginationRevision = 0
 
@@ -70,18 +71,21 @@ final class StoreWindowStore {
         self.importClient = .live
         self.buildClient = .live()
         self.packageMaterializer = .live
+        self.saveModelContext = { try $0.save() }
     }
 
     init(
         client: IronsmithStoreClient,
         importClient: StoreToolImportClient,
         buildClient: ToolBuildClient,
-        packageMaterializer: ToolPackageMaterializer = .live
+        packageMaterializer: ToolPackageMaterializer = .live,
+        saveModelContext: @escaping (ModelContext) throws -> Void = { try $0.save() }
     ) {
         self.client = client
         self.importClient = importClient
         self.buildClient = buildClient
         self.packageMaterializer = packageMaterializer
+        self.saveModelContext = saveModelContext
     }
 
     var selectedAppSummary: StoreAppSummary? {
@@ -260,22 +264,19 @@ final class StoreWindowStore {
 
     func install(
         _ app: StoreAppSummary,
-        mode: StoreToolImportMode,
         tools: [Tool],
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore,
         inferenceStore: InferenceStore
     ) async {
         selectedAppID = app.id
-        if mode == .get,
-            case .openExisting(let tool) = installDisposition(for: app, tools: tools)
-        {
+        if case .openExisting(let tool) = installDisposition(for: app, tools: tools) {
             routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
             return
         }
         guard
             requireAccountForDownload(
-                .appSummary(app, mode: mode),
+                .appSummary(app),
                 inferenceStore: inferenceStore
             )
         else { return }
@@ -291,7 +292,6 @@ final class StoreWindowStore {
             }
             await install(
                 detail,
-                mode: mode,
                 tools: tools,
                 modelContext: modelContext,
                 routeStore: routeStore,
@@ -454,22 +454,19 @@ final class StoreWindowStore {
 
     func install(
         _ app: StoreAppDetail,
-        mode: StoreToolImportMode,
         tools: [Tool],
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore,
         inferenceStore: InferenceStore
     ) async {
         guard workingAppID == nil else { return }
-        if mode == .get,
-            case .openExisting(let tool) = installDisposition(for: app, tools: tools)
-        {
+        if case .openExisting(let tool) = installDisposition(for: app, tools: tools) {
             routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
             return
         }
         guard
             requireAccountForDownload(
-                .appDetail(app, mode: mode),
+                .appDetail(app),
                 inferenceStore: inferenceStore
             )
         else { return }
@@ -483,24 +480,22 @@ final class StoreWindowStore {
             if inferenceStore.ironsmithSession != nil {
                 await refreshPublished(showLoadingIndicator: false)
             }
-            if mode == .get {
-                switch installDisposition(for: app, tools: tools) {
-                case .openExisting(let tool):
-                    routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
-                    return
-                case .updateExisting(let tool):
-                    try await updateExistingTool(
-                        tool,
-                        from: app,
-                        modelContext: modelContext,
-                        routeStore: routeStore,
-                        inferenceStore: inferenceStore
-                    )
-                    contentRevision += 1
-                    return
-                case .createCopy:
-                    break
-                }
+            switch installDisposition(for: app, tools: tools) {
+            case .openExisting(let tool):
+                routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+                return
+            case .updateExisting(let tool):
+                try await updateExistingTool(
+                    tool,
+                    from: app,
+                    modelContext: modelContext,
+                    routeStore: routeStore,
+                    inferenceStore: inferenceStore
+                )
+                contentRevision += 1
+                return
+            case .createCopy:
+                break
             }
             let version = try await client.fetchVersion(
                 app.storeId,
@@ -510,7 +505,6 @@ final class StoreWindowStore {
             try await importAndBuild(
                 version,
                 app: app,
-                mode: mode,
                 displayName: nil,
                 modelContext: modelContext,
                 routeStore: routeStore
@@ -584,7 +578,6 @@ final class StoreWindowStore {
             try await importAndBuild(
                 download,
                 app: app,
-                mode: .get,
                 displayName: displayName,
                 modelContext: modelContext,
                 routeStore: routeStore
@@ -613,6 +606,55 @@ final class StoreWindowStore {
         } catch {
             present(error)
         }
+    }
+
+    func deleteFromStore(
+        _ app: StoreAppSummary,
+        tools: [Tool],
+        modelContext: ModelContext
+    ) async {
+        guard workingAppID == nil else { return }
+        workingAppID = app.id
+        defer { workingAppID = nil }
+        do {
+            try await client.deleteApp(app.storeId, app.id)
+        } catch {
+            present(error)
+            return
+        }
+
+        let linkedTools = tools.filter { $0.storeId == app.storeId && $0.storeAppId == app.id }
+        let previousLinkages = linkedTools.map {
+            ($0, StoreToolLinkageSnapshot(tool: $0), $0.updatedAt)
+        }
+        for tool in linkedTools {
+            tool.storeId = nil
+            tool.storeAppId = nil
+            tool.storeVersionId = nil
+            tool.storeVersionNumber = nil
+            tool.storeSourceSha256 = nil
+            tool.storeImportedAt = nil
+            tool.updatedAt = .now
+        }
+        do {
+            try saveModelContext(modelContext)
+        } catch {
+            modelContext.rollback()
+            for (tool, linkage, updatedAt) in previousLinkages {
+                linkage.apply(to: tool)
+                tool.updatedAt = updatedAt
+            }
+            errorMessage =
+                "The Store listing was deleted, but Ironsmith could not unlink its local app copies: \(error.localizedDescription)"
+            return
+        }
+
+        publishedApps.removeAll { $0.id == app.id }
+        if selectedAppID == app.id {
+            selectedAppID = nil
+            selectedAppDetail = nil
+        }
+        contentRevision += 1
     }
 
     private func updateExistingTool(
@@ -696,19 +738,17 @@ final class StoreWindowStore {
         inferenceStore: InferenceStore
     ) async {
         switch request {
-        case .appSummary(let app, let mode):
+        case .appSummary(let app):
             await install(
                 app,
-                mode: mode,
                 tools: tools,
                 modelContext: modelContext,
                 routeStore: routeStore,
                 inferenceStore: inferenceStore
             )
-        case .appDetail(let app, let mode):
+        case .appDetail(let app):
             await install(
                 app,
-                mode: mode,
                 tools: tools,
                 modelContext: modelContext,
                 routeStore: routeStore,
@@ -741,7 +781,6 @@ final class StoreWindowStore {
     private func importAndBuild(
         _ version: StoreVersionDownload,
         app: StoreAppDetail,
-        mode: StoreToolImportMode,
         displayName: String?,
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore
@@ -750,18 +789,12 @@ final class StoreWindowStore {
             StoreToolImportRequest(
                 app: app,
                 version: version,
-                mode: mode,
                 displayName: displayName,
-                initialGenerationState: mode == .get ? .generating : .ready
+                initialGenerationState: .generating
             ),
             modelContext
         )
-        routeStore.open(
-            .toolLibrary(
-                .selectTool(id: result.tool.id, focusPrompt: mode == .remix)
-            )
-        )
-        guard mode == .get else { return }
+        routeStore.open(.toolLibrary(.selectTool(id: result.tool.id, focusPrompt: false)))
 
         do {
             try await buildClient.buildTool(result.tool)
@@ -840,7 +873,7 @@ final class StoreWindowStore {
         tool.storeVersionNumber = version.versionNumber
         tool.storeSourceSha256 = version.sourceSha256
         tool.storeImportedAt = Date()
-        tool.storeRemixedFromVersionId = version.id
+        tool.storeRemixedFromVersionId = version.remixedFromVersionId
         tool.updatedAt = Date()
     }
 
