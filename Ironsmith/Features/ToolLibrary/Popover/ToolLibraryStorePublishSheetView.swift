@@ -11,6 +11,8 @@ struct ToolLibraryStorePublishSheetView: View {
     @Binding var publishLicense: StoreLicenseIdentifier
     let publishScreenshotName: String?
     let publishIconPreviewData: Data?
+    let creatorHandle: String
+    let inheritedLegalAttributions: [StoreLegalAttribution]
     let publishNameMatchesOriginal: Bool
     let isUsingOriginalRemixIcon: Bool
     let isPublishing: Bool
@@ -19,6 +21,7 @@ struct ToolLibraryStorePublishSheetView: View {
     let onEditDetails: () -> Void
     let onPublish: () -> Void
     @State private var isChoosingScreenshot = false
+    @State private var isShowingLicense = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -77,19 +80,25 @@ struct ToolLibraryStorePublishSheetView: View {
             }
 
             field("License") {
-                Picker("License", selection: $publishLicense) {
-                    ForEach(StoreLicenseIdentifier.supported) { license in
-                        Text(license.title).tag(license)
+                HStack {
+                    Picker("License", selection: $publishLicense) {
+                        ForEach(StoreLicenseIdentifier.supported) { license in
+                            Text(license.title).tag(license)
+                        }
+                    }
+                    .labelsHidden()
+                    Spacer()
+                    Button("View License…") {
+                        isShowingLicense = true
                     }
                 }
-                .labelsHidden()
-                Text(
-                    isUpdatingPublishedListing
-                        ? "This license applies to the new version. Earlier versions keep their existing licenses."
-                        : publishLicense.summary
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                if isUpdatingPublishedListing {
+                    Text(
+                        "This license applies to the new version. Earlier versions keep their existing licenses."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
 
             field("Screenshot") {
@@ -126,6 +135,32 @@ struct ToolLibraryStorePublishSheetView: View {
                 onChooseScreenshot(url)
             }
         }
+        .sheet(isPresented: $isShowingLicense) {
+            StoreLicenseDetailSheet(
+                license: publishLicense,
+                documents: previewLegalDocuments,
+                inheritedAttributions: inheritedLegalAttributions
+            )
+        }
+    }
+
+    private var previewLegalDocuments: StoreLegalDocuments {
+        StoreLegalDocumentRenderer.render(
+            appName: tool.name,
+            currentVersionId: "preview-current-version",
+            primaryLicense: publishLicense,
+            attributions: inheritedLegalAttributions + [
+                StoreLegalAttribution(
+                    versionId: "preview-current-version",
+                    appName: tool.name,
+                    creatorHandle: creatorHandle,
+                    creatorDisplayName: creatorHandle,
+                    publicationYear: Calendar(identifier: .gregorian).component(
+                        .year, from: Date()),
+                    license: publishLicense
+                )
+            ]
+        )
     }
 
     private var appIdentitySection: some View {

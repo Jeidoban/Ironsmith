@@ -130,6 +130,10 @@ extension ToolLibraryTests {
         await publisher.beginPublishing(tool, inferenceStore: inferenceStore, tools: [tool])
 
         #expect(publisher.originalRemixApp?.id == original.id)
+        #expect(
+            publisher.publishInheritedLegalAttributions
+                == original.currentVersion.legalAttributions
+        )
         #expect(publisher.publishNameMatchesOriginal(for: tool))
         #expect(publisher.isUsingOriginalRemixIcon)
         #expect(!publisher.canPublishRemixIdentity(for: tool))

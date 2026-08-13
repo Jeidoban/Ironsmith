@@ -155,38 +155,36 @@ private struct StoreDetailMetadataStrip: View {
         .overlay(alignment: .top) { Divider() }
         .overlay(alignment: .bottom) { Divider() }
         .sheet(isPresented: $isShowingLicense) {
-            StoreLicenseDetailSheet(app: app)
+            StoreLicenseDetailSheet(
+                license: app.currentVersion.license,
+                documents: StoreLegalDocumentRenderer.render(
+                    appName: app.name,
+                    currentVersionId: app.currentVersion.id,
+                    primaryLicense: app.currentVersion.license,
+                    attributions: app.currentVersion.legalAttributions
+                ),
+                inheritedAttributions: app.currentVersion.legalAttributions.filter {
+                    $0.versionId != app.currentVersion.id
+                }
+            )
         }
     }
 
 }
 
-private struct StoreLicenseDetailSheet: View {
-    let app: StoreAppDetail
+struct StoreLicenseDetailSheet: View {
+    let license: StoreLicenseIdentifier
+    let documents: StoreLegalDocuments
+    let inheritedAttributions: [StoreLegalAttribution]
     @Environment(\.dismiss) private var dismiss
-
-    private var documents: StoreLegalDocuments {
-        StoreLegalDocumentRenderer.render(
-            appName: app.name,
-            currentVersionId: app.currentVersion.id,
-            primaryLicense: app.currentVersion.license,
-            attributions: app.currentVersion.legalAttributions
-        )
-    }
-
-    private var inherited: [StoreLegalAttribution] {
-        app.currentVersion.legalAttributions.filter {
-            $0.versionId != app.currentVersion.id
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(app.currentVersion.license.title)
+                    Text(license.title)
                         .font(.title2.weight(.semibold))
-                    Text(app.currentVersion.license.summary)
+                    Text(license.summary)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -194,11 +192,11 @@ private struct StoreLicenseDetailSheet: View {
                     .keyboardShortcut(.defaultAction)
             }
 
-            if !inherited.isEmpty {
+            if !inheritedAttributions.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Includes material under")
                         .font(.headline)
-                    ForEach(inherited, id: \.versionId) { attribution in
+                    ForEach(inheritedAttributions, id: \.versionId) { attribution in
                         Text(
                             "\(attribution.license.title) — \(attribution.appName), \(attribution.holderDisplayName)"
                         )

@@ -14,6 +14,7 @@ final class ToolLibraryStorePublisher {
     var publishScreenshotData: Data?
     var publishScreenshotName: String?
     var publishIconPreviewData: Data?
+    var publishInheritedLegalAttributions: [StoreLegalAttribution] = []
     var originalRemixApp: StoreAppDetail?
     var isShowingPublishSheet = false
     var isPublishing = false
@@ -225,6 +226,9 @@ final class ToolLibraryStorePublisher {
                 publishDescription = detail.description
                 publishCategory = detail.category
                 publishLicense = detail.currentVersion.license
+                publishInheritedLegalAttributions = detail.currentVersion.legalAttributions.filter {
+                    $0.versionId != detail.currentVersion.id
+                }
                 currentPublishedSourceSha256 = detail.currentVersion.sourceSha256.lowercased()
             } catch {
                 present(error)
@@ -235,6 +239,7 @@ final class ToolLibraryStorePublisher {
             publishDescription = ""
             publishCategory = tool.category
             publishLicense = .mit
+            publishInheritedLegalAttributions = []
             currentPublishedSourceSha256 = nil
         }
         do {
@@ -413,6 +418,7 @@ final class ToolLibraryStorePublisher {
 
         let originalApp = try await storeClient.fetchApp(storeId, appId)
         originalRemixApp = originalApp
+        publishInheritedLegalAttributions = originalApp.currentVersion.legalAttributions
         if let url = originalApp.iconAsset?.url {
             if let downloadedIconData = try? await originalIconDataLoader(url) {
                 originalRemixIconData = comparableOriginalIconData(

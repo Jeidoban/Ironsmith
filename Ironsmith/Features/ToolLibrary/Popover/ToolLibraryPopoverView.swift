@@ -633,6 +633,8 @@ struct ToolLibraryPopoverView: View {
                 publishLicense: $storePublisher.publishLicense,
                 publishScreenshotName: storePublisher.publishScreenshotName,
                 publishIconPreviewData: storePublisher.publishIconPreviewData,
+                creatorHandle: inferenceStore.ironsmithAccountSummary?.profile?.handle ?? "",
+                inheritedLegalAttributions: storePublisher.publishInheritedLegalAttributions,
                 publishNameMatchesOriginal: storePublisher.publishNameMatchesOriginal(
                     for: tool
                 ),
