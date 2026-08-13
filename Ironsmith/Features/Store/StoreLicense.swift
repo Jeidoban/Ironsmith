@@ -147,6 +147,7 @@ nonisolated enum StoreLegalDocumentRenderer {
                     \(heading)
                     License: \(attribution.license.rawValue)
                     \(upstreamCopyright)
+                    The source in this version was modified from the work above.
 
                     \(terms)
                     """

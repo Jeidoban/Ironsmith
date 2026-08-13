@@ -74,24 +74,22 @@ struct ToolLibraryStorePublishSheetView: View {
                     }
                     .labelsHidden()
                 }
-                field("License") {
-                    Picker("License", selection: $publishLicense) {
-                        ForEach(StoreLicenseIdentifier.supported) { license in
-                            Text(license.title).tag(license)
-                        }
+            }
+
+            field("License") {
+                Picker("License", selection: $publishLicense) {
+                    ForEach(StoreLicenseIdentifier.supported) { license in
+                        Text(license.title).tag(license)
                     }
-                    .labelsHidden()
-                    Text(publishLicense.summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
-            } else {
-                field("License") {
-                    Text(publishLicense.title)
-                    Text("The license is fixed for all versions of this Store app.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                .labelsHidden()
+                Text(
+                    isUpdatingPublishedListing
+                        ? "This license applies to the new version. Earlier versions keep their existing licenses."
+                        : publishLicense.summary
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             field("Screenshot") {

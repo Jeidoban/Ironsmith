@@ -293,6 +293,7 @@ final class ToolLibraryStorePublisher {
                     StoreVersionPublicationRequest(
                         storeId: linkedApp.storeId,
                         appId: linkedApp.id,
+                        license: publishLicense,
                         shortDescription: publishShortDescription.trimmingCharacters(
                             in: .whitespacesAndNewlines),
                         description: publishDescription.trimmingCharacters(

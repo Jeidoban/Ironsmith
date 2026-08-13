@@ -306,6 +306,7 @@ nonisolated struct StorePublicationRequest: Sendable {
 nonisolated struct StoreVersionPublicationRequest: Sendable {
     let storeId: String
     let appId: String
+    let license: StoreLicenseIdentifier
     let shortDescription: String
     let description: String
     let sourceCode: String
@@ -503,6 +504,7 @@ extension IronsmithStoreClient {
                     throw IronsmithStoreClientError.invalidResponse
                 }
                 let metadata = StoreVersionMetadataPayload(
+                    license: request.license,
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
                     generationSettings: StoreGenerationSettingsDTO(
                         settings: request.generationSettings),
@@ -733,6 +735,7 @@ nonisolated private struct StorePublicationMetadataPayload: Encodable {
 }
 
 nonisolated private struct StoreVersionMetadataPayload: Encodable {
+    let license: StoreLicenseIdentifier
     let runtimeVersion: String
     let generationSettings: StoreGenerationSettingsDTO
     let remixedFromVersionId: String?

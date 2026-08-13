@@ -191,7 +191,7 @@ extension ToolLibraryTests {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let detail = Self.publisherAppDetail()
+        let detail = Self.publisherAppDetail(license: .apache2)
         var client = IronsmithStoreClient.unconfigured
         client.listApps = { _, _, _, _, _, _, _ in
             StoreAppPage(apps: [StoreAppSummary(detail: detail)], hasMore: false)
@@ -227,6 +227,7 @@ extension ToolLibraryTests {
 
         #expect(publisher.publishShortDescription == detail.shortDescription)
         #expect(publisher.publishDescription == detail.description)
+        #expect(publisher.publishLicense == .apache2)
         #expect(publisher.isUpdatingPublishedListing)
         #expect(publisher.isShowingPublishSheet)
     }
@@ -590,6 +591,7 @@ extension ToolLibraryTests {
         )
         let parentVersionId = "00000000-0000-4000-8000-000000000299"
         let previousDetail = Self.publisherAppDetail(
+            license: .apache2,
             remixedFromVersionId: parentVersionId
         )
         let publishedDetail = Self.publisherAppDetail(
@@ -620,6 +622,7 @@ extension ToolLibraryTests {
         )
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
+        publisher.publishLicense = .mit
         let tool = Tool(
             name: "Clipboard Cleaner",
             executableName: "ClipboardCleaner",
@@ -663,6 +666,7 @@ extension ToolLibraryTests {
         #expect(await buildCapture.categories == [.finance])
         #expect(await buildCapture.versionNumbers == [2])
         #expect(await versionCapture.lastRemixedFromVersionId == parentVersionId)
+        #expect(await versionCapture.lastLicense == .mit)
         #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.remixedFromVersionId)
         #expect(publisher.errorMessage == nil)
         #expect(!publisher.isShowingPublishSheet)
@@ -857,6 +861,7 @@ extension ToolLibraryTests {
         versionNumber: Int = 1,
         category: StoreAppCategory = .utilities,
         source: String = publisherSource,
+        license: StoreLicenseIdentifier = .mit,
         remixedFromVersionId: String? = nil,
         icon: StoreAsset? = nil
     ) -> StoreAppDetail {
@@ -868,7 +873,7 @@ extension ToolLibraryTests {
             sourceSha256: IronsmithStoreClient.sha256Hex(for: source),
             generationSettings: StoreGenerationSettingsDTO(settings: .default),
             runtimeVersion: "ironsmith-macos-v1",
-            license: .mit,
+            license: license,
             legalAttributions: [
                 StoreLegalAttribution(
                     versionId: "00000000-0000-4000-8000-000000000201",
@@ -876,7 +881,7 @@ extension ToolLibraryTests {
                     creatorHandle: "jade",
                     creatorDisplayName: "Jade",
                     publicationYear: 2026,
-                    license: .mit
+                    license: license
                 )
             ],
             scannerVersion: "swift-execution-blocklist-v1",
@@ -968,9 +973,11 @@ private actor PublisherPublicationCapture {
 
 private actor PublisherVersionCapture {
     private(set) var lastRemixedFromVersionId: String?
+    private(set) var lastLicense: StoreLicenseIdentifier?
 
     func record(_ request: StoreVersionPublicationRequest) {
         lastRemixedFromVersionId = request.remixedFromVersionId
+        lastLicense = request.license
     }
 }
 

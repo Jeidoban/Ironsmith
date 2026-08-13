@@ -53,6 +53,11 @@ struct StoreLicenseTests {
         #expect(documents.license.contains("MIT TERMS"))
         #expect(documents.notice.contains("Copyright 2025 @original_author"))
         #expect(documents.attributions.contains("License: Apache-2.0"))
+        #expect(
+            documents.attributions.contains(
+                "The source in this version was modified from the work above."
+            )
+        )
         #expect(documents.attributions.contains("APACHE TERMS"))
     }
 
