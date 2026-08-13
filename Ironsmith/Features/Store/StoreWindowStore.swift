@@ -373,12 +373,13 @@ final class StoreWindowStore {
         }
     }
 
-    func select(_ app: StoreAppSummary) {
-        select(storeID: app.storeId, appID: app.id)
+    func select(_ app: StoreAppSummary, forceReload: Bool = false) {
+        select(storeID: app.storeId, appID: app.id, forceReload: forceReload)
     }
 
-    func select(storeID: String, appID: String) {
-        if selectedAppID == appID,
+    func select(storeID: String, appID: String, forceReload: Bool = false) {
+        if !forceReload,
+            selectedAppID == appID,
             selectedAppDetail?.id == appID || isLoadingDetail
         {
             return

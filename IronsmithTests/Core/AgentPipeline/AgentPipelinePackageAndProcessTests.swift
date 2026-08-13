@@ -441,6 +441,14 @@ extension AgentPipelineTests {
         try FileManager.default.createDirectory(
             at: cachedIconURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("icon".utf8).write(to: cachedIconURL)
+        let legalDirectoryURL = packageRoot.appendingPathComponent("Legal", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: legalDirectoryURL, withIntermediateDirectories: true)
+        try "license text".write(
+            to: legalDirectoryURL.appendingPathComponent("LICENSE.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let capture = BundleProcessCapture()
         let processClient = SwiftPackageProcessClient(
@@ -506,6 +514,13 @@ extension AgentPipelineTests {
         #expect(plist["LSApplicationCategoryType"] as? String == "public.app-category.finance")
         #expect(plist["LSUIElement"] as? Bool == true)
         #expect(plist["IronsmithQuitOnLastWindowClose"] as? Bool == true)
+        #expect(
+            try String(
+                contentsOf: appURL.appendingPathComponent(
+                    "Contents/Resources/Legal/LICENSE.txt"),
+                encoding: .utf8
+            ) == "license text"
+        )
         #expect(entitlements["com.apple.security.app-sandbox"] as? Bool == true)
         #expect(entitlements["com.apple.security.files.user-selected.read-write"] as? Bool == true)
         #expect(entitlements["com.apple.security.network.client"] as? Bool == true)

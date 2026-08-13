@@ -109,6 +109,7 @@ private struct StoreDetailMetadataStrip: View {
     let app: StoreAppDetail
     let onOpenCreator: (String, String) -> Void
     let onOpenRemix: (StoreRemixMetadata) -> Void
+    @State private var isShowingLicense = false
 
     private var columns: [GridItem] {
         if app.remix != nil {
@@ -144,13 +145,88 @@ private struct StoreDetailMetadataStrip: View {
                 value: String(app.currentVersion.versionNumber)
             )
             StoreDetailMetadataItem(title: "Category", value: app.category.title)
-            StoreDetailMetadataItem(title: "License", value: app.currentVersion.license)
+            StoreDetailLinkedMetadataItem(
+                title: "License",
+                value: app.currentVersion.license.title,
+                action: { isShowingLicense = true }
+            )
         }
         .padding(.vertical, 16)
         .overlay(alignment: .top) { Divider() }
         .overlay(alignment: .bottom) { Divider() }
+        .sheet(isPresented: $isShowingLicense) {
+            StoreLicenseDetailSheet(
+                license: app.currentVersion.license,
+                documents: StoreLegalDocumentRenderer.render(
+                    appName: app.name,
+                    currentVersionId: app.currentVersion.id,
+                    primaryLicense: app.currentVersion.license,
+                    attributions: app.currentVersion.legalAttributions
+                ),
+                inheritedAttributions: app.currentVersion.legalAttributions.filter {
+                    $0.versionId != app.currentVersion.id
+                }
+            )
+        }
     }
 
+}
+
+struct StoreLicenseDetailSheet: View {
+    let license: StoreLicenseIdentifier
+    let documents: StoreLegalDocuments
+    let inheritedAttributions: [StoreLegalAttribution]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(license.title)
+                        .font(.title2.weight(.semibold))
+                    Text(license.summary)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            if !inheritedAttributions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Includes material under")
+                        .font(.headline)
+                    ForEach(inheritedAttributions, id: \.versionId) { attribution in
+                        Text(
+                            "\(attribution.license.title) — \(attribution.appName), \(attribution.holderDisplayName)"
+                        )
+                        .font(.callout)
+                    }
+                }
+            }
+
+            TabView {
+                legalText(documents.license)
+                    .tabItem { Text("License") }
+                legalText(documents.notice)
+                    .tabItem { Text("Notice") }
+                legalText(documents.attributions)
+                    .tabItem { Text("Attributions") }
+            }
+        }
+        .padding(20)
+        .frame(width: 680, height: 620)
+    }
+
+    private func legalText(_ text: String) -> some View {
+        ScrollView {
+            Text(text)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+        }
+    }
 }
 
 private struct StoreDetailCreatorMetadataItem: View {
@@ -523,7 +599,7 @@ private struct StoreVersionMetadataList: View {
             row("Published", StoreVersionPresentation.formattedDate(version.publishedAt))
             row("App Type", version.generationSettings.appKind.displayName)
             row("Permissions", StoreVersionPresentation.permissionsSummary(version))
-            row("License", version.license)
+            row("License", version.license.title)
             row("Runtime", version.runtimeVersion)
             row("Source Hash", version.sourceSha256, monospaced: true)
         }

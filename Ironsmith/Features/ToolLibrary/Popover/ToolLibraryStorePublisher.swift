@@ -10,9 +10,11 @@ final class ToolLibraryStorePublisher {
     var publishShortDescription = ""
     var publishDescription = ""
     var publishCategory: StoreAppCategory = .utilities
+    var publishLicense: StoreLicenseIdentifier = .mit
     var publishScreenshotData: Data?
     var publishScreenshotName: String?
     var publishIconPreviewData: Data?
+    var publishInheritedLegalAttributions: [StoreLegalAttribution] = []
     var originalRemixApp: StoreAppDetail?
     var isShowingPublishSheet = false
     var isPublishing = false
@@ -223,6 +225,10 @@ final class ToolLibraryStorePublisher {
                 publishShortDescription = detail.shortDescription
                 publishDescription = detail.description
                 publishCategory = detail.category
+                publishLicense = detail.currentVersion.license
+                publishInheritedLegalAttributions = detail.currentVersion.legalAttributions.filter {
+                    $0.versionId != detail.currentVersion.id
+                }
                 currentPublishedSourceSha256 = detail.currentVersion.sourceSha256.lowercased()
             } catch {
                 present(error)
@@ -232,6 +238,8 @@ final class ToolLibraryStorePublisher {
             publishShortDescription = ""
             publishDescription = ""
             publishCategory = tool.category
+            publishLicense = .mit
+            publishInheritedLegalAttributions = []
             currentPublishedSourceSha256 = nil
         }
         do {
@@ -290,6 +298,7 @@ final class ToolLibraryStorePublisher {
                     StoreVersionPublicationRequest(
                         storeId: linkedApp.storeId,
                         appId: linkedApp.id,
+                        license: publishLicense,
                         shortDescription: publishShortDescription.trimmingCharacters(
                             in: .whitespacesAndNewlines),
                         description: publishDescription.trimmingCharacters(
@@ -313,6 +322,7 @@ final class ToolLibraryStorePublisher {
                         description: publishDescription.trimmingCharacters(
                             in: .whitespacesAndNewlines),
                         category: publishCategory,
+                        license: publishLicense,
                         sourceCode: source,
                         generationSettings: settings,
                         iconMasterJPEG: iconMasterJPEG,
@@ -408,6 +418,7 @@ final class ToolLibraryStorePublisher {
 
         let originalApp = try await storeClient.fetchApp(storeId, appId)
         originalRemixApp = originalApp
+        publishInheritedLegalAttributions = originalApp.currentVersion.legalAttributions
         if let url = originalApp.iconAsset?.url {
             if let downloadedIconData = try? await originalIconDataLoader(url) {
                 originalRemixIconData = comparableOriginalIconData(
@@ -478,6 +489,23 @@ final class ToolLibraryStorePublisher {
             persistenceError = error
         }
 
+        let legalDocumentsError: Error?
+        do {
+            let version = app.currentVersion
+            try StoreLegalPackageWriter.write(
+                StoreLegalDocumentRenderer.render(
+                    appName: app.name,
+                    currentVersionId: version.id,
+                    primaryLicense: version.license,
+                    attributions: version.legalAttributions
+                ),
+                to: tool.packageLayout
+            )
+            legalDocumentsError = nil
+        } catch {
+            legalDocumentsError = error
+        }
+
         let rebuildError: Error?
         do {
             try await buildClient.buildTool(tool)
@@ -492,6 +520,7 @@ final class ToolLibraryStorePublisher {
 
         if let warning = ToolLibraryStorePublishingError.localFinalizationWarning(
             persistenceError: persistenceError,
+            legalDocumentsError: legalDocumentsError,
             rebuildError: rebuildError
         ) {
             present(warning)
@@ -520,12 +549,18 @@ private enum ToolLibraryStorePublishingError: LocalizedError {
 
     static func localFinalizationWarning(
         persistenceError: Error?,
+        legalDocumentsError: Error?,
         rebuildError: Error?
     ) -> Self? {
         var details: [String] = []
         if let persistenceError {
             details.append(
                 "Ironsmith could not save the Store linkage locally: \(persistenceError.localizedDescription)"
+            )
+        }
+        if let legalDocumentsError {
+            details.append(
+                "Ironsmith could not write the local Legal documents: \(legalDocumentsError.localizedDescription)"
             )
         }
         if let rebuildError {

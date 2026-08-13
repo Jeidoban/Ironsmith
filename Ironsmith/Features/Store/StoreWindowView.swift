@@ -319,7 +319,7 @@ struct StoreWindowView: View {
                 await store.refreshPublished(showLoadingIndicator: false)
                 categoryRefreshToken += 1
                 if let app = store.publishedApps.first(where: { $0.id == appID }) {
-                    store.select(app)
+                    store.select(app, forceReload: true)
                     path = [.app(StoreAppRoute(app: app))]
                 }
             }

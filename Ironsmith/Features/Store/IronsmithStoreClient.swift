@@ -118,7 +118,8 @@ nonisolated struct StoreVersionMetadata: Decodable, Identifiable, Equatable, Sen
     let sourceSha256: String
     let generationSettings: StoreGenerationSettingsDTO
     let runtimeVersion: String
-    let license: String
+    let license: StoreLicenseIdentifier
+    let legalAttributions: [StoreLegalAttribution]
     let scannerVersion: String
     let remixedFromVersionId: String?
     let publishedAt: String
@@ -133,7 +134,8 @@ nonisolated struct StoreVersionDownload: Decodable, Equatable, Sendable {
     let sourceSha256: String
     let generationSettings: StoreGenerationSettingsDTO
     let runtimeVersion: String
-    let license: String
+    let license: StoreLicenseIdentifier
+    let legalAttributions: [StoreLegalAttribution]
     let scannerVersion: String
     let remixedFromVersionId: String?
     let publishedAt: String
@@ -292,6 +294,7 @@ nonisolated struct StorePublicationRequest: Sendable {
     let shortDescription: String
     let description: String
     let category: StoreAppCategory
+    let license: StoreLicenseIdentifier
     let sourceCode: String
     let generationSettings: ToolGenerationSettings
     let iconMasterJPEG: Data
@@ -303,6 +306,7 @@ nonisolated struct StorePublicationRequest: Sendable {
 nonisolated struct StoreVersionPublicationRequest: Sendable {
     let storeId: String
     let appId: String
+    let license: StoreLicenseIdentifier
     let shortDescription: String
     let description: String
     let sourceCode: String
@@ -328,6 +332,7 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
     case invalidResponse
     case requestFailed(statusCode: Int, message: String)
     case sourceHashMismatch(expected: String, actual: String)
+    case unsupportedLicense(String)
     case unchangedStoreVersion
 
     var errorDescription: String? {
@@ -342,6 +347,8 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
             return "The Ironsmith Store returned HTTP \(statusCode): \(message)"
         case .sourceHashMismatch:
             return "The downloaded source did not match the scanned source hash."
+        case .unsupportedLicense(let identifier):
+            return "Update Ironsmith to download or remix apps containing the \(identifier) license."
         case .unchangedStoreVersion:
             return "The source matches the currently published version. Make a source change before publishing a new version."
         }
@@ -453,6 +460,7 @@ extension IronsmithStoreClient {
                     shortDescription: request.shortDescription,
                     description: request.description,
                     category: request.category,
+                    license: request.license,
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
                     generationSettings: StoreGenerationSettingsDTO(
                         settings: request.generationSettings),
@@ -496,6 +504,7 @@ extension IronsmithStoreClient {
                     throw IronsmithStoreClientError.invalidResponse
                 }
                 let metadata = StoreVersionMetadataPayload(
+                    license: request.license,
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
                     generationSettings: StoreGenerationSettingsDTO(
                         settings: request.generationSettings),
@@ -719,12 +728,14 @@ nonisolated private struct StorePublicationMetadataPayload: Encodable {
     let shortDescription: String
     let description: String
     let category: StoreAppCategory
+    let license: StoreLicenseIdentifier
     let runtimeVersion: String
     let generationSettings: StoreGenerationSettingsDTO
     let remixedFromVersionId: String?
 }
 
 nonisolated private struct StoreVersionMetadataPayload: Encodable {
+    let license: StoreLicenseIdentifier
     let runtimeVersion: String
     let generationSettings: StoreGenerationSettingsDTO
     let remixedFromVersionId: String?
