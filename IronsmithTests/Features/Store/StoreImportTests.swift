@@ -784,6 +784,47 @@ struct StoreImportTests {
 
     @MainActor
     @Test
+    func forcedStoreDetailSelectionReloadsTheCurrentlySelectedApp() async {
+        let sourceV1 = Self.sourceCode("version one")
+        let sourceV2 = Self.sourceCode("version two")
+        let firstVersion = Self.versionMetadata(versionNumber: 1, sourceCode: sourceV1)
+        let secondVersion = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000202",
+            versionNumber: 2,
+            sourceCode: sourceV2
+        )
+        let first = Self.appListing(sourceCode: sourceV1, versions: [firstVersion])
+        let updated = Self.appListing(
+            sourceCode: sourceV2,
+            versions: [firstVersion, secondVersion]
+        )
+        let responses = StoreDetailResponseSequence([first, updated])
+        var client = IronsmithStoreClient.unconfigured
+        client.fetchApp = { _, _ in
+            await responses.next()
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        store.select(storeID: first.storeId, appID: first.id)
+        await Self.waitForStoreDetail(first.id, in: store)
+        #expect(store.selectedAppDetail?.currentVersion.versionNumber == 1)
+
+        store.select(storeID: first.storeId, appID: first.id, forceReload: true)
+        #expect(store.isLoadingDetail)
+        await Self.waitForStoreDetail(first.id, in: store)
+
+        #expect(store.selectedAppDetail?.currentVersion.versionNumber == 2)
+        #expect(await responses.requestCount == 2)
+    }
+
+    @MainActor
+    @Test
     func searchPaginationAppendsUniqueResultsAndAdvancesOffset() async {
         let first = Self.appSummary(id: "app-one")
         let second = Self.appSummary(id: "app-two")
@@ -1524,6 +1565,21 @@ struct StoreImportTests {
                 "ironsmith-store-import-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
+    }
+}
+
+private actor StoreDetailResponseSequence {
+    private let responses: [StoreAppDetail]
+    private(set) var requestCount = 0
+
+    init(_ responses: [StoreAppDetail]) {
+        self.responses = responses
+    }
+
+    func next() -> StoreAppDetail {
+        let response = responses[min(requestCount, responses.count - 1)]
+        requestCount += 1
+        return response
     }
 }
 
