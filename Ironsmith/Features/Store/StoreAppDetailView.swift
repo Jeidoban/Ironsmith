@@ -436,11 +436,18 @@ nonisolated struct StorePermissionPresentation: Identifiable, Equatable, Sendabl
         let sandbox: [Self] = settings.sandboxEnabled
             ? settings.sandboxPermissions.enabledPermissions.map { permission in
                 switch permission {
-                case .incomingConnections, .outgoingConnections:
+                case .incomingConnections:
                     Self(
                         id: "sandbox.\(permission.rawValue)",
                         title: permission.displayName,
-                        explanation: "Access to network connections",
+                        explanation: "Accept connections from other devices",
+                        systemImage: "server.rack"
+                    )
+                case .outgoingConnections:
+                    Self(
+                        id: "sandbox.\(permission.rawValue)",
+                        title: permission.displayName,
+                        explanation: "Connect to websites and online services",
                         systemImage: "network"
                     )
                 case .userSelectedFiles:
@@ -450,12 +457,33 @@ nonisolated struct StorePermissionPresentation: Identifiable, Equatable, Sendabl
                         explanation: "Access to files you choose",
                         systemImage: "folder.badge.plus"
                     )
-                case .downloadsFolder, .picturesFolder, .musicFolder, .moviesFolder:
+                case .downloadsFolder:
                     Self(
                         id: "sandbox.\(permission.rawValue)",
                         title: permission.displayName,
-                        explanation: "Read and write access to this folder",
-                        systemImage: "folder"
+                        explanation: "Read and write items in your Downloads folder",
+                        systemImage: "tray.and.arrow.down"
+                    )
+                case .picturesFolder:
+                    Self(
+                        id: "sandbox.\(permission.rawValue)",
+                        title: permission.displayName,
+                        explanation: "Read and write images in your Pictures folder",
+                        systemImage: "photo.on.rectangle"
+                    )
+                case .musicFolder:
+                    Self(
+                        id: "sandbox.\(permission.rawValue)",
+                        title: permission.displayName,
+                        explanation: "Read and write music in your Music folder",
+                        systemImage: "music.note"
+                    )
+                case .moviesFolder:
+                    Self(
+                        id: "sandbox.\(permission.rawValue)",
+                        title: permission.displayName,
+                        explanation: "Read and write videos in your Movies folder",
+                        systemImage: "film"
                     )
                 }
             }

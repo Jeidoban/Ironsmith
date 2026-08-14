@@ -13,6 +13,7 @@ struct SettingsWindowView: View {
     #endif
     @State private var presentedSheet: SettingsPresentedSheet?
     @State private var pendingProviderEditorIdentifierAfterSheetDismissal: String?
+    @State private var isShowingNestedSettingsSheet = false
     @State private var hasPreparedSettings = false
 
     var body: some View {
@@ -44,28 +45,20 @@ struct SettingsWindowView: View {
         }
         .sheet(
             item: $presentedSheet,
-            onDismiss: presentPendingProviderEditorIfNeeded
-        ) { sheet in
-            switch sheet {
-            case .addProvider(let initialKind):
-                AddProviderSheetView(
-                    initialKind: initialKind,
-                    onProviderAdded: handleProviderAdded
-                )
-            case .editProvider(let provider, let showsCreditPacks):
-                ProviderEditorSheetView(
-                    provider: provider,
-                    showsCreditPacksOnAppear: showsCreditPacks
-                )
-            case .manageAccount:
-                ManageIronsmithAccountSheetView(
-                    onBuyCredits: {
-                        presentedSheet = inferenceStore.providers
-                            .first { $0.kind == .ironsmith }
-                            .map { .editProvider($0, showsCreditPacks: true) }
-                    }
-                )
+            onDismiss: {
+                isShowingNestedSettingsSheet = false
+                presentPendingProviderEditorIfNeeded()
             }
+        ) { sheet in
+            settingsSheetContent(sheet)
+                .alert(
+                    "Settings Error",
+                    isPresented: activeSheetErrorAlertBinding
+                ) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(inferenceStore.presentedErrorMessage ?? "")
+                }
         }
         .alert(
             "Settings Error",
@@ -127,13 +120,55 @@ struct SettingsWindowView: View {
 
     private var errorAlertBinding: Binding<Bool> {
         Binding(
-            get: { inferenceStore.presentedErrorMessage != nil },
+            get: { inferenceStore.presentedErrorMessage != nil && presentedSheet == nil },
             set: { isPresented in
                 if !isPresented {
                     inferenceStore.clearPresentedError()
                 }
             }
         )
+    }
+
+    private var activeSheetErrorAlertBinding: Binding<Bool> {
+        Binding(
+            get: {
+                inferenceStore.presentedErrorMessage != nil
+                    && presentedSheet != nil
+                    && !isShowingNestedSettingsSheet
+            },
+            set: { isPresented in
+                if !isPresented {
+                    inferenceStore.clearPresentedError()
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func settingsSheetContent(_ sheet: SettingsPresentedSheet) -> some View {
+        switch sheet {
+        case .addProvider(let initialKind):
+            AddProviderSheetView(
+                initialKind: initialKind,
+                onProviderAdded: handleProviderAdded
+            )
+        case .editProvider(let provider, let showsCreditPacks):
+            ProviderEditorSheetView(
+                provider: provider,
+                showsCreditPacksOnAppear: showsCreditPacks,
+                onNestedSheetPresentationChange: { isPresented in
+                    isShowingNestedSettingsSheet = isPresented
+                }
+            )
+        case .manageAccount:
+            ManageIronsmithAccountSheetView(
+                onBuyCredits: {
+                    presentedSheet = inferenceStore.providers
+                        .first { $0.kind == .ironsmith }
+                        .map { .editProvider($0, showsCreditPacks: true) }
+                }
+            )
+        }
     }
 }
 
