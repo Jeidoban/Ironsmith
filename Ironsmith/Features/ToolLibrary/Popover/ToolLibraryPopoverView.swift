@@ -268,6 +268,7 @@ struct ToolLibraryPopoverView: View {
             ToolLibraryCreatorProfileSheetView(
                 displayName: $storePublisher.creatorDisplayName,
                 handle: $storePublisher.creatorHandle,
+                errorMessage: $storePublisher.errorMessage,
                 isSaving: storePublisher.isSavingCreatorProfile,
                 isClaimingHandle:
                     inferenceStore.ironsmithAccountSummary?.profile?.handle == nil,
@@ -640,6 +641,7 @@ struct ToolLibraryPopoverView: View {
                 ),
                 isUsingOriginalRemixIcon: storePublisher.isUsingOriginalRemixIcon,
                 isPublishing: storePublisher.isPublishing,
+                errorMessage: $storePublisher.errorMessage,
                 onChooseScreenshot: { url in
                     storePublisher.importScreenshot(from: url)
                 },
@@ -1256,7 +1258,11 @@ struct ToolLibraryPopoverView: View {
 
     private var storeErrorPresentedBinding: Binding<Bool> {
         Binding(
-            get: { storePublisher.errorMessage != nil },
+            get: {
+                storePublisher.errorMessage != nil
+                    && !storePublisher.isShowingPublishSheet
+                    && !storePublisher.isShowingCreatorProfileSheet
+            },
             set: { isPresented in
                 if !isPresented {
                     storePublisher.errorMessage = nil

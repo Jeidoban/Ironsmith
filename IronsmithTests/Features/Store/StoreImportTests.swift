@@ -1252,19 +1252,53 @@ struct StoreImportTests {
             sourceCode: source,
             settings: ToolGenerationSettings(
                 sandboxEnabled: true,
-                sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections]),
+                sandboxPermissions: GeneratedAppSandboxPermissions([
+                    .incomingConnections,
+                    .outgoingConnections,
+                    .userSelectedFiles,
+                    .downloadsFolder,
+                    .picturesFolder,
+                    .musicFolder,
+                    .moviesFolder,
+                ]),
                 resourcePermissions: GeneratedAppResourcePermissions([.microphone])
             )
         )
         let items = StorePermissionPresentation.items(for: permissionVersion)
 
-        #expect(items.map(\.title) == ["Internet access", "Microphone"])
+        #expect(items.map(\.title) == [
+            "Incoming connections (server)",
+            "Internet access",
+            "User-selected files",
+            "Downloads folder",
+            "Pictures folder",
+            "Music folder",
+            "Movies folder",
+            "Microphone",
+        ])
         #expect(
             items.map(\.explanation) == [
-                "Access to network connections",
+                "Accept connections from other devices",
+                "Connect to websites and online services",
+                "Access to files you choose",
+                "Read and write items in your Downloads folder",
+                "Read and write images in your Pictures folder",
+                "Read and write music in your Music folder",
+                "Read and write videos in your Movies folder",
                 "Access to audio input",
             ]
         )
+        #expect(Set(items.map(\.explanation)).count == items.count)
+        #expect(items.map(\.systemImage) == [
+            "server.rack",
+            "network",
+            "folder.badge.plus",
+            "tray.and.arrow.down",
+            "photo.on.rectangle",
+            "music.note",
+            "film",
+            "mic",
+        ])
 
         let emptyVersion = Self.versionMetadata(
             versionNumber: 1,

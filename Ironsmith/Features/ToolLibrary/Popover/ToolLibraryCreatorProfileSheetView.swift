@@ -3,6 +3,7 @@ import SwiftUI
 struct ToolLibraryCreatorProfileSheetView: View {
     @Binding var displayName: String
     @Binding var handle: String
+    @Binding var errorMessage: String?
     let isSaving: Bool
     let isClaimingHandle: Bool
     let onCancel: () -> Void
@@ -62,6 +63,22 @@ struct ToolLibraryCreatorProfileSheetView: View {
                 "@\(IronsmithCreatorHandle.normalized(handle)) cannot be changed after it is claimed."
             )
         }
+        .alert("Ironsmith Store", isPresented: errorPresentedBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private var errorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    errorMessage = nil
+                }
+            }
+        )
     }
 
     static func isValidHandle(_ handle: String) -> Bool {

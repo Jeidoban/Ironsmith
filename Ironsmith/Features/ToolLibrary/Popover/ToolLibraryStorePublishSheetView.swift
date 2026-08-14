@@ -16,6 +16,7 @@ struct ToolLibraryStorePublishSheetView: View {
     let publishNameMatchesOriginal: Bool
     let isUsingOriginalRemixIcon: Bool
     let isPublishing: Bool
+    @Binding var errorMessage: String?
     let onChooseScreenshot: (URL) -> Void
     let onCancel: () -> Void
     let onEditDetails: () -> Void
@@ -30,7 +31,7 @@ struct ToolLibraryStorePublishSheetView: View {
                     ? "Update \(tool.name) on Ironsmith Store"
                     : "Publish \(tool.name) to Ironsmith Store"
             )
-                .font(.headline)
+            .font(.headline)
 
             appIdentitySection
 
@@ -39,11 +40,11 @@ struct ToolLibraryStorePublishSheetView: View {
                     "Summarize your app in a few words",
                     text: $publishShortDescription
                 )
-                    .onChange(of: publishShortDescription) { _, value in
-                        if value.count > 40 {
-                            publishShortDescription = String(value.prefix(40))
-                        }
+                .onChange(of: publishShortDescription) { _, value in
+                    if value.count > 40 {
+                        publishShortDescription = String(value.prefix(40))
                     }
+                }
             }
             field("Description") {
                 ZStack(alignment: .topLeading) {
@@ -142,6 +143,25 @@ struct ToolLibraryStorePublishSheetView: View {
                 inheritedAttributions: inheritedLegalAttributions
             )
         }
+        .alert(
+            "Ironsmith Store",
+            isPresented: errorPresentedBinding
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private var errorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    errorMessage = nil
+                }
+            }
+        )
     }
 
     private var previewLegalDocuments: StoreLegalDocuments {

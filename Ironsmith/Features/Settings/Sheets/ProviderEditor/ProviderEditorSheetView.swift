@@ -16,6 +16,7 @@ struct ProviderEditorSheetView: View {
     @State private var isSigningOut = false
     @State private var isSigningInToChatGPT = false
     @State private var isSigningOutOfChatGPT = false
+    let onNestedSheetPresentationChange: (Bool) -> Void
 
     private var isCustomOpenAICompatible: Bool {
         provider.kind == .customOpenAICompatible
@@ -39,9 +40,11 @@ struct ProviderEditorSheetView: View {
 
     init(
         provider: ProviderConfig,
-        showsCreditPacksOnAppear: Bool = false
+        showsCreditPacksOnAppear: Bool = false,
+        onNestedSheetPresentationChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.provider = provider
+        self.onNestedSheetPresentationChange = onNestedSheetPresentationChange
         _isShowingCreditPacks = State(initialValue: showsCreditPacksOnAppear)
     }
 
@@ -167,6 +170,7 @@ struct ProviderEditorSheetView: View {
         }
         .frame(minWidth: 540, minHeight: 430)
         .onAppear {
+            onNestedSheetPresentationChange(isShowingCreditPacks)
             apiKey = inferenceStore.apiKey(for: provider)
             displayName = provider.displayName
             baseURLString = provider.baseURLString
@@ -189,6 +193,12 @@ struct ProviderEditorSheetView: View {
                 await inferenceStore.refreshIronsmithAccountSummary()
             }
         }
+        .onChange(of: isShowingCreditPacks) { _, isPresented in
+            onNestedSheetPresentationChange(isPresented)
+        }
+        .onDisappear {
+            onNestedSheetPresentationChange(false)
+        }
         .textFieldStyle(.roundedBorder)
         .sheet(isPresented: $isShowingCreditPacks, onDismiss: {
             Task {
@@ -197,6 +207,11 @@ struct ProviderEditorSheetView: View {
         }) {
             IronsmithCreditPackPurchaseSheetView()
                 .environment(inferenceStore)
+                .alert("Settings Error", isPresented: errorAlertBinding) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(inferenceStore.presentedErrorMessage ?? "")
+                }
         }
         .confirmationDialog(
             "Delete \(provider.displayName)?",
@@ -219,6 +234,17 @@ struct ProviderEditorSheetView: View {
     private var providerSummaryRow: some View {
         ProviderSummaryRowView(provider: provider, logoSize: 34, subtitleFont: .subheadline)
             .padding(.vertical, 2)
+    }
+
+    private var errorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { inferenceStore.presentedErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    inferenceStore.clearPresentedError()
+                }
+            }
+        )
     }
 
     @ViewBuilder
