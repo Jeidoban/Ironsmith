@@ -888,7 +888,6 @@ extension ToolLibraryTests {
                     license: license
                 )
             ],
-            scannerVersion: "swift-execution-blocklist-v1",
             remixedFromVersionId: remixedFromVersionId,
             publishedAt: "2026-07-28T00:00:00.000Z"
         )

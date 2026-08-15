@@ -120,7 +120,6 @@ nonisolated struct StoreVersionMetadata: Decodable, Identifiable, Equatable, Sen
     let runtimeVersion: String
     let license: StoreLicenseIdentifier
     let legalAttributions: [StoreLegalAttribution]
-    let scannerVersion: String
     let remixedFromVersionId: String?
     let publishedAt: String
 }
@@ -136,7 +135,6 @@ nonisolated struct StoreVersionDownload: Decodable, Equatable, Sendable {
     let runtimeVersion: String
     let license: StoreLicenseIdentifier
     let legalAttributions: [StoreLegalAttribution]
-    let scannerVersion: String
     let remixedFromVersionId: String?
     let publishedAt: String
     let sourceCode: String

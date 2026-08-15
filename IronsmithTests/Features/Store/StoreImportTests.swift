@@ -1459,7 +1459,6 @@ struct StoreImportTests {
                     license: .mit
                 )
             ],
-            scannerVersion: "swift-execution-blocklist-v1",
             remixedFromVersionId: nil,
             publishedAt: "2026-06-27T00:00:00.000Z"
         )
@@ -1526,7 +1525,6 @@ struct StoreImportTests {
                     license: .mit
                 )
             ],
-            scannerVersion: "swift-execution-blocklist-v1",
             remixedFromVersionId: nil,
             publishedAt: publishedAt
         )
@@ -1582,7 +1580,6 @@ struct StoreImportTests {
                     license: license
                 )
             ],
-            scannerVersion: "swift-execution-blocklist-v1",
             remixedFromVersionId: remixedFromVersionId,
             publishedAt: "2026-06-27T00:00:00.000Z",
             sourceCode: sourceCode
