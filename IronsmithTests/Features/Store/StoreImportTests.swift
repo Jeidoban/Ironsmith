@@ -9,6 +9,47 @@ import Testing
 
 struct StoreImportTests {
     @Test
+    func storeClientPresentsStructuredReviewRejectionReasons() throws {
+        let data = try #require(
+            """
+            {
+              "error": {
+                "code": "store_review_rejected",
+                "message": "Automated review found content or behavior that is not allowed.",
+                "verdict": "reject",
+                "findings": [
+                  {
+                    "code": "credential_exposure",
+                    "summary": "The app contains an embedded credential or other secret that would be exposed when published.",
+                    "detail": "The source embeds a service credential directly.",
+                    "line": 7
+                  },
+                  {
+                    "code": "deceptive_behavior",
+                    "summary": "The app's behavior may be deceptive or misrepresented.",
+                    "detail": "The listing says data stays local, but the app uploads clipboard contents.",
+                    "line": null
+                  }
+                ]
+              }
+            }
+            """.data(using: .utf8)
+        )
+
+        let error = IronsmithStoreClient.backendError(statusCode: 422, data: data)
+
+        #expect(
+            error == .reviewRejected(reasons: [
+                "The source embeds a service credential directly. (ContentView.swift line 7)",
+                "The listing says data stays local, but the app uploads clipboard contents.",
+            ])
+        )
+        #expect(error.localizedDescription.contains("service credential"))
+        #expect(error.localizedDescription.contains("uploads clipboard contents"))
+        #expect(!error.localizedDescription.contains("HTTP 422"))
+    }
+
+    @Test
     func freshStoreInstallUsesDownloadTitle() {
         #expect(StoreAppInstallDisposition.createCopy.buttonTitle == "Download")
     }
