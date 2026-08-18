@@ -156,7 +156,7 @@ struct StoreWindowView: View {
             Text(store.errorMessage ?? "")
         }
         .alert(
-            "Sign in to Continue",
+            "Sign in to Download",
             isPresented: Binding(
                 get: { store.isStoreSignInRequired },
                 set: { isPresented in
@@ -175,7 +175,7 @@ struct StoreWindowView: View {
             }
         } message: {
             Text(
-                "Sign in with Ironsmith to view source code, ask about apps, and download apps from the Ironsmith Store."
+                "Sign in with Ironsmith to download and install apps from the Ironsmith Store."
             )
         }
         .alert(
@@ -986,10 +986,6 @@ private struct StoreAppDetailDestinationView: View {
             },
             onOpenRemix: onOpenRemix,
             onOpenCreator: onOpenCreator,
-            isStoreAccountAvailable: inferenceStore.ironsmithSession != nil,
-            onRequireStoreAccount: {
-                _ = store.requestStoreAccountAccess(using: inferenceStore)
-            },
             loadSource: { app, version in
                 try await store.fetchSource(for: version, of: app)
             },

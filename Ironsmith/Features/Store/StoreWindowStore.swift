@@ -739,15 +739,17 @@ final class StoreWindowStore {
         return true
     }
 
-    func fetchSource(for version: StoreVersionMetadata, of app: StoreAppDetail) async throws -> String {
-        let downloadedVersion = try await client.fetchVersion(
+    func fetchSource(for version: StoreVersionMetadata, of app: StoreAppDetail) async throws
+        -> String
+    {
+        let downloadedVersion = try await client.fetchSource(
             app.storeId,
             app.id,
             version.versionNumber
         )
         guard downloadedVersion.id == version.id,
-              downloadedVersion.appId == app.id,
-              downloadedVersion.sourceSha256.lowercased() == version.sourceSha256.lowercased()
+            downloadedVersion.appId == app.id,
+            downloadedVersion.sourceSha256.lowercased() == version.sourceSha256.lowercased()
         else {
             throw IronsmithStoreClientError.invalidResponse
         }

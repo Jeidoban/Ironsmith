@@ -11,8 +11,6 @@ struct StoreAppDetailView: View {
     let onGet: (StoreAppDetail) -> Void
     let onOpenRemix: (StoreRemixMetadata) -> Void
     let onOpenCreator: (String, String) -> Void
-    let isStoreAccountAvailable: Bool
-    let onRequireStoreAccount: () -> Void
     let loadSource: (StoreAppDetail, StoreVersionMetadata) async throws -> String
     let selectedModelName: String?
     let onAsk: (StoreAppDetail, StoreAppSourceStore, StoreAppQuestionStore) -> Void
@@ -57,9 +55,7 @@ struct StoreAppDetailView: View {
                             sourceStore: questionSourceStore,
                             questionStore: questionStore,
                             selectedModelName: selectedModelName,
-                            hasStoreAccount: isStoreAccountAvailable,
                             hasSelectedModel: selectedModelName != nil,
-                            onRequireStoreAccount: onRequireStoreAccount,
                             onAsk: { onAsk(app, questionSourceStore, questionStore) }
                         )
 
@@ -107,10 +103,6 @@ struct StoreAppDetailView: View {
     }
 
     private func showSource(for version: StoreVersionMetadata) {
-        guard isStoreAccountAvailable else {
-            onRequireStoreAccount()
-            return
-        }
         sourceVersion = version
     }
 }
@@ -161,9 +153,7 @@ private struct StoreAppQuestionSection: View {
     let sourceStore: StoreAppSourceStore
     let questionStore: StoreAppQuestionStore
     let selectedModelName: String?
-    let hasStoreAccount: Bool
     let hasSelectedModel: Bool
-    let onRequireStoreAccount: () -> Void
     let onAsk: () -> Void
 
     var body: some View {
@@ -181,15 +171,7 @@ private struct StoreAppQuestionSection: View {
                         .lineLimit(1)
                 }
 
-                if !hasStoreAccount {
-                    HStack(spacing: 10) {
-                        Text("Sign in with Ironsmith to load this app’s source code.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        Button("Sign In", action: onRequireStoreAccount)
-                            .controlSize(.small)
-                    }
-                } else if !hasSelectedModel {
+                if !hasSelectedModel {
                     Text("Choose an AI model in Settings to ask questions about this app.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -203,7 +185,7 @@ private struct StoreAppQuestionSection: View {
                     )
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...4)
-                    .disabled(!hasStoreAccount || !hasSelectedModel || questionStore.isAnswering)
+                    .disabled(!hasSelectedModel || questionStore.isAnswering)
                     .onSubmit(submitQuestion)
 
                     if questionStore.isAnswering {
@@ -256,8 +238,7 @@ private struct StoreAppQuestionSection: View {
     }
 
     private var canSubmit: Bool {
-        hasStoreAccount
-            && hasSelectedModel
+        hasSelectedModel
             && !questionStore.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !questionStore.isAnswering
     }

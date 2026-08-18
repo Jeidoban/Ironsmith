@@ -253,7 +253,7 @@ struct StoreImportTests {
             sourceSha256: historicalVersion.sourceSha256
         )
         var client = IronsmithStoreClient.unconfigured
-        client.fetchVersion = { storeID, appID, versionNumber in
+        client.fetchSource = { storeID, appID, versionNumber in
             #expect(storeID == app.storeId)
             #expect(appID == app.id)
             #expect(versionNumber == historicalVersion.versionNumber)
@@ -284,7 +284,7 @@ struct StoreImportTests {
             sourceSha256: app.currentVersion.sourceSha256
         )
         var client = IronsmithStoreClient.unconfigured
-        client.fetchVersion = { _, _, _ in unexpected }
+        client.fetchSource = { _, _, _ in unexpected }
         let store = StoreWindowStore(
             client: client,
             importClient: StoreToolImportClient(importTool: { _, _ in

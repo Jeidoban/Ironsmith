@@ -375,6 +375,9 @@ nonisolated struct IronsmithStoreClient {
     var fetchVersion:
         @Sendable (_ storeId: String, _ appId: String, _ versionNumber: Int) async throws
             -> StoreVersionDownload
+    var fetchSource:
+        @Sendable (_ storeId: String, _ appId: String, _ versionNumber: Int) async throws
+            -> StoreVersionDownload
     var publishApp: @Sendable (_ request: StorePublicationRequest) async throws -> StoreAppDetail
     var publishVersion:
         @Sendable (_ request: StoreVersionPublicationRequest) async throws -> StoreAppDetail
@@ -453,6 +456,14 @@ extension IronsmithStoreClient {
                     "api/v1/stores/\(storeId)/apps/\(appId)/versions/\(versionNumber)",
                     method: "GET",
                     authentication: .required
+                )
+                return response.data
+            },
+            fetchSource: { storeId, appId, versionNumber in
+                let response: StoreDataEnvelope<StoreVersionDownload> = try await api.request(
+                    "api/v1/stores/\(storeId)/apps/\(appId)/versions/\(versionNumber)/source",
+                    method: "GET",
+                    authentication: .optional
                 )
                 return response.data
             },
@@ -576,6 +587,7 @@ extension IronsmithStoreClient {
             listApps: { _, _, _, _, _, _, _ in throw IronsmithStoreClientError.notConfigured },
             fetchApp: { _, _ in throw IronsmithStoreClientError.notConfigured },
             fetchVersion: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
+            fetchSource: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
             publishApp: { _ in throw IronsmithStoreClientError.notConfigured },
             publishVersion: { _ in throw IronsmithStoreClientError.notConfigured },
             patchListing: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
