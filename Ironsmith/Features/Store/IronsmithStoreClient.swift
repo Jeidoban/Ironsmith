@@ -120,7 +120,6 @@ nonisolated struct StoreVersionMetadata: Decodable, Identifiable, Equatable, Sen
     let runtimeVersion: String
     let license: StoreLicenseIdentifier
     let legalAttributions: [StoreLegalAttribution]
-    let scannerVersion: String
     let remixedFromVersionId: String?
     let publishedAt: String
 }
@@ -136,7 +135,6 @@ nonisolated struct StoreVersionDownload: Decodable, Equatable, Sendable {
     let runtimeVersion: String
     let license: StoreLicenseIdentifier
     let legalAttributions: [StoreLegalAttribution]
-    let scannerVersion: String
     let remixedFromVersionId: String?
     let publishedAt: String
     let sourceCode: String
@@ -330,6 +328,7 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
     case notConfigured
     case missingSession
     case invalidResponse
+    case reviewRejected(reasons: [String])
     case requestFailed(statusCode: Int, message: String)
     case sourceHashMismatch(expected: String, actual: String)
     case unsupportedLicense(String)
@@ -343,6 +342,9 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
             return "Sign in with Ironsmith before using the Ironsmith Store."
         case .invalidResponse:
             return "The Ironsmith Store returned an invalid response."
+        case .reviewRejected(let reasons):
+            let explanation = reasons.map { "• \($0)" }.joined(separator: "\n")
+            return "This app was not approved for the Ironsmith Store:\n\n\(explanation)"
         case .requestFailed(let statusCode, let message):
             return "The Ironsmith Store returned HTTP \(statusCode): \(message)"
         case .sourceHashMismatch:
@@ -595,6 +597,44 @@ extension IronsmithStoreClient {
             )
         }
     }
+
+    nonisolated static func backendError(
+        statusCode: Int,
+        data: Data
+    ) -> IronsmithStoreClientError {
+        let decoder = StoreJSON.decoder
+        let nestedError = try? decoder.decode(StoreBackendErrorEnvelope.self, from: data).error
+        let topLevelError = try? decoder.decode(StoreBackendError.self, from: data)
+        let backendError = nestedError ?? topLevelError
+
+        if statusCode == 401 {
+            return .missingSession
+        }
+        if backendError?.code == "store_review_rejected" {
+            var seenReasons: Set<String> = []
+            let reasons = backendError?.findings?
+                .map { finding in
+                    let detail = finding.detail?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let reason = (detail?.isEmpty == false ? detail : nil) ?? finding.summary
+                    guard let line = finding.line else { return reason }
+                    return "\(reason) (ContentView.swift line \(line))"
+                }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && seenReasons.insert($0).inserted }
+                ?? []
+            return .reviewRejected(
+                reasons: reasons.isEmpty
+                    ? [backendError?.message ?? "Automated review could not approve this app."]
+                    : reasons
+            )
+        }
+        return .requestFailed(
+            statusCode: statusCode,
+            message: backendError?.message
+                ?? HTTPURLResponse.localizedString(forStatusCode: statusCode)
+        )
+    }
 }
 
 nonisolated private enum StoreAuthentication {
@@ -627,7 +667,10 @@ nonisolated private struct StoreHTTPClient {
             throw IronsmithStoreClientError.invalidResponse
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw Self.backendError(statusCode: httpResponse.statusCode, data: data)
+            throw IronsmithStoreClient.backendError(
+                statusCode: httpResponse.statusCode,
+                data: data
+            )
         }
         do {
             return try StoreJSON.decoder.decode(Response.self, from: data)
@@ -679,21 +722,6 @@ nonisolated private struct StoreHTTPClient {
         return request
     }
 
-    private static func backendError(statusCode: Int, data: Data) -> IronsmithStoreClientError {
-        let decoder = StoreJSON.decoder
-        let nestedError = try? decoder.decode(StoreBackendErrorEnvelope.self, from: data).error
-        let topLevelError = try? decoder.decode(StoreBackendError.self, from: data)
-        let backendError = nestedError ?? topLevelError
-
-        if statusCode == 401 {
-            return .missingSession
-        }
-        return .requestFailed(
-            statusCode: statusCode,
-            message: backendError?.message
-                ?? HTTPURLResponse.localizedString(forStatusCode: statusCode)
-        )
-    }
 }
 
 nonisolated private enum StoreJSON {
@@ -717,6 +745,14 @@ nonisolated private struct StoreBackendErrorEnvelope: Decodable {
 nonisolated private struct StoreBackendError: Decodable {
     let code: String
     let message: String
+    let findings: [StoreBackendReviewFinding]?
+}
+
+nonisolated private struct StoreBackendReviewFinding: Decodable {
+    let code: String
+    let summary: String
+    let detail: String?
+    let line: Int?
 }
 
 nonisolated private struct StoreDeletionResponse: Decodable {

@@ -8,6 +8,73 @@ import Testing
 
 extension ToolLibraryTests {
     @MainActor
+    @Test(arguments: [false, true])
+    func storePublisherShowsReviewReasonsForInitialAndVersionPublishing(
+        isVersion: Bool
+    ) async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let detail = Self.publisherAppDetail()
+        let expectedReason = isVersion
+            ? "The new version deletes a selected folder without confirmation."
+            : "The app embeds a service credential in its source."
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.publishApp = { _ in
+            throw IronsmithStoreClientError.reviewRejected(
+                reasons: ["The app embeds a service credential in its source."]
+            )
+        }
+        storeClient.publishVersion = { _ in
+            throw IronsmithStoreClientError.reviewRejected(
+                reasons: ["The new version deletes a selected folder without confirmation."]
+            )
+        }
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: storeClient,
+            iconClient: .noOp
+        )
+        publisher.publishShortDescription = "Clean copied text"
+        publisher.publishDescription = "Cleans and reformats text."
+        publisher.isShowingPublishSheet = true
+
+        let tool = Tool(
+            name: "Clipboard Cleaner",
+            executableName: "ClipboardCleaner",
+            packageRootPath: root.appendingPathComponent("ClipboardCleaner").path,
+            storeId: isVersion ? detail.storeId : nil,
+            storeAppId: isVersion ? detail.id : nil,
+            storeVersionId: isVersion ? detail.currentVersion.id : nil,
+            storeVersionNumber: isVersion ? detail.currentVersion.versionNumber : nil
+        )
+        if isVersion {
+            publisher.publishedStoreAppsByID[detail.id] = StoreAppSummary(detail: detail)
+        }
+        try Self.writeSource(Self.publisherSource, to: tool)
+        try FileManager.default.createDirectory(
+            at: tool.packageLayout.packageMetadataDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try Data([1]).write(to: tool.packageLayout.cachedAppIconMasterJPEGURL)
+        try Data([2]).write(to: tool.packageLayout.cachedAppIconThumbnailJPEGURL)
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = container.mainContext
+        context.insert(tool)
+
+        await publisher.publish(
+            tool,
+            modelContext: context,
+            inferenceStore: InferenceStore(dependencies: Self.inferenceDependencies()),
+            defaultSettings: .default,
+            routeStore: IronsmithRouteStore(openSettingsWindow: {})
+        )
+
+        #expect(publisher.errorMessage?.contains(expectedReason) == true)
+        #expect(publisher.isShowingPublishSheet)
+    }
+
+    @MainActor
     @Test
     func storePublisherRequestsSignInWithoutShowingGenericError() async {
         let inferenceStore = InferenceStore(
@@ -888,7 +955,6 @@ extension ToolLibraryTests {
                     license: license
                 )
             ],
-            scannerVersion: "swift-execution-blocklist-v1",
             remixedFromVersionId: remixedFromVersionId,
             publishedAt: "2026-07-28T00:00:00.000Z"
         )
