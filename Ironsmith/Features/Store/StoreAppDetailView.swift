@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct StoreAppDetailView: View {
@@ -10,9 +11,18 @@ struct StoreAppDetailView: View {
     let onGet: (StoreAppDetail) -> Void
     let onOpenRemix: (StoreRemixMetadata) -> Void
     let onOpenCreator: (String, String) -> Void
+    let isStoreAccountAvailable: Bool
+    let onRequireStoreAccount: () -> Void
+    let loadSource: (StoreAppDetail, StoreVersionMetadata) async throws -> String
+    let selectedModelName: String?
+    let onAsk: (StoreAppDetail, StoreAppSourceStore, StoreAppQuestionStore) -> Void
     let onInstallVersion: (StoreAppDetail, StoreVersionMetadata) -> Void
 
     @State private var expandedVersionID: String?
+    @State private var sourceVersion: StoreVersionMetadata?
+    @State private var sourceStore = StoreAppSourceStore()
+    @State private var questionSourceStore = StoreAppSourceStore()
+    @State private var questionStore = StoreAppQuestionStore()
 
     var body: some View {
         Group {
@@ -23,7 +33,8 @@ struct StoreAppDetailView: View {
                             app: app,
                             isWorking: isWorking,
                             installDisposition: installDisposition,
-                            onGet: { onGet(app) }
+                            onGet: { onGet(app) },
+                            onViewSource: { showSource(for: app.currentVersion) }
                         )
 
                         StoreDetailMetadataStrip(
@@ -41,6 +52,17 @@ struct StoreAppDetailView: View {
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
+                        StoreAppQuestionSection(
+                            app: app,
+                            sourceStore: questionSourceStore,
+                            questionStore: questionStore,
+                            selectedModelName: selectedModelName,
+                            hasStoreAccount: isStoreAccountAvailable,
+                            hasSelectedModel: selectedModelName != nil,
+                            onRequireStoreAccount: onRequireStoreAccount,
+                            onAsk: { onAsk(app, questionSourceStore, questionStore) }
+                        )
+
                         StorePermissionsSection(version: app.currentVersion)
 
                         StoreVersionsCard(
@@ -49,6 +71,7 @@ struct StoreAppDetailView: View {
                             isWorking: isWorking,
                             workingVersionID: workingVersionID,
                             installDisposition: versionInstallDisposition,
+                            onViewSource: showSource,
                             onInstall: onInstallVersion
                         )
                     }
@@ -57,8 +80,22 @@ struct StoreAppDetailView: View {
                     .padding(.bottom, 28)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .task(id: app.id) {
+                .task(id: app.currentVersion.id) {
                     expandedVersionID = app.currentVersion.id
+                    sourceStore.reset()
+                    questionSourceStore.reset()
+                    questionStore.reset()
+                }
+                .sheet(item: $sourceVersion) { version in
+                    StoreSourceCodeSheet(
+                        app: app,
+                        version: version,
+                        sourceStore: sourceStore,
+                        loadSourceCode: { try await loadSource(app, version) }
+                    )
+                }
+                .onDisappear {
+                    questionStore.cancel()
                 }
             } else if isLoading {
                 ProgressView()
@@ -68,6 +105,14 @@ struct StoreAppDetailView: View {
             }
         }
     }
+
+    private func showSource(for version: StoreVersionMetadata) {
+        guard isStoreAccountAvailable else {
+            onRequireStoreAccount()
+            return
+        }
+        sourceVersion = version
+    }
 }
 
 private struct StoreDetailHeroView: View {
@@ -75,6 +120,7 @@ private struct StoreDetailHeroView: View {
     let isWorking: Bool
     let installDisposition: StoreAppInstallDisposition
     let onGet: () -> Void
+    let onViewSource: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 18) {
@@ -92,6 +138,11 @@ private struct StoreDetailHeroView: View {
                         .buttonBorderShape(.capsule)
                         .controlSize(.small)
 
+                    Button("View Source", action: onViewSource)
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+
                     if isWorking {
                         ProgressView()
                             .controlSize(.small)
@@ -102,6 +153,246 @@ private struct StoreDetailHeroView: View {
             }
             Spacer(minLength: 0)
         }
+    }
+}
+
+private struct StoreAppQuestionSection: View {
+    let app: StoreAppDetail
+    let sourceStore: StoreAppSourceStore
+    let questionStore: StoreAppQuestionStore
+    let selectedModelName: String?
+    let hasStoreAccount: Bool
+    let hasSelectedModel: Bool
+    let onRequireStoreAccount: () -> Void
+    let onAsk: () -> Void
+
+    var body: some View {
+        @Bindable var questionStore = questionStore
+
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Ask about this app")
+                .font(.title2.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 14) {
+                if let selectedModelName {
+                    Text("Using \(selectedModelName)")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if !hasStoreAccount {
+                    HStack(spacing: 10) {
+                        Text("Sign in with Ironsmith to load this app’s source code.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Button("Sign In", action: onRequireStoreAccount)
+                            .controlSize(.small)
+                    }
+                } else if !hasSelectedModel {
+                    Text("Choose an AI model in Settings to ask questions about this app.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField(
+                        "Ask anything about this app",
+                        text: $questionStore.question,
+                        axis: .vertical
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...4)
+                    .disabled(!hasStoreAccount || !hasSelectedModel || questionStore.isAnswering)
+                    .onSubmit(submitQuestion)
+
+                    if questionStore.isAnswering {
+                        Button("Stop", action: questionStore.cancel)
+                            .controlSize(.small)
+                    } else {
+                        Button("Ask", action: submitQuestion)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(!canSubmit)
+                    }
+                }
+
+                if let submittedQuestion = questionStore.submittedQuestion {
+                    Divider()
+                    Text(submittedQuestion)
+                        .font(.callout.weight(.medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if questionStore.isAnswering, questionStore.answer.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(sourceStore.isLoading ? "Loading source code…" : "Thinking…")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !questionStore.answer.isEmpty {
+                    Text(IronsmithMarkdown.attributedString(questionStore.answer))
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let errorMessage = questionStore.errorMessage {
+                    Text(errorMessage)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 18))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var canSubmit: Bool {
+        hasStoreAccount
+            && hasSelectedModel
+            && !questionStore.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !questionStore.isAnswering
+    }
+
+    private func submitQuestion() {
+        guard canSubmit else { return }
+        onAsk()
+    }
+}
+
+private struct StoreSourceCodeSheet: View {
+    let app: StoreAppDetail
+    let version: StoreVersionMetadata
+    let sourceStore: StoreAppSourceStore
+    let loadSourceCode: () async throws -> String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(app.name) Source")
+                        .font(.title2.weight(.semibold))
+                    Text("Version \(version.versionNumber) · ContentView.swift")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            Group {
+                if sourceStore.sourceVersionID == version.id,
+                   let sourceCode = sourceStore.sourceCode
+                {
+                    StoreSourceCodeTextView(sourceCode: sourceCode)
+                    .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
+                } else if sourceStore.isLoading {
+                    ProgressView("Loading source code…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorMessage = sourceStore.loadErrorMessage {
+                    ContentUnavailableView(
+                        "Source Code Unavailable",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(errorMessage)
+                    )
+                } else {
+                    ProgressView("Loading source code…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if let editorErrorMessage = sourceStore.editorErrorMessage {
+                Text(editorErrorMessage)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack {
+                if sourceStore.loadErrorMessage != nil {
+                    Button("Retry", action: loadSource)
+                }
+                Spacer()
+                Button("Open in Default Editor") {
+                    sourceStore.openInDefaultEditor(for: app, version: version)
+                }
+                .disabled(sourceStore.sourceVersionID != version.id || sourceStore.sourceCode == nil)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 720, minHeight: 560)
+        .task(id: version.id) {
+            _ = try? await sourceStore.loadSource(for: version, using: loadSourceCode)
+        }
+    }
+
+    private func loadSource() {
+        Task {
+            _ = try? await sourceStore.loadSource(for: version, using: loadSourceCode)
+        }
+    }
+}
+
+private struct StoreSourceCodeTextView: NSViewRepresentable {
+    let sourceCode: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+
+        let textView = NSTextView(frame: .zero)
+        textView.drawsBackground = false
+        textView.backgroundColor = .clear
+        textView.textColor = .labelColor
+        textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        textView.isRichText = false
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.allowsUndo = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = true
+        textView.autoresizingMask = []
+        textView.minSize = NSSize(width: 1, height: 1)
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.textContainerInset = NSSize(width: 14, height: 14)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = false
+        textView.textContainer?.containerSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.string = sourceCode
+        textView.sizeToFit()
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView,
+            textView.string != sourceCode
+        else { return }
+
+        textView.string = sourceCode
+        textView.sizeToFit()
     }
 }
 
@@ -530,6 +821,7 @@ private struct StoreVersionsCard: View {
     let isWorking: Bool
     let workingVersionID: String?
     let installDisposition: (StoreAppDetail, StoreVersionMetadata) -> StoreAppInstallDisposition
+    let onViewSource: (StoreVersionMetadata) -> Void
     let onInstall: (StoreAppDetail, StoreVersionMetadata) -> Void
 
     private var versions: [StoreVersionMetadata] {
@@ -553,6 +845,7 @@ private struct StoreVersionsCard: View {
                         isWorking: isWorking,
                         isThisVersionWorking: workingVersionID == version.id,
                         installDisposition: installDisposition(app, version),
+                        onViewSource: { onViewSource(version) },
                         onInstall: { onInstall(app, version) }
                     )
                     if index < versions.count - 1 {
@@ -573,6 +866,7 @@ private struct StoreVersionAccordionRow: View {
     let isWorking: Bool
     let isThisVersionWorking: Bool
     let installDisposition: StoreAppInstallDisposition
+    let onViewSource: () -> Void
     let onInstall: () -> Void
 
     var body: some View {
@@ -582,6 +876,11 @@ private struct StoreVersionAccordionRow: View {
                 HStack {
                     Button(installDisposition.buttonTitle, action: onInstall)
                         .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+                        .disabled(isWorking)
+                    Button("View Source", action: onViewSource)
+                        .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
                         .controlSize(.small)
                         .disabled(isWorking)

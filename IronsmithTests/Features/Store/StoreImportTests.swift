@@ -103,7 +103,7 @@ struct StoreImportTests {
             inferenceStore: InferenceStore()
         )
 
-        #expect(store.isDownloadSignInRequired)
+        #expect(store.isStoreSignInRequired)
         #expect(store.workingAppID == nil)
         #expect(store.errorMessage == nil)
         #expect(try context.fetch(FetchDescriptor<Tool>()).isEmpty)
@@ -145,7 +145,7 @@ struct StoreImportTests {
             inferenceStore: InferenceStore()
         )
 
-        #expect(store.isDownloadSignInRequired)
+        #expect(store.isStoreSignInRequired)
         #expect(store.workingAppID == nil)
         #expect(store.workingVersionID == nil)
         #expect(store.errorMessage == nil)
@@ -180,7 +180,7 @@ struct StoreImportTests {
             inferenceStore: InferenceStore()
         )
 
-        #expect(store.isDownloadSignInRequired)
+        #expect(store.isStoreSignInRequired)
         guard case .appDetail(let pendingApp) = store.pendingDownloadRequest else {
             Issue.record("Expected the download request to remain pending for sign-in.")
             return
@@ -221,9 +221,164 @@ struct StoreImportTests {
             inferenceStore: InferenceStore()
         )
 
-        #expect(!store.isDownloadSignInRequired)
+        #expect(!store.isStoreSignInRequired)
         #expect(store.pendingDownloadRequest == nil)
         #expect(store.errorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func sourceFetchReturnsTheVerifiedRequestedVersionSource() async throws {
+        let currentSource = Self.sourceCode("current source")
+        let historicalSource = Self.sourceCode("historical source")
+        let historicalVersion = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000200",
+            versionNumber: 1,
+            sourceCode: historicalSource
+        )
+        let currentVersion = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000201",
+            versionNumber: 2,
+            sourceCode: currentSource
+        )
+        let app = Self.appListing(
+            sourceCode: currentSource,
+            versions: [historicalVersion, currentVersion]
+        )
+        let expected = Self.versionDownload(
+            id: historicalVersion.id,
+            versionNumber: historicalVersion.versionNumber,
+            appId: app.id,
+            sourceCode: historicalSource,
+            sourceSha256: historicalVersion.sourceSha256
+        )
+        var client = IronsmithStoreClient.unconfigured
+        client.fetchVersion = { storeID, appID, versionNumber in
+            #expect(storeID == app.storeId)
+            #expect(appID == app.id)
+            #expect(versionNumber == historicalVersion.versionNumber)
+            return expected
+        }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        let fetchedSource = try await store.fetchSource(for: historicalVersion, of: app)
+
+        #expect(fetchedSource == historicalSource)
+    }
+
+    @MainActor
+    @Test
+    func currentSourceFetchRejectsAResponseForAnotherVersion() async throws {
+        let source = Self.sourceCode("current source")
+        let app = Self.appListing(sourceCode: source)
+        let unexpected = Self.versionDownload(
+            id: "00000000-0000-4000-8000-000000000299",
+            appId: app.id,
+            sourceCode: source,
+            sourceSha256: app.currentVersion.sourceSha256
+        )
+        var client = IronsmithStoreClient.unconfigured
+        client.fetchVersion = { _, _, _ in unexpected }
+        let store = StoreWindowStore(
+            client: client,
+            importClient: StoreToolImportClient(importTool: { _, _ in
+                throw IronsmithStoreClientError.notConfigured
+            }),
+            buildClient: ToolBuildClient(buildTool: { _ in })
+        )
+
+        do {
+            _ = try await store.fetchSource(for: app.currentVersion, of: app)
+            Issue.record("Expected the source request to reject the unexpected version.")
+        } catch {
+            #expect(error as? IronsmithStoreClientError == .invalidResponse)
+        }
+    }
+
+    @MainActor
+    @Test
+    func sourceStoreCachesCurrentSourceAndExportsItForTheDefaultEditor() async throws {
+        let currentSource = Self.sourceCode("source cache")
+        let historicalSource = Self.sourceCode("historical source")
+        let historicalVersion = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000200",
+            versionNumber: 1,
+            sourceCode: historicalSource
+        )
+        let currentVersion = Self.versionMetadata(
+            id: "00000000-0000-4000-8000-000000000201",
+            versionNumber: 2,
+            sourceCode: currentSource
+        )
+        let app = Self.appListing(
+            sourceCode: currentSource,
+            versions: [historicalVersion, currentVersion]
+        )
+        var loaderCallCount = 0
+        var exportedRequest: StoreSourceCodeExportRequest?
+        let sourceStore = StoreAppSourceStore(
+            exportClient: StoreSourceCodeExportClient { request in
+                exportedRequest = request
+            }
+        )
+
+        let firstSource = try await sourceStore.loadSource(for: app.currentVersion) {
+            loaderCallCount += 1
+            return currentSource
+        }
+        let secondSource = try await sourceStore.loadSource(for: app.currentVersion) {
+            loaderCallCount += 1
+            return "This should not be loaded."
+        }
+        let historicalResult = try await sourceStore.loadSource(for: historicalVersion) {
+            loaderCallCount += 1
+            return historicalSource
+        }
+        sourceStore.openInDefaultEditor(for: app, version: historicalVersion)
+
+        #expect(firstSource == currentSource)
+        #expect(secondSource == currentSource)
+        #expect(historicalResult == historicalSource)
+        #expect(loaderCallCount == 2)
+        let request = try #require(exportedRequest)
+        #expect(request.appName == app.name)
+        #expect(request.versionNumber == historicalVersion.versionNumber)
+        #expect(request.sourceCode == historicalSource)
+    }
+
+    @MainActor
+    @Test
+    func sourceStoreKeepsEditorFailureSeparateFromSourceLoadingFailure() async throws {
+        let source = Self.sourceCode("editor failure")
+        let app = Self.appListing(sourceCode: source)
+        var shouldFailToOpen = true
+        let sourceStore = StoreAppSourceStore(
+            exportClient: StoreSourceCodeExportClient { _ in
+                if shouldFailToOpen {
+                    throw StoreSourceCodeExportError.couldNotOpenFile
+                }
+            }
+        )
+
+        _ = try await sourceStore.loadSource(for: app.currentVersion) { source }
+        sourceStore.openInDefaultEditor(for: app, version: app.currentVersion)
+
+        #expect(sourceStore.loadErrorMessage == nil)
+        #expect(
+            sourceStore.editorErrorMessage
+                == StoreSourceCodeExportError.couldNotOpenFile.errorDescription
+        )
+
+        shouldFailToOpen = false
+        sourceStore.openInDefaultEditor(for: app, version: app.currentVersion)
+
+        #expect(sourceStore.editorErrorMessage == nil)
     }
 
     @Test

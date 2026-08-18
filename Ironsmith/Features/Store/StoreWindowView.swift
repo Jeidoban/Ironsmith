@@ -156,11 +156,11 @@ struct StoreWindowView: View {
             Text(store.errorMessage ?? "")
         }
         .alert(
-            "Sign in to Download",
+            "Sign in to Continue",
             isPresented: Binding(
-                get: { store.isDownloadSignInRequired },
+                get: { store.isStoreSignInRequired },
                 set: { isPresented in
-                    store.isDownloadSignInRequired = isPresented
+                    store.isStoreSignInRequired = isPresented
                     if !isPresented, !isSigningInToIronsmith {
                         store.pendingDownloadRequest = nil
                     }
@@ -174,7 +174,9 @@ struct StoreWindowView: View {
                 signInToIronsmith(resumeDownload: store.takePendingDownloadRequest())
             }
         } message: {
-            Text("Sign in with Ironsmith to download this app from the Ironsmith Store.")
+            Text(
+                "Sign in with Ironsmith to view source code, ask about apps, and download apps from the Ironsmith Store."
+            )
         }
         .alert(
             "Sign In Failed",
@@ -984,6 +986,24 @@ private struct StoreAppDetailDestinationView: View {
             },
             onOpenRemix: onOpenRemix,
             onOpenCreator: onOpenCreator,
+            isStoreAccountAvailable: inferenceStore.ironsmithSession != nil,
+            onRequireStoreAccount: {
+                _ = store.requestStoreAccountAccess(using: inferenceStore)
+            },
+            loadSource: { app, version in
+                try await store.fetchSource(for: version, of: app)
+            },
+            selectedModelName: inferenceStore.selectedModel?.displayName,
+            onAsk: { app, sourceStore, questionStore in
+                questionStore.ask(
+                    about: app,
+                    sourceStore: sourceStore,
+                    loadCurrentSource: {
+                        try await store.fetchSource(for: app.currentVersion, of: app)
+                    },
+                    inferenceStore: inferenceStore
+                )
+            },
             onInstallVersion: { app, version in
                 Task {
                     await store.installVersion(

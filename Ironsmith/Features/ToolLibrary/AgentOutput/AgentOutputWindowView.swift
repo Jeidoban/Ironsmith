@@ -602,14 +602,7 @@ private struct AgentOutputEventRow: View {
     private func markdownAttributedString(_ message: String, packageRootURL: URL)
         -> AttributedString
     {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        var attributedString =
-            (try? AttributedString(
-                markdown: trimmed,
-                options: AttributedString.MarkdownParsingOptions(
-                    interpretedSyntax: .inlineOnlyPreservingWhitespace
-                )
-            )) ?? AttributedString(trimmed)
+        var attributedString = IronsmithMarkdown.attributedString(message)
         attributedString.resolveFileLinks(relativeTo: packageRootURL)
         return attributedString
     }
