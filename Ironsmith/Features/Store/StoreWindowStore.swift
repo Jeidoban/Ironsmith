@@ -55,7 +55,7 @@ final class StoreWindowStore {
     var workingVersionID: String?
     var contentRevision = 0
     var errorMessage: String?
-    var isDownloadSignInRequired = false
+    var isStoreSignInRequired = false
     var pendingDownloadRequest: StorePendingDownloadRequest?
 
     @ObservationIgnored private let client: IronsmithStoreClient
@@ -731,6 +731,32 @@ final class StoreWindowStore {
         return pendingDownloadRequest
     }
 
+    func requestStoreAccountAccess(using inferenceStore: InferenceStore) -> Bool {
+        guard inferenceStore.ironsmithSession != nil else {
+            isStoreSignInRequired = true
+            return false
+        }
+        return true
+    }
+
+    func fetchSource(for version: StoreVersionMetadata, of app: StoreAppDetail) async throws
+        -> String
+    {
+        let downloadedVersion = try await client.fetchSource(
+            app.storeId,
+            app.id,
+            version.versionNumber
+        )
+        guard downloadedVersion.id == version.id,
+            downloadedVersion.appId == app.id,
+            downloadedVersion.sourceSha256.lowercased() == version.sourceSha256.lowercased()
+        else {
+            throw IronsmithStoreClientError.invalidResponse
+        }
+        try IronsmithStoreClient.verifySourceHash(downloadedVersion)
+        return downloadedVersion.sourceCode
+    }
+
     func resumeDownload(
         _ request: StorePendingDownloadRequest,
         tools: [Tool],
@@ -771,9 +797,8 @@ final class StoreWindowStore {
         _ request: StorePendingDownloadRequest,
         inferenceStore: InferenceStore
     ) -> Bool {
-        guard inferenceStore.ironsmithSession != nil else {
+        guard requestStoreAccountAccess(using: inferenceStore) else {
             pendingDownloadRequest = request
-            isDownloadSignInRequired = true
             return false
         }
         return true
