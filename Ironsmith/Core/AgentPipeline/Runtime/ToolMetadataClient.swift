@@ -384,66 +384,66 @@ struct ToolGenerationPlanningClient: Sendable {
         imageGenerationProvider: ToolImageGenerationProvider
     ) -> String {
         """
-            User request:
-            \(userPrompt)
+        User request:
+        \(userPrompt)
 
-            Image prompt mode:
-            \(imagePromptModeDescription(for: imageGenerationProvider))
+        Image prompt mode:
+        \(imagePromptModeDescription(for: imageGenerationProvider))
 
-            Allowed menuBarSystemImage values:
-            \(ToolMenuBarSymbol.allowedSymbols.joined(separator: ", "))
+        Allowed menuBarSystemImage values:
+        \(ToolMenuBarSymbol.allowedSymbols.joined(separator: ", "))
 
-            Allowed category values:
-            \(StoreAppCategory.allCases.map(\.rawValue).joined(separator: ", "))
+        Allowed category values:
+        \(StoreAppCategory.allCases.map(\.rawValue).joined(separator: ", "))
 
-            Allowed appKind values:
-            \(ToolAppKind.allCases.map(\.rawValue).joined(separator: ", "))
+        Allowed appKind values:
+        \(ToolAppKind.allCases.map(\.rawValue).joined(separator: ", "))
 
-            Allowed sandboxPermissions values:
-            \(GeneratedAppSandboxPermission.allCases.map(\.rawValue).joined(separator: ", "))
+        Allowed sandboxPermissions values:
+        \(GeneratedAppSandboxPermission.allCases.map(\.rawValue).joined(separator: ", "))
 
-            Allowed resourcePermissions values:
-            \(GeneratedAppResourcePermission.allCases.map(\.rawValue).joined(separator: ", "))
-            """
+        Allowed resourcePermissions values:
+        \(GeneratedAppResourcePermission.allCases.map(\.rawValue).joined(separator: ", "))
+        """
     }
 
     nonisolated private static func metadataInstructions(
         for imageGenerationProvider: ToolImageGenerationProvider
     ) -> String {
         """
-            You create compact metadata for a SwiftUI AI coding agent for a macOS app.
+        You create compact metadata for a SwiftUI AI coding agent for a macOS app.
 
-            displayName:
-            - Must be one or two separate words.
-            - Must be Title Case.
-            - Must name the user's requested app, task, or workflow, not the icon artwork or symbol.
-            - Should feel snappy, playful, and useful for a small macOS app.
-            - Do not use punctuation, emoji, or generic suffixes like App or Tool.
+        displayName:
+        - Must be one or two separate words.
+        - Must be Title Case.
+        - Must name the user's requested app, task, or workflow, not the icon artwork or symbol.
+        - Should feel snappy, playful, and useful for a small macOS app.
+        - Do not use punctuation, emoji, or generic suffixes like App or Tool.
 
-            iconPrompt:
-            \(imagePromptInstructions(for: imageGenerationProvider))
+        iconPrompt:
+        \(imagePromptInstructions(for: imageGenerationProvider))
 
-            menuBarSystemImage:
-            - Must be one exact SF Symbol name from the allowed list in the prompt.
-            - Choose the closest symbol for the user's requested app.
-            - Do not invent names or include variants outside that list.
+        menuBarSystemImage:
+        - Must be one exact SF Symbol name from the allowed list in the prompt.
+        - Choose the closest symbol for the user's requested app.
+        - Do not invent names or include variants outside that list.
 
-            category:
-            - Must be one exact raw value from the allowed category list in the prompt.
-            - Choose the category that best represents the app's primary purpose.
-            - Use utilities only when no more specific category applies.
+        category:
+        - Must be one exact raw value from the allowed category list in the prompt.
+        - Choose the category that best represents the app's primary purpose.
+        - Use utilities only when no more specific category applies.
 
-            appKind:
-            - Choose menu_bar only for a compact, glanceable utility centered on a quick interaction.
-            - Choose window for workflows that need substantial content, navigation, editing space, or multiple controls.
-            - Use exactly one allowed raw value.
+        appKind:
+        - Choose menu_bar when the user asks for it or if the app the user requests only makes sense as a menu bar app.
+        - Choose window for everything else.
+        - Use exactly one allowed raw value.
 
-            sandboxPermissions and resourcePermissions:
-            - Select only permissions required to implement the user's explicit request.
-            - Do not add permissions for hypothetical future features.
-            - Use only exact values from the corresponding allowed lists.
-            - Use an empty list when no permission in a group is required.
-            """
+        sandboxPermissions and resourcePermissions:
+        - Select only permissions required to implement the user's explicit request.
+        - Do not add permissions for hypothetical future features.
+        - Use only exact values from the corresponding allowed lists.
+        - Use an empty list when no permission in a group is required.
+        """
     }
 
     nonisolated private static func imagePromptModeDescription(
