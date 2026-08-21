@@ -21,6 +21,7 @@ struct SingleFileToolGenerationRuntime {
         for prompt: String,
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
+        planningPolicy: ToolGenerationPlanningPolicy? = nil,
         imageGenerationProvider: ToolImageGenerationProvider = .disabled,
         attachments: [ToolPromptAttachment] = [],
         lifecycle: ToolGenerationLifecycle = .noop
@@ -29,6 +30,8 @@ struct SingleFileToolGenerationRuntime {
         guard !trimmedPrompt.isEmpty else {
             throw ToolGenerationError.emptyPrompt
         }
+
+        let planningPolicy = planningPolicy ?? .manual(settings: settings)
 
         if let existingTool {
             let effectivePrompt = existingTool.isGenerationReady
@@ -39,6 +42,7 @@ struct SingleFileToolGenerationRuntime {
                     prompt: effectivePrompt,
                     existingTool: existingTool,
                     settings: settings,
+                    planningPolicy: planningPolicy,
                     imageGenerationProvider: imageGenerationProvider,
                     attachments: [],
                     lifecycle: lifecycle
@@ -48,6 +52,7 @@ struct SingleFileToolGenerationRuntime {
                 prompt: effectivePrompt,
                 existingTool: existingTool,
                 settings: settings,
+                planningPolicy: planningPolicy,
                 attachments: attachments,
                 lifecycle: lifecycle
             )
@@ -56,6 +61,7 @@ struct SingleFileToolGenerationRuntime {
         return try await createTool(
             prompt: trimmedPrompt,
             settings: settings,
+            planningPolicy: planningPolicy,
             imageGenerationProvider: imageGenerationProvider,
             attachments: attachments,
             lifecycle: lifecycle
@@ -98,7 +104,7 @@ struct SingleFileToolGenerationRuntime {
     }
 
     private func prepareNewCreateSetup(
-        metadata: ToolMetadataSuggestion,
+        metadata: ToolCreationPlan,
         placeholderRootURL: URL,
         prompt: String,
         settings: ToolGenerationSettings,
@@ -186,6 +192,7 @@ struct SingleFileToolGenerationRuntime {
         prompt: String,
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
+        planningPolicy: ToolGenerationPlanningPolicy,
         imageGenerationProvider: ToolImageGenerationProvider,
         attachments: [ToolPromptAttachment],
         lifecycle: ToolGenerationLifecycle
@@ -211,17 +218,22 @@ struct SingleFileToolGenerationRuntime {
             }
             try await lifecycle.updatePhase(.generating, .planning, nil)
             try Task.checkCancellation()
-            let metadata = await context.metadataClient.suggestMetadata(
+            let metadata = await context.planningClient.planCreation(
                 userPrompt: prompt,
                 imageGenerationProvider: imageGenerationProvider,
                 invoker: context.languageModelInvoker
             )
             try Task.checkCancellation()
+            let resolvedSettings = Self.resolveCreationSettings(
+                submittedSettings: settings,
+                planningPolicy: planningPolicy,
+                suggestion: metadata
+            )
             setup = try await prepareNewCreateSetup(
                 metadata: metadata,
                 placeholderRootURL: placeholderRootURL,
                 prompt: prompt,
-                settings: settings,
+                settings: resolvedSettings,
                 lifecycle: lifecycle
             )
         }
@@ -414,13 +426,136 @@ struct SingleFileToolGenerationRuntime {
         try await lifecycle.didPersistAttachments(persistedIDs)
     }
 
+    private static func resolveCreationSettings(
+        submittedSettings: ToolGenerationSettings,
+        planningPolicy: ToolGenerationPlanningPolicy,
+        suggestion: ToolCreationPlan
+    ) -> ToolGenerationSettings {
+        let appKind = planningPolicy.appKindPreference.explicitAppKind
+            ?? suggestion.suggestedAppKind
+        let sandboxPermissions: GeneratedAppSandboxPermissions
+        let resourcePermissions: GeneratedAppResourcePermissions
+        if planningPolicy.automaticallySelectPermissions {
+            sandboxPermissions = union(
+                planningPolicy.alwaysIncludedSandboxPermissions,
+                suggestion.suggestedSandboxPermissions
+            )
+            resourcePermissions = union(
+                planningPolicy.alwaysIncludedResourcePermissions,
+                suggestion.suggestedResourcePermissions
+            )
+        } else {
+            sandboxPermissions = submittedSettings.sandboxPermissions
+            resourcePermissions = submittedSettings.resourcePermissions
+        }
+        let resolvedSettings = ToolGenerationSettings(
+            appKind: appKind,
+            menuBarSystemImage: submittedSettings.menuBarSystemImage,
+            sandboxEnabled: submittedSettings.sandboxEnabled,
+            sandboxPermissions: sandboxPermissions,
+            resourcePermissions: resourcePermissions
+        )
+        AgentDiagnosticsLog.append(
+            """
+            Creation planning resolved generation settings.
+            appKind: \(resolvedSettings.appKind.rawValue)
+            sandboxPermissions: \(resolvedSettings.sandboxPermissions.enabledPermissions.map(\.rawValue).joined(separator: ","))
+            resourcePermissions: \(resolvedSettings.resourcePermissions.enabledPermissions.map(\.rawValue).joined(separator: ","))
+            """
+        )
+        return resolvedSettings
+    }
+
+    private func resolveEditSettings(
+        prompt: String,
+        existingTool: Tool,
+        submittedSettings: ToolGenerationSettings,
+        planningPolicy: ToolGenerationPlanningPolicy
+    ) async throws -> ToolGenerationSettings {
+        if let pendingSettings = try context.versionBackupClient.pendingGenerationSettings(
+            existingTool.packageRootURL
+        ) {
+            return pendingSettings
+        }
+        guard planningPolicy.automaticallySelectPermissions else {
+            return submittedSettings
+        }
+
+        let baselineSettings = ToolGenerationSettings(
+            appKind: submittedSettings.appKind,
+            menuBarSystemImage: submittedSettings.menuBarSystemImage,
+            sandboxEnabled: submittedSettings.sandboxEnabled,
+            sandboxPermissions: Self.union(
+                submittedSettings.sandboxPermissions,
+                planningPolicy.alwaysIncludedSandboxPermissions
+            ),
+            resourcePermissions: Self.union(
+                submittedSettings.resourcePermissions,
+                planningPolicy.alwaysIncludedResourcePermissions
+            )
+        )
+        let plan = await context.planningClient.planEdit(
+            userPrompt: prompt,
+            toolName: existingTool.name,
+            currentSettings: baselineSettings,
+            invoker: context.languageModelInvoker
+        )
+        let resolvedSettings = ToolGenerationSettings(
+            appKind: baselineSettings.appKind,
+            menuBarSystemImage: baselineSettings.menuBarSystemImage,
+            sandboxEnabled: baselineSettings.sandboxEnabled,
+            sandboxPermissions: Self.union(
+                baselineSettings.sandboxPermissions,
+                plan.additionalSandboxPermissions
+            ),
+            resourcePermissions: Self.union(
+                baselineSettings.resourcePermissions,
+                plan.additionalResourcePermissions
+            )
+        )
+        AgentDiagnosticsLog.append(
+            """
+            Tool edit planning resolved permissions.
+            tool: \(existingTool.name)
+            sandboxPermissions: \(resolvedSettings.sandboxPermissions.enabledPermissions.map(\.rawValue).joined(separator: ","))
+            resourcePermissions: \(resolvedSettings.resourcePermissions.enabledPermissions.map(\.rawValue).joined(separator: ","))
+            """
+        )
+        try context.versionBackupClient.stagePendingGenerationSettings(
+            existingTool.packageRootURL,
+            resolvedSettings
+        )
+        return resolvedSettings
+    }
+
+    private static func union(
+        _ lhs: GeneratedAppSandboxPermissions,
+        _ rhs: GeneratedAppSandboxPermissions
+    ) -> GeneratedAppSandboxPermissions {
+        GeneratedAppSandboxPermissions(lhs.enabled.union(rhs.enabled))
+    }
+
+    private static func union(
+        _ lhs: GeneratedAppResourcePermissions,
+        _ rhs: GeneratedAppResourcePermissions
+    ) -> GeneratedAppResourcePermissions {
+        GeneratedAppResourcePermissions(lhs.enabled.union(rhs.enabled))
+    }
+
     private func editTool(
         prompt: String,
         existingTool: Tool,
-        settings: ToolGenerationSettings,
+        settings submittedSettings: ToolGenerationSettings,
+        planningPolicy: ToolGenerationPlanningPolicy,
         attachments: [ToolPromptAttachment],
         lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
+        let settings = try await resolveEditSettings(
+            prompt: prompt,
+            existingTool: existingTool,
+            submittedSettings: submittedSettings,
+            planningPolicy: planningPolicy
+        )
         let layout = ToolPackageLayout(
             packageRootURL: existingTool.packageRootURL,
             executableName: existingTool.executableName
@@ -438,7 +573,7 @@ struct SingleFileToolGenerationRuntime {
         }
         if !existingTool.isGenerationReady,
            startingPhase == .packaging || startingPhase == .completed {
-            return try await packageTool(
+            let result = try await packageTool(
                 displayName: existingTool.name,
                 executableName: existingTool.executableName,
                 bundleIdentifier: existingTool.bundleIdentifier,
@@ -449,6 +584,10 @@ struct SingleFileToolGenerationRuntime {
                 iconPrompt: nil,
                 lifecycle: lifecycle
             )
+            try context.versionBackupClient.clearPendingGenerationSettings(
+                existingTool.packageRootURL
+            )
+            return result
         }
         let existingSource = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
         let existingAppEntrySource = try context.readIfPresent(

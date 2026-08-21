@@ -51,8 +51,8 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: appBundleClient,
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(
                     displayName: "Tiny Tool",
                     iconPrompt: "",
                     menuBarSystemImage: "timer"

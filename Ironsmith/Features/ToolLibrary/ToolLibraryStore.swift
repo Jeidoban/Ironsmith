@@ -65,6 +65,7 @@ final class ToolLibraryStore {
     var isGenerating = false
     var sandboxEnabled = true
     var appKind: ToolAppKind = .window
+    var appKindPreference: ToolAppKindPreference = .automatic
     var menuBarSystemImage = ToolMenuBarSymbol.fallback
     var sandboxPermissions = GeneratedAppSandboxPermissions.default
     var resourcePermissions = GeneratedAppResourcePermissions.none
@@ -79,6 +80,7 @@ final class ToolLibraryStore {
     private(set) var selectedToolName: String?
     private var restorableToolIDs = Set<UUID>()
     @ObservationIgnored private var nextGenerationSettings: ToolGenerationSettings?
+    @ObservationIgnored private var nextGenerationAppKindPreference: ToolAppKindPreference = .automatic
     @ObservationIgnored private var hasCustomizedNextGenerationSettings = false
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var generationStopWasRequested = false
@@ -180,13 +182,25 @@ final class ToolLibraryStore {
         guard !hasCustomizedNextGenerationSettings else { return }
         nextGenerationSettings = defaultSettings
         if !hasSelectedTool {
-            applyComposerSettings(defaultSettings)
+            applyComposerSettings(
+                defaultSettings,
+                appKindPreference: nextGenerationAppKindPreference
+            )
         }
     }
 
     func rememberCurrentGenerationSettingsForNextGeneration() {
         nextGenerationSettings = currentComposerSettings
+        nextGenerationAppKindPreference = appKindPreference
         hasCustomizedNextGenerationSettings = true
+    }
+
+    func setAppKindPreference(_ preference: ToolAppKindPreference) {
+        appKindPreference = preference
+        if let explicitAppKind = preference.explicitAppKind {
+            appKind = explicitAppKind
+        }
+        rememberCurrentGenerationSettingsForNextGeneration()
     }
 
     func isSelected(_ tool: Tool) -> Bool {
@@ -363,6 +377,9 @@ final class ToolLibraryStore {
                 } catch ToolVersionBackupError.missingStagedVersion {
                     // Older incomplete edits may not have a staged backup; leave the current package intact.
                 }
+                try? dependencies.versionBackupClient.clearPendingGenerationSettings(
+                    packageRootURL
+                )
                 clearPendingGeneration(on: tool)
                 try modelContext.save()
                 removeCurrentRunAttachments(for: tool)
@@ -456,6 +473,7 @@ final class ToolLibraryStore {
         let submittedSettings = submittedGenerationSettings(
             defaultSettings: Self.defaultGenerationSettings(from: inferenceStore.generationPreferences)
         )
+        let submittedAppKindPreference = appKindPreference
         let submittedAttachments = attachments
         var activeTool: Tool?
         isGenerating = true
@@ -510,6 +528,12 @@ final class ToolLibraryStore {
                     prompt: trimmedPrompt,
                     existingTool: selectedTool,
                     settings: submittedSettings,
+                    planningPolicy: generationPlanningPolicy(
+                        preferences: inferenceStore.generationPreferences,
+                        appKindPreference: selectedTool == nil
+                            ? submittedAppKindPreference
+                            : ToolAppKindPreference(submittedSettings.appKind)
+                    ),
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
                     attachments: submittedAttachments,
@@ -737,7 +761,10 @@ final class ToolLibraryStore {
     private func clearSelection() {
         selectedToolID = nil
         selectedToolName = nil
-        applyComposerSettings(nextGenerationSettings ?? .default)
+        applyComposerSettings(
+            nextGenerationSettings ?? .default,
+            appKindPreference: nextGenerationAppKindPreference
+        )
     }
 
     private var currentComposerSettings: ToolGenerationSettings {
@@ -750,9 +777,13 @@ final class ToolLibraryStore {
         )
     }
 
-    private func applyComposerSettings(_ settings: ToolGenerationSettings) {
+    private func applyComposerSettings(
+        _ settings: ToolGenerationSettings,
+        appKindPreference: ToolAppKindPreference? = nil
+    ) {
         sandboxEnabled = settings.sandboxEnabled
         appKind = settings.appKind
+        self.appKindPreference = appKindPreference ?? ToolAppKindPreference(settings.appKind)
         menuBarSystemImage = settings.menuBarSystemImage
         sandboxPermissions = settings.sandboxPermissions
         resourcePermissions = settings.resourcePermissions
@@ -771,6 +802,19 @@ final class ToolLibraryStore {
             sandboxEnabled: sandboxEnabled,
             sandboxPermissions: defaultBackedSandboxPermissions,
             resourcePermissions: defaultBackedResourcePermissions
+        )
+    }
+
+    private func generationPlanningPolicy(
+        preferences: GenerationPreferencesStore,
+        appKindPreference: ToolAppKindPreference
+    ) -> ToolGenerationPlanningPolicy {
+        ToolGenerationPlanningPolicy(
+            appKindPreference: appKindPreference,
+            automaticallySelectPermissions: preferences
+                .automaticallySelectGeneratedAppPermissions,
+            alwaysIncludedSandboxPermissions: preferences.generatedAppSandboxPermissions,
+            alwaysIncludedResourcePermissions: preferences.generatedAppResourcePermissions
         )
     }
 
@@ -848,6 +892,10 @@ final class ToolLibraryStore {
                     prompt: resumePrompt,
                     existingTool: tool,
                     settings: settings,
+                    planningPolicy: generationPlanningPolicy(
+                        preferences: inferenceStore.generationPreferences,
+                        appKindPreference: ToolAppKindPreference(settings.appKind)
+                    ),
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
                     lifecycle: lifecycle

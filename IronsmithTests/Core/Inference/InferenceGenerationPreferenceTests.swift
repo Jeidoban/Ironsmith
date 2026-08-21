@@ -382,6 +382,23 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func automaticGeneratedAppPermissionsDefaultOnAndPersist() {
+        let suiteName = "IronsmithTests.AutomaticGeneratedAppPermissions.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(preferences.automaticallySelectGeneratedAppPermissions)
+
+        preferences.automaticallySelectGeneratedAppPermissions = false
+        #expect(
+            !GenerationPreferencesStore(userDefaults: userDefaults)
+                .automaticallySelectGeneratedAppPermissions
+        )
+    }
+
+    @MainActor
+    @Test
     func generatedAppResourcePermissionPreferencesDefaultOffAndPersist() {
         let suiteName = "IronsmithTests.GeneratedAppResourcePermissions.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!

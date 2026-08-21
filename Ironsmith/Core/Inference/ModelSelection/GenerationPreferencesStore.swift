@@ -9,6 +9,8 @@ final class GenerationPreferencesStore {
         static let codingAgentPreference = "generation.agentPipelineProfile"
         static let reasoningEffort = "generation.reasoningEffort"
         static let imageGenerationProvider = "generation.imageGenerationProvider"
+        static let automaticallySelectGeneratedAppPermissions =
+            "generation.automaticallySelectGeneratedAppPermissions"
     }
 
     var generatedPromptRefinementEnabled: Bool {
@@ -29,6 +31,14 @@ final class GenerationPreferencesStore {
     var imageGenerationProvider: ToolImageGenerationProvider {
         didSet {
             userDefaults.set(imageGenerationProvider.rawValue, forKey: Key.imageGenerationProvider)
+        }
+    }
+    var automaticallySelectGeneratedAppPermissions: Bool {
+        didSet {
+            userDefaults.set(
+                automaticallySelectGeneratedAppPermissions,
+                forKey: Key.automaticallySelectGeneratedAppPermissions
+            )
         }
     }
     var generatedAppMicrophoneAccessEnabled: Bool {
@@ -174,6 +184,11 @@ final class GenerationPreferencesStore {
         self.imageGenerationProvider = userDefaults
             .string(forKey: Key.imageGenerationProvider)
             .flatMap(ToolImageGenerationProvider.init(rawValue:)) ?? .automatic
+        self.automaticallySelectGeneratedAppPermissions = userDefaults.object(
+            forKey: Key.automaticallySelectGeneratedAppPermissions
+        ) == nil
+            ? true
+            : userDefaults.bool(forKey: Key.automaticallySelectGeneratedAppPermissions)
         self.generatedAppMicrophoneAccessEnabled = userDefaults.bool(
             forKey: GeneratedAppResourcePermission.microphone.userDefaultsKey
         )

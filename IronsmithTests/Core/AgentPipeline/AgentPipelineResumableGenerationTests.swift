@@ -23,9 +23,9 @@ extension AgentPipelineTests {
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
             iconClient: .noOp,
-            metadataClient: ToolMetadataClient { _ in
+            planningClient: ToolGenerationPlanningClient { _ in
                 await metadataGate.waitForRelease()
-                return ToolMetadataSuggestion(displayName: "Named Later", iconPrompt: "")
+                return ToolCreationPlan(displayName: "Named Later", iconPrompt: "")
             },
             promptRefinementClient: .disabled()
         ))
@@ -85,8 +85,8 @@ extension AgentPipelineTests {
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
             iconClient: .noOp,
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Paused Tool", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Paused Tool", iconPrompt: "")
             },
             promptRefinementClient: .disabled()
         ))
@@ -177,7 +177,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -258,7 +258,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -337,7 +337,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
-            metadataClient: .fallback(),
+            planningClient: .fallback(),
             versionBackupClient: .live
         )
 
@@ -401,7 +401,7 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
             appBundleClient: .noOp(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let task = Task {

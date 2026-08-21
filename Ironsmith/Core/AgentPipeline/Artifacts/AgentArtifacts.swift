@@ -121,6 +121,35 @@ enum ToolAppKind: String, Codable, CaseIterable, Equatable, Sendable {
     }
 }
 
+enum ToolAppKindPreference: String, CaseIterable, Equatable, Sendable {
+    case automatic
+    case window
+    case menuBar = "menu_bar"
+
+    var displayName: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .window: return ToolAppKind.window.displayName
+        case .menuBar: return ToolAppKind.menuBar.displayName
+        }
+    }
+
+    var explicitAppKind: ToolAppKind? {
+        switch self {
+        case .automatic: nil
+        case .window: .window
+        case .menuBar: .menuBar
+        }
+    }
+
+    nonisolated init(_ appKind: ToolAppKind) {
+        switch appKind {
+        case .window: self = .window
+        case .menuBar: self = .menuBar
+        }
+    }
+}
+
 enum ToolMenuBarSymbol {
     nonisolated static let fallback = "hammer"
 
@@ -204,6 +233,34 @@ struct ToolGenerationSettings: Equatable, Sendable {
             sandboxEnabled: sandboxEnabled,
             sandboxPermissions: sandboxPermissions,
             resourcePermissions: resourcePermissions
+        )
+    }
+}
+
+struct ToolGenerationPlanningPolicy: Equatable, Sendable {
+    var appKindPreference: ToolAppKindPreference
+    var automaticallySelectPermissions: Bool
+    var alwaysIncludedSandboxPermissions: GeneratedAppSandboxPermissions
+    var alwaysIncludedResourcePermissions: GeneratedAppResourcePermissions
+
+    nonisolated init(
+        appKindPreference: ToolAppKindPreference,
+        automaticallySelectPermissions: Bool,
+        alwaysIncludedSandboxPermissions: GeneratedAppSandboxPermissions,
+        alwaysIncludedResourcePermissions: GeneratedAppResourcePermissions
+    ) {
+        self.appKindPreference = appKindPreference
+        self.automaticallySelectPermissions = automaticallySelectPermissions
+        self.alwaysIncludedSandboxPermissions = alwaysIncludedSandboxPermissions
+        self.alwaysIncludedResourcePermissions = alwaysIncludedResourcePermissions
+    }
+
+    nonisolated static func manual(settings: ToolGenerationSettings) -> Self {
+        Self(
+            appKindPreference: ToolAppKindPreference(settings.appKind),
+            automaticallySelectPermissions: false,
+            alwaysIncludedSandboxPermissions: .none,
+            alwaysIncludedResourcePermissions: .none
         )
     }
 }
@@ -330,6 +387,8 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let previousContentViewVersionFilename = "previous-ContentView.swift"
     nonisolated static let pendingBuildSettingsVersionFilename = "pending-build-settings.json"
     nonisolated static let previousBuildSettingsVersionFilename = "previous-build-settings.json"
+    nonisolated static let pendingGenerationSettingsFilename =
+        "pending-generation-settings.json"
 
     let packageRootURL: URL
     let executableName: String
@@ -374,6 +433,10 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var previousBuildSettingsVersionURL: URL {
         Self.previousBuildSettingsVersionURL(for: packageRootURL)
+    }
+
+    nonisolated var pendingGenerationSettingsURL: URL {
+        Self.pendingGenerationSettingsURL(for: packageRootURL)
     }
 
     nonisolated var sourceDirectoryURL: URL {
@@ -500,6 +563,11 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static func previousBuildSettingsVersionURL(for packageRootURL: URL) -> URL {
         versionsDirectoryURL(for: packageRootURL)
             .appendingPathComponent(previousBuildSettingsVersionFilename)
+    }
+
+    nonisolated static func pendingGenerationSettingsURL(for packageRootURL: URL) -> URL {
+        packageMetadataDirectoryURL(for: packageRootURL)
+            .appendingPathComponent(pendingGenerationSettingsFilename)
     }
 
     nonisolated static func sandboxEntitlementsURL(for packageRootURL: URL) -> URL {

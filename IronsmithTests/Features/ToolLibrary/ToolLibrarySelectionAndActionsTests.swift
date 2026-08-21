@@ -14,11 +14,13 @@ extension ToolLibraryTests {
         let otherTool = Tool(name: "Notes", packageRootPath: "/tmp/notes")
 
         #expect(toolLibraryState.promptPlaceholder == "Describe a new app to build…")
+        #expect(toolLibraryState.appKindPreference == .automatic)
         #expect(!(toolLibraryState.isSelected(tool)))
 
         toolLibraryState.selectForEditing(tool)
 
         #expect(toolLibraryState.isSelected(tool))
+        #expect(toolLibraryState.appKindPreference == .window)
         #expect(toolLibraryState.promptPlaceholder == "Describe changes for Calculator…")
 
         toolLibraryState.handleDeletedTool(otherTool)
@@ -26,6 +28,7 @@ extension ToolLibraryTests {
         #expect(toolLibraryState.isSelected(tool))
         toolLibraryState.syncSelection(with: [otherTool])
         #expect(!(toolLibraryState.isSelected(tool)))
+        #expect(toolLibraryState.appKindPreference == .automatic)
         #expect(toolLibraryState.promptPlaceholder == "Describe a new app to build…")
     }
 
@@ -113,7 +116,7 @@ extension ToolLibraryTests {
         )
 
         toolLibraryState.initializeNextGenerationSettingsIfNeeded(defaults)
-        toolLibraryState.appKind = .menuBar
+        toolLibraryState.setAppKindPreference(.menuBar)
         toolLibraryState.sandboxEnabled = false
         toolLibraryState.sandboxPermissions = GeneratedAppSandboxPermissions([.outgoingConnections])
         toolLibraryState.resourcePermissions = GeneratedAppResourcePermissions([.camera])
@@ -123,6 +126,7 @@ extension ToolLibraryTests {
 
         #expect(toolLibraryState.isSelected(tool))
         #expect(toolLibraryState.appKind == .window)
+        #expect(toolLibraryState.appKindPreference == .window)
         #expect(toolLibraryState.sandboxEnabled)
         #expect(toolLibraryState.sandboxPermissions.enabled.isEmpty)
         #expect(toolLibraryState.resourcePermissions.enabled.isEmpty)
@@ -131,6 +135,7 @@ extension ToolLibraryTests {
 
         #expect(!(toolLibraryState.isSelected(tool)))
         #expect(toolLibraryState.appKind == .menuBar)
+        #expect(toolLibraryState.appKindPreference == .menuBar)
         #expect(!(toolLibraryState.sandboxEnabled))
         #expect(toolLibraryState.sandboxPermissions.enabled == [.outgoingConnections])
         #expect(toolLibraryState.resourcePermissions.enabled == [.camera])
@@ -852,6 +857,12 @@ extension ToolLibraryTests {
         try #"Text("failed edit progress")"#.write(to: contentViewURL, atomically: true, encoding: .utf8)
         try #"Text("last ready")"#.write(to: layout.pendingContentViewVersionURL, atomically: true, encoding: .utf8)
         try "partial patch".write(to: layout.pendingContentViewDraftURL, atomically: true, encoding: .utf8)
+        try ToolVersionBackupClient.live.stagePendingGenerationSettings(
+            packageRoot,
+            ToolGenerationSettings(
+                resourcePermissions: GeneratedAppResourcePermissions([.microphone])
+            )
+        )
         try FileManager.default.createDirectory(
             at: layout.currentRunAttachmentsDirectoryURL,
             withIntermediateDirectories: true
@@ -897,6 +908,7 @@ extension ToolLibraryTests {
         #expect(FileManager.default.fileExists(atPath: packageRoot.path))
         #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewDraftURL.path)))
         #expect(!(FileManager.default.fileExists(atPath: layout.pendingContentViewVersionURL.path)))
+        #expect(!(FileManager.default.fileExists(atPath: layout.pendingGenerationSettingsURL.path)))
         #expect(!(FileManager.default.fileExists(atPath: layout.currentRunAttachmentsDirectoryURL.path)))
         #expect(cleanupCapture.removedLayout == layout)
         #expect(try String(contentsOf: contentViewURL, encoding: .utf8) == #"Text("last ready")"#)

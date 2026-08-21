@@ -149,7 +149,7 @@ struct ToolGenerationRuntimeDependencies {
     let appBundleClient: ToolAppBundleClient
     let iconClient: ToolIconClient
     let iconGenerationCoordinator: ToolIconGenerationCoordinator
-    let metadataClient: ToolMetadataClient
+    let planningClient: ToolGenerationPlanningClient
     let promptRefinementClient: ToolPromptRefinementClient
     let versionBackupClient: ToolVersionBackupClient
     let packageMaterializer: ToolPackageMaterializer
@@ -163,7 +163,7 @@ struct ToolGenerationRuntimeDependencies {
         appBundleClient: ToolAppBundleClient,
         iconClient: ToolIconClient = .noOp,
         iconGenerationCoordinator: ToolIconGenerationCoordinator = ToolIconGenerationCoordinator(),
-        metadataClient: ToolMetadataClient = .fallback(),
+        planningClient: ToolGenerationPlanningClient = .fallback(),
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         versionBackupClient: ToolVersionBackupClient,
         packageMaterializer: ToolPackageMaterializer? = nil,
@@ -176,7 +176,7 @@ struct ToolGenerationRuntimeDependencies {
         self.appBundleClient = appBundleClient
         self.iconClient = iconClient
         self.iconGenerationCoordinator = iconGenerationCoordinator
-        self.metadataClient = metadataClient
+        self.planningClient = planningClient
         self.promptRefinementClient = promptRefinementClient
         self.versionBackupClient = versionBackupClient
         self.packageMaterializer = packageMaterializer ?? ToolPackageMaterializer(fileClient: fileClient)
@@ -192,7 +192,7 @@ struct ToolGenerationRuntimeDependencies {
         appBundleClient: ToolAppBundleClient? = nil,
         iconClient: ToolIconClient? = nil,
         iconGenerationCoordinator: ToolIconGenerationCoordinator = ToolIconGenerationCoordinator(),
-        metadataClient: ToolMetadataClient? = nil,
+        planningClient: ToolGenerationPlanningClient? = nil,
         promptRefinementClient: ToolPromptRefinementClient? = nil,
         versionBackupClient: ToolVersionBackupClient = .live,
         packageMaterializer: ToolPackageMaterializer? = nil,
@@ -206,7 +206,7 @@ struct ToolGenerationRuntimeDependencies {
             appBundleClient: appBundleClient ?? .live(),
             iconClient: iconClient ?? .live(),
             iconGenerationCoordinator: iconGenerationCoordinator,
-            metadataClient: metadataClient ?? .live(),
+            planningClient: planningClient ?? .live(),
             promptRefinementClient: promptRefinementClient ?? .live(),
             versionBackupClient: versionBackupClient,
             packageMaterializer: packageMaterializer,
@@ -226,7 +226,7 @@ struct ToolGenerationRuntimeContext {
     let appBundleClient: ToolAppBundleClient
     let iconClient: ToolIconClient
     let iconGenerationCoordinator: ToolIconGenerationCoordinator
-    let metadataClient: ToolMetadataClient
+    let planningClient: ToolGenerationPlanningClient
     let promptRefinementClient: ToolPromptRefinementClient
     let promptRefinementEnabled: Bool
     let versionBackupClient: ToolVersionBackupClient
@@ -273,7 +273,7 @@ struct ToolGenerationRuntimeContext {
         self.appBundleClient = dependencies.appBundleClient
         self.iconClient = dependencies.iconClient
         self.iconGenerationCoordinator = dependencies.iconGenerationCoordinator
-        self.metadataClient = dependencies.metadataClient
+        self.planningClient = dependencies.planningClient
         self.promptRefinementClient = dependencies.promptRefinementClient
         self.promptRefinementEnabled = languageModelContext.promptRefinementEnabled
         self.versionBackupClient = dependencies.versionBackupClient
