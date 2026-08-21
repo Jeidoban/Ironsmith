@@ -235,7 +235,7 @@ enum ToolRowGenerationStatusResolver {
         case .initializing:
             return "Initializing"
         case .planning:
-            return "Naming app"
+            return "Generating metadata"
         case .generatingIcon:
             return "Generating icon"
         case .waitingForIcon:

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ToolLibraryStorePublishSheetView: View {
     let tool: Tool
+    let generationSettings: ToolGenerationSettings
     let isUpdatingPublishedListing: Bool
     @Binding var publishShortDescription: String
     @Binding var publishDescription: String
@@ -34,6 +35,7 @@ struct ToolLibraryStorePublishSheetView: View {
             .font(.headline)
 
             appIdentitySection
+            permissionsSection
 
             field("Short Description") {
                 TextField(
@@ -222,6 +224,45 @@ struct ToolLibraryStorePublishSheetView: View {
             .padding(10)
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
         }
+    }
+
+    private var permissionsSection: some View {
+        field("Permissions") {
+            Group {
+                if publishPermissions.isEmpty {
+                    Text("No additional permissions")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.adaptive(minimum: 180), spacing: 14, alignment: .top)
+                        ],
+                        alignment: .leading,
+                        spacing: 10
+                    ) {
+                        ForEach(publishPermissions) { permission in
+                            HStack(spacing: 7) {
+                                Image(systemName: permission.systemImage)
+                                    .font(.body)
+                                    .foregroundStyle(.blue)
+                                    .frame(width: 18)
+                                Text(permission.title)
+                                    .font(.callout.weight(.medium))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var publishPermissions: [StorePermissionPresentation] {
+        StorePermissionPresentation.items(for: generationSettings)
     }
 
     @ViewBuilder

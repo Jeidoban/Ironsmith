@@ -432,7 +432,10 @@ nonisolated struct StorePermissionPresentation: Identifiable, Equatable, Sendabl
     let systemImage: String
 
     static func items(for version: StoreVersionMetadata) -> [Self] {
-        let settings = version.generationSettings.toolSettings
+        items(for: version.generationSettings.toolSettings)
+    }
+
+    static func items(for settings: ToolGenerationSettings) -> [Self] {
         let sandbox: [Self] = settings.sandboxEnabled
             ? settings.sandboxPermissions.enabledPermissions.map { permission in
                 switch permission {

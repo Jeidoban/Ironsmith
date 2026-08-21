@@ -1137,9 +1137,13 @@ final class ToolLibraryStore {
     func remixIdentitySubmissionAction(
         for tool: Tool,
         generatesIdentity: Bool,
-        hasPresentedNotice: Bool
+        hasPresentedNotice: Bool,
+        isConfirmedDownloadedFromAnotherUser: Bool
     ) -> ToolRemixIdentitySubmissionAction {
-        guard isFirstEditOfDownloadedApp(tool), generatesIdentity else { return .submit }
+        guard isConfirmedDownloadedFromAnotherUser,
+            isFirstEditOfDownloadedApp(tool),
+            generatesIdentity
+        else { return .submit }
         return hasPresentedNotice ? .generateIdentity : .presentNotice
     }
 

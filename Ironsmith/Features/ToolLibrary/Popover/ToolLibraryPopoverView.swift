@@ -1,4 +1,5 @@
 import AuthenticationServices
+import Auth
 import Foundation
 import SwiftData
 import SwiftUI
@@ -629,6 +630,9 @@ struct ToolLibraryPopoverView: View {
         if let tool = tools.first(where: { $0.id == storePublisher.publishingToolID }) {
             ToolLibraryStorePublishSheetView(
                 tool: tool,
+                generationSettings: tool.generationSettings(
+                    defaults: defaultGenerationSettings
+                ),
                 isUpdatingPublishedListing: storePublisher.isUpdatingPublishedListing,
                 publishShortDescription: $storePublisher.publishShortDescription,
                 publishDescription: $storePublisher.publishDescription,
@@ -738,7 +742,7 @@ struct ToolLibraryPopoverView: View {
     }
 
     private var publishedStoreLinkRefreshID: String {
-        let session = inferenceStore.ironsmithSession == nil ? "signed-out" : "signed-in"
+        let session = inferenceStore.ironsmithSession?.user.id.uuidString ?? "signed-out"
         let storeFeature = isStoreFeatureEnabled ? "store-on" : "store-off"
         let links =
             tools
@@ -991,7 +995,9 @@ struct ToolLibraryPopoverView: View {
         switch toolLibraryStore.remixIdentitySubmissionAction(
             for: tool,
             generatesIdentity: generatesIdentityForNewRemixes,
-            hasPresentedNotice: hasPresentedRemixIdentityNotice
+            hasPresentedNotice: hasPresentedRemixIdentityNotice,
+            isConfirmedDownloadedFromAnotherUser: storePublisher
+                .isConfirmedDownloadedFromAnotherUser(tool)
         ) {
         case .submit:
             submitCurrentPrompt()
