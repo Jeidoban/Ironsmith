@@ -54,7 +54,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -132,7 +132,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -200,7 +200,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -268,7 +268,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: .fallback(),
+            planningClient: .fallback(),
             afterLanguageModelInvocation: {
                 await invocationCapture.record()
             }
@@ -354,8 +354,8 @@ extension AgentPipelineTests {
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Model Conversation Tool", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Model Conversation Tool", iconPrompt: "")
             }
         )
 
@@ -446,8 +446,8 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Build A Large Model Repair", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Build A Large Model Repair", iconPrompt: "")
             }
         )
 
@@ -652,8 +652,8 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Build Safety Limit Repair", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Build Safety Limit Repair", iconPrompt: "")
             }
         )
 
@@ -752,8 +752,8 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Temporary Increase Repair", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Temporary Increase Repair", iconPrompt: "")
             }
         )
 
@@ -835,7 +835,7 @@ extension AgentPipelineTests {
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -895,7 +895,7 @@ extension AgentPipelineTests {
                 launch: { _ in },
                 stripQuarantine: { _ in }
             ),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(

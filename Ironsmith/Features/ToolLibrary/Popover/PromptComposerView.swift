@@ -12,13 +12,14 @@ struct PromptComposerView: View {
     @Binding var prompt: String
     @Binding var isExpanded: Bool
     @Binding var sandboxEnabled: Bool
-    @Binding var appKind: ToolAppKind
+    @Binding var appKindPreference: ToolAppKindPreference
     @Binding var sandboxPermissions: GeneratedAppSandboxPermissions
     @Binding var resourcePermissions: GeneratedAppResourcePermissions
     @Binding var codingAgentPreference: ToolCodingAgentPreference
     @Binding var reasoningEffort: ToolReasoningEffort
     let placeholder: String
     let showsSandboxControl: Bool
+    let showsPermissionControls: Bool
     let modelPickerTitle: String
     let isModelPickerEnabled: Bool
     let isSubmitEnabled: Bool
@@ -252,13 +253,13 @@ struct PromptComposerView: View {
 
     private var generationSettingsMenu: some View {
         Menu {
-            Picker("App Type", selection: $appKind) {
-                ForEach(ToolAppKind.allCases, id: \.self) { kind in
+            Picker("App Type", selection: $appKindPreference) {
+                ForEach(ToolAppKindPreference.allCases, id: \.self) { preference in
                     Label(
-                        kind.displayName,
-                        systemImage: kind == .menuBar ? "menubar.rectangle" : "macwindow"
+                        preference.displayName,
+                        systemImage: appKindSystemImage(preference)
                     )
-                    .tag(kind)
+                    .tag(preference)
                 }
             }
 
@@ -311,21 +312,26 @@ struct PromptComposerView: View {
                     .help(sandboxHelpText)
             }
 
-            Divider()
+            if showsPermissionControls {
+                Divider()
 
-            Menu("Permissions") {
-                Section("General Access") {
-                    ForEach(GeneratedAppResourcePermission.allCases) { permission in
-                        Toggle(
-                            permission.displayName, isOn: resourcePermissionBinding(for: permission)
-                        )
+                Menu("Permissions") {
+                    Section("General Access") {
+                        ForEach(GeneratedAppResourcePermission.allCases) { permission in
+                            Toggle(
+                                permission.displayName,
+                                isOn: resourcePermissionBinding(for: permission)
+                            )
+                        }
                     }
-                }
 
-                Section("Sandbox Access") {
-                    ForEach(GeneratedAppSandboxPermission.allCases) { permission in
-                        Toggle(
-                            permission.displayName, isOn: sandboxPermissionBinding(for: permission))
+                    Section("Sandbox Access") {
+                        ForEach(GeneratedAppSandboxPermission.allCases) { permission in
+                            Toggle(
+                                permission.displayName,
+                                isOn: sandboxPermissionBinding(for: permission)
+                            )
+                        }
                     }
                 }
             }
@@ -419,6 +425,14 @@ struct PromptComposerView: View {
 
     private var sandboxHelpText: String {
         "Controls whether generated apps include App Sandbox entitlements."
+    }
+
+    private func appKindSystemImage(_ preference: ToolAppKindPreference) -> String {
+        switch preference {
+        case .automatic: "wand.and.sparkles"
+        case .window: "macwindow"
+        case .menuBar: "menubar.rectangle"
+        }
     }
 
     private func checkedSelectionButton<Value: Equatable>(
@@ -620,7 +634,7 @@ private struct PromptComposerPreview: View {
             prompt: .constant(""),
             isExpanded: $isExpanded,
             sandboxEnabled: .constant(!isEditing),
-            appKind: .constant(isEditing ? .menuBar : .window),
+            appKindPreference: .constant(isEditing ? .menuBar : .automatic),
             sandboxPermissions: .constant(.default),
             resourcePermissions: .constant(
                 isEditing ? GeneratedAppResourcePermissions([.camera]) : .none
@@ -631,6 +645,7 @@ private struct PromptComposerPreview: View {
                 ? "Describe changes for Clipboard Cleaner…"
                 : "Describe a new app to build…",
             showsSandboxControl: isEditing,
+            showsPermissionControls: true,
             modelPickerTitle: "DeepSeek V4 Flash",
             isModelPickerEnabled: true,
             isSubmitEnabled: isEditing,

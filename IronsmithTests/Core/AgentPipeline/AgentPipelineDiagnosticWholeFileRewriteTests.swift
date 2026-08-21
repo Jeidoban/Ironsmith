@@ -33,8 +33,8 @@ extension AgentPipelineTests {
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Disabled Rewrite Tool", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Disabled Rewrite Tool", iconPrompt: "")
             }
         )
 
@@ -83,8 +83,8 @@ extension AgentPipelineTests {
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Diagnostic Rewrite Tool", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Diagnostic Rewrite Tool", iconPrompt: "")
             }
         )
 
@@ -146,8 +146,8 @@ extension AgentPipelineTests {
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(
                     displayName: "Progressive Diagnostic Rewrite Tool",
                     iconPrompt: ""
                 )
@@ -227,8 +227,8 @@ extension AgentPipelineTests {
                 launch: { _ in },
                 stripQuarantine: { _ in }
             ),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(
                     displayName: "Deterministic Stall Recovery Tool",
                     iconPrompt: ""
                 )
@@ -293,8 +293,8 @@ extension AgentPipelineTests {
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Regressed Rewrite Tool", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Regressed Rewrite Tool", iconPrompt: "")
             }
         )
 
@@ -348,8 +348,8 @@ extension AgentPipelineTests {
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "One Shot Rewrite Tool", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "One Shot Rewrite Tool", iconPrompt: "")
             }
         )
 
@@ -396,8 +396,8 @@ extension AgentPipelineTests {
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Context Window Rewrite Tool", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Context Window Rewrite Tool", iconPrompt: "")
             }
         )
 
@@ -444,8 +444,8 @@ extension AgentPipelineTests {
             ),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.diagnosticRewriteProcessClient(builds: builds, formats: formats),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "High Error Rewrite Tool", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "High Error Rewrite Tool", iconPrompt: "")
             }
         )
 

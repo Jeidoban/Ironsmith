@@ -1461,6 +1461,12 @@ struct StoreImportTests {
             )
         )
         let items = StorePermissionPresentation.items(for: permissionVersion)
+        #expect(
+            items
+                == StorePermissionPresentation.items(
+                    for: permissionVersion.generationSettings.toolSettings
+                )
+        )
 
         #expect(items.map(\.title) == [
             "Incoming connections (server)",

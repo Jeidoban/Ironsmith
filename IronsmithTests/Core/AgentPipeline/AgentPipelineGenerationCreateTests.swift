@@ -70,8 +70,8 @@ extension AgentPipelineTests {
             languageModel: model,
             toolsDirectoryURL: toolsDirectory,
             iconClient: iconClient,
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Parallel Icon", iconPrompt: "An anvil")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Parallel Icon", iconPrompt: "An anvil")
             }
         )
 
@@ -195,8 +195,8 @@ extension AgentPipelineTests {
             languageModel: model,
             toolsDirectoryURL: toolsDirectory,
             iconClient: iconClient,
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Paused Icon", iconPrompt: "An anvil")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Paused Icon", iconPrompt: "An anvil")
             }
         )
 
@@ -250,8 +250,8 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: .live,
             appBundleClient: .noOp(),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Cancel Tool", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Cancel Tool", iconPrompt: "")
             }
         )
 
@@ -327,8 +327,8 @@ extension AgentPipelineTests {
             toolsDirectoryURL: toolsDirectory,
             processClient: processClient,
             appBundleClient: .noOp(),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Flame Envelope", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Flame Envelope", iconPrompt: "")
             }
         )
 
@@ -368,7 +368,7 @@ extension AgentPipelineTests {
             processClient: processClient,
             appBundleClient: .noOp(),
             iconClient: .noOp,
-            metadataClient: .fallback()
+            planningClient: .fallback()
         ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
@@ -412,7 +412,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func liveGenerationClientUsesGeneratedMetadataForNameAndIconPrompt() async throws {
+    func liveGenerationClientResolvesAutomaticCreationPlanAndAlwaysIncludedPermissions() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
 
@@ -448,12 +448,15 @@ extension AgentPipelineTests {
             processClient: processClient,
             appBundleClient: appBundleClient,
             iconClient: .noOp,
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(
                     displayName: "Focus Pad",
                     iconPrompt: iconPrompt,
                     menuBarSystemImage: "note.text",
-                    category: .productivity
+                    category: .productivity,
+                    suggestedAppKind: .menuBar,
+                    suggestedSandboxPermissions: GeneratedAppSandboxPermissions([.downloadsFolder]),
+                    suggestedResourcePermissions: GeneratedAppResourcePermissions([.microphone])
                 )
             },
             promptRefinementClient: ToolPromptRefinementClient { _ in
@@ -482,7 +485,6 @@ extension AgentPipelineTests {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
 
-        store.appKind = .menuBar
         store.prompt = "Build a focused notes helper with quick tags"
         await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
 
@@ -492,7 +494,10 @@ extension AgentPipelineTests {
         #expect(tool.appKind == .menuBar)
         #expect(tool.validatedMenuBarSystemImage == "note.text")
         #expect(tool.category == .productivity)
-        #expect(tool.storedResourcePermissions?.enabled == [.camera])
+        #expect(tool.storedSandboxPermissions?.enabled == [
+            .outgoingConnections, .userSelectedFiles, .downloadsFolder,
+        ])
+        #expect(tool.storedResourcePermissions?.enabled == [.camera, .microphone])
         #expect(tool.pendingPrompt == nil)
         #expect(tool.packageRootURL.lastPathComponent == "focus-pad")
         let appEntryURL = tool.packageRootURL.appendingPathComponent("Sources/FocusPad/FocusPad.swift")
@@ -545,7 +550,7 @@ extension AgentPipelineTests {
             processClient: processClient,
             appBundleClient: .noOp(),
             iconClient: .noOp,
-            metadataClient: .fallback()
+            planningClient: .fallback()
         ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
@@ -610,7 +615,7 @@ extension AgentPipelineTests {
             processClient: processClient,
             appBundleClient: .noOp(),
             iconClient: .noOp,
-            metadataClient: .fallback()
+            planningClient: .fallback()
         ))
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(

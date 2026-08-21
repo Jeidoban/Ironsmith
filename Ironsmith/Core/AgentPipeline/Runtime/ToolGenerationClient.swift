@@ -72,6 +72,7 @@ nonisolated struct ToolGenerationRequest {
     let prompt: String
     let existingTool: Tool?
     let settings: ToolGenerationSettings
+    let planningPolicy: ToolGenerationPlanningPolicy
     let languageModelContext: AgentLanguageModelContext
     let imageGenerationProvider: ToolImageGenerationProvider
     let attachments: [ToolPromptAttachment]
@@ -81,6 +82,7 @@ nonisolated struct ToolGenerationRequest {
         prompt: String,
         existingTool: Tool? = nil,
         settings: ToolGenerationSettings,
+        planningPolicy: ToolGenerationPlanningPolicy? = nil,
         languageModelContext: AgentLanguageModelContext,
         imageGenerationProvider: ToolImageGenerationProvider = .disabled,
         attachments: [ToolPromptAttachment] = [],
@@ -89,6 +91,7 @@ nonisolated struct ToolGenerationRequest {
         self.prompt = prompt
         self.existingTool = existingTool
         self.settings = settings
+        self.planningPolicy = planningPolicy ?? .manual(settings: settings)
         self.languageModelContext = languageModelContext
         self.imageGenerationProvider = imageGenerationProvider
         self.attachments = attachments
@@ -132,6 +135,7 @@ struct ToolGenerationClient {
                     for: request.prompt,
                     existingTool: request.existingTool,
                     settings: request.settings,
+                    planningPolicy: request.planningPolicy,
                     imageGenerationProvider: request.imageGenerationProvider,
                     attachments: request.attachments,
                     lifecycle: request.lifecycle

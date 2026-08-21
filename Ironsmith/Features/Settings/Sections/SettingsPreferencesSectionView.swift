@@ -80,6 +80,25 @@ struct SettingsPreferencesSectionView: View {
 
         Section {
             VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle(
+                        "Automatically select permissions",
+                        isOn: binding(\.automaticallySelectGeneratedAppPermissions)
+                    )
+                    .toggleStyle(.switch)
+
+                    Text(
+                        inferenceStore.generationPreferences
+                            .automaticallySelectGeneratedAppPermissions
+                            ? "Ironsmith selects permissions from each prompt. Permissions below are always included."
+                            : "Permissions below provide the defaults shown when generating an app."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text("General access")
                         .font(.caption.weight(.semibold))
@@ -103,7 +122,7 @@ struct SettingsPreferencesSectionView: View {
                 }
             }
         } header: {
-            Text("Default generated app permissions")
+            Text("Generated app permissions")
         }
     }
 

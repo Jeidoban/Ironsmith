@@ -1,4 +1,5 @@
 import AuthenticationServices
+import Auth
 import Foundation
 import SwiftData
 import SwiftUI
@@ -30,7 +31,7 @@ struct ToolLibraryPopoverView: View {
     #endif
     let appUpdateStore: AppUpdateStore
     private let welcomeOnboardingStore: WelcomeOnboardingStore
-    private let remixMetadataClient: ToolMetadataClient
+    private let remixMetadataClient: ToolGenerationPlanningClient
     @State private var toolLibraryStore = ToolLibraryStore()
     @State private var storePublisher: ToolLibraryStorePublisher
     @State private var detailsEditor: ToolAppDetailsEditorStore
@@ -69,7 +70,7 @@ struct ToolLibraryPopoverView: View {
         iconClient: ToolIconClient = .cachedOnly(),
         iconEditingClient: ToolIconEditingClient? = nil,
         iconBuildClient: ToolBuildClient? = nil,
-        remixMetadataClient: ToolMetadataClient? = nil
+        remixMetadataClient: ToolGenerationPlanningClient? = nil
     ) {
         self.appUpdateStore = appUpdateStore
         self.welcomeOnboardingStore = welcomeOnboardingStore ?? WelcomeOnboardingStore()
@@ -335,13 +336,15 @@ struct ToolLibraryPopoverView: View {
                 prompt: $toolLibraryStore.prompt,
                 isExpanded: $isPromptExpanded,
                 sandboxEnabled: sandboxEnabledBinding,
-                appKind: appKindBinding,
+                appKindPreference: appKindPreferenceBinding,
                 sandboxPermissions: sandboxPermissionsBinding,
                 resourcePermissions: resourcePermissionsBinding,
                 codingAgentPreference: codingAgentPreferenceBinding,
                 reasoningEffort: reasoningEffortBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
                 showsSandboxControl: showSandboxOverride,
+                showsPermissionControls: !inferenceStore.generationPreferences
+                    .automaticallySelectGeneratedAppPermissions,
                 modelPickerTitle: composerModelPickerTitle,
                 isModelPickerEnabled: isComposerModelPickerEnabled,
                 isSubmitEnabled: canSubmitPrompt,
@@ -627,6 +630,9 @@ struct ToolLibraryPopoverView: View {
         if let tool = tools.first(where: { $0.id == storePublisher.publishingToolID }) {
             ToolLibraryStorePublishSheetView(
                 tool: tool,
+                generationSettings: tool.generationSettings(
+                    defaults: defaultGenerationSettings
+                ),
                 isUpdatingPublishedListing: storePublisher.isUpdatingPublishedListing,
                 publishShortDescription: $storePublisher.publishShortDescription,
                 publishDescription: $storePublisher.publishDescription,
@@ -736,7 +742,7 @@ struct ToolLibraryPopoverView: View {
     }
 
     private var publishedStoreLinkRefreshID: String {
-        let session = inferenceStore.ironsmithSession == nil ? "signed-out" : "signed-in"
+        let session = inferenceStore.ironsmithSession?.user.id.uuidString ?? "signed-out"
         let storeFeature = isStoreFeatureEnabled ? "store-on" : "store-off"
         let links =
             tools
@@ -880,13 +886,10 @@ struct ToolLibraryPopoverView: View {
         )
     }
 
-    private var appKindBinding: Binding<ToolAppKind> {
+    private var appKindPreferenceBinding: Binding<ToolAppKindPreference> {
         Binding(
-            get: { toolLibraryStore.appKind },
-            set: { newValue in
-                toolLibraryStore.appKind = newValue
-                toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
-            }
+            get: { toolLibraryStore.appKindPreference },
+            set: { toolLibraryStore.setAppKindPreference($0) }
         )
     }
 
@@ -992,7 +995,9 @@ struct ToolLibraryPopoverView: View {
         switch toolLibraryStore.remixIdentitySubmissionAction(
             for: tool,
             generatesIdentity: generatesIdentityForNewRemixes,
-            hasPresentedNotice: hasPresentedRemixIdentityNotice
+            hasPresentedNotice: hasPresentedRemixIdentityNotice,
+            isConfirmedDownloadedFromAnotherUser: storePublisher
+                .isConfirmedDownloadedFromAnotherUser(tool)
         ) {
         case .submit:
             submitCurrentPrompt()
@@ -1053,7 +1058,7 @@ struct ToolLibraryPopoverView: View {
             )
             let sourceURL = try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath)
             let source = try String(contentsOf: sourceURL, encoding: .utf8)
-            let suggestion = await remixMetadataClient.suggestMetadata(
+            let suggestion = await remixMetadataClient.planCreation(
                 userPrompt: Self.remixIdentityPrompt(for: tool, source: source),
                 imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
                 invoker: languageModelContext.languageModelInvoker

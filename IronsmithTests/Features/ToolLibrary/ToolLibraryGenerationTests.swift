@@ -35,21 +35,32 @@ extension ToolLibraryTests {
             store.remixIdentitySubmissionAction(
                 for: tool,
                 generatesIdentity: true,
-                hasPresentedNotice: false
+                hasPresentedNotice: false,
+                isConfirmedDownloadedFromAnotherUser: true
             ) == .presentNotice
         )
         #expect(
             store.remixIdentitySubmissionAction(
                 for: tool,
                 generatesIdentity: true,
-                hasPresentedNotice: true
+                hasPresentedNotice: true,
+                isConfirmedDownloadedFromAnotherUser: true
             ) == .generateIdentity
         )
         #expect(
             store.remixIdentitySubmissionAction(
                 for: tool,
                 generatesIdentity: false,
-                hasPresentedNotice: false
+                hasPresentedNotice: false,
+                isConfirmedDownloadedFromAnotherUser: true
+            ) == .submit
+        )
+        #expect(
+            store.remixIdentitySubmissionAction(
+                for: tool,
+                generatesIdentity: true,
+                hasPresentedNotice: false,
+                isConfirmedDownloadedFromAnotherUser: false
             ) == .submit
         )
         try (source + "// changed\n").write(
@@ -62,7 +73,8 @@ extension ToolLibraryTests {
             store.remixIdentitySubmissionAction(
                 for: tool,
                 generatesIdentity: true,
-                hasPresentedNotice: false
+                hasPresentedNotice: false,
+                isConfirmedDownloadedFromAnotherUser: true
             ) == .submit
         )
 
@@ -422,6 +434,13 @@ extension ToolLibraryTests {
 
     @Test
     func toolRowStatusUsesCodexWorkingTextOnlyForCodexOwnedPhases() {
+        #expect(
+            ToolRowGenerationStatusResolver.statusText(
+                phase: .planning,
+                repairErrorCount: nil,
+                activeCodingAgent: nil
+            ) == "Generating metadata"
+        )
         #expect(
             ToolRowGenerationStatusResolver.statusText(
                 phase: .generatingSource,

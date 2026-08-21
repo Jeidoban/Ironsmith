@@ -17,6 +17,14 @@ struct ToolVersionBackupClient {
     ) throws -> ToolContentVersionBackup
     var promoteStagedVersion: (_ backup: ToolContentVersionBackup) throws -> Void
     var discardStagedVersion: (_ backup: ToolContentVersionBackup) throws -> Void
+    var stagePendingGenerationSettings: (
+        _ packageRootURL: URL,
+        _ settings: ToolGenerationSettings
+    ) throws -> Void
+    var pendingGenerationSettings: (
+        _ packageRootURL: URL
+    ) throws -> ToolGenerationSettings?
+    var clearPendingGenerationSettings: (_ packageRootURL: URL) throws -> Void
     var hasPreviousVersion: (_ packageRootURL: URL, _ contentViewPath: String) -> Bool
     var restoreStagedVersion: (
         _ packageRootURL: URL,
@@ -68,6 +76,7 @@ struct ToolVersionBackupClient {
                     to: backup.previousBuildSettingsURL
                 )
             }
+            try removePendingGenerationSettings(for: backup.packageRootURL)
         },
         discardStagedVersion: { backup in
             if FileManager.default.fileExists(atPath: backup.pendingURL.path) {
@@ -76,6 +85,26 @@ struct ToolVersionBackupClient {
             if FileManager.default.fileExists(atPath: backup.pendingBuildSettingsURL.path) {
                 try FileManager.default.removeItem(at: backup.pendingBuildSettingsURL)
             }
+            try removePendingGenerationSettings(for: backup.packageRootURL)
+        },
+        stagePendingGenerationSettings: { packageRootURL, settings in
+            let url = ToolPackageLayout.pendingGenerationSettingsURL(for: packageRootURL)
+            let data = try JSONEncoder().encode(ToolVersionBuildSettingsSnapshot(settings: settings))
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: url, options: .atomic)
+        },
+        pendingGenerationSettings: { packageRootURL in
+            let url = ToolPackageLayout.pendingGenerationSettingsURL(for: packageRootURL)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            let data = try Data(contentsOf: url)
+            return try JSONDecoder().decode(ToolVersionBuildSettingsSnapshot.self, from: data)
+                .settings
+        },
+        clearPendingGenerationSettings: { packageRootURL in
+            try removePendingGenerationSettings(for: packageRootURL)
         },
         hasPreviousVersion: { packageRootURL, contentViewPath in
             guard let backup = try? backupPaths(packageRootURL: packageRootURL, contentViewPath: contentViewPath) else {
@@ -109,6 +138,7 @@ struct ToolVersionBackupClient {
             if FileManager.default.fileExists(atPath: backup.pendingBuildSettingsURL.path) {
                 try FileManager.default.removeItem(at: backup.pendingBuildSettingsURL)
             }
+            try removePendingGenerationSettings(for: packageRootURL)
             return stagedSettings
         },
         restorePreviousVersion: { packageRootURL, contentViewPath, currentSettings in
@@ -186,6 +216,12 @@ private func resolvedContentViewURL(
     contentViewPath: String
 ) throws -> URL {
     try ToolPackageLayout.packageFileURL(for: contentViewPath, packageRootURL: packageRootURL)
+}
+
+private func removePendingGenerationSettings(for packageRootURL: URL) throws {
+    let url = ToolPackageLayout.pendingGenerationSettingsURL(for: packageRootURL)
+    guard FileManager.default.fileExists(atPath: url.path) else { return }
+    try FileManager.default.removeItem(at: url)
 }
 
 nonisolated private struct ToolVersionBuildSettingsSnapshot: Codable, Equatable {

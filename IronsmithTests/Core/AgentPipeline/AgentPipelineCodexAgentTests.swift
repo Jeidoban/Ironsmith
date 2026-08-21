@@ -1117,7 +1117,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .codex(),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: ToolMetadataClient { _ in
+            planningClient: ToolGenerationPlanningClient { _ in
                 let placeholderRoot = toolsDirectory.appendingPathComponent(
                     "new-app",
                     isDirectory: true
@@ -1131,7 +1131,7 @@ extension AgentPipelineTests {
                         .appendingPathComponent("1-reference.txt").path
                 ))
                 #expect(!FileManager.default.fileExists(atPath: placeholderLayout.packageManifestURL.path))
-                return ToolMetadataSuggestion(displayName: "Codex Demo", iconPrompt: "")
+                return ToolCreationPlan(displayName: "Codex Demo", iconPrompt: "")
             },
             promptRefinementClient: ToolPromptRefinementClient { _ in
                 "Refined codex prompt"
@@ -1298,8 +1298,8 @@ extension AgentPipelineTests {
             pipelineConfiguration: .codex(),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(displayName: "Codex Demo", iconPrompt: "")
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Codex Demo", iconPrompt: "")
             },
             codexAgentClient: codexAgentClient,
             codingAgentModelIdentifier: "gpt-5.5",

@@ -8,6 +8,103 @@ import Testing
 
 extension ToolLibraryTests {
     @MainActor
+    @Test
+    func storePublisherConfirmsRemixesOnlyForAppsNotOwnedByCurrentUser() async {
+        let ownedApp = Self.publisherAppDetail()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, _, _, _, _, _, _ in
+            StoreAppPage(apps: [StoreAppSummary(detail: ownedApp)], hasMore: false)
+        }
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: client,
+            iconClient: .noOp
+        )
+        let ownedTool = Tool(
+            name: "Owned",
+            packageRootPath: "/tmp/owned",
+            storeId: ownedApp.storeId,
+            storeAppId: ownedApp.id,
+            storeVersionId: ownedApp.currentVersion.id
+        )
+        let downloadedTool = Tool(
+            name: "Downloaded",
+            packageRootPath: "/tmp/downloaded",
+            storeId: ownedApp.storeId,
+            storeAppId: "00000000-0000-4000-8000-000000000999",
+            storeVersionId: "00000000-0000-4000-8000-000000000998"
+        )
+
+        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(ownedTool))
+        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(downloadedTool))
+
+        await publisher.refreshPublishedStoreApps(
+            isSignedIn: true,
+            tools: [ownedTool, downloadedTool]
+        )
+
+        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(ownedTool))
+        #expect(publisher.isConfirmedDownloadedFromAnotherUser(downloadedTool))
+
+        await publisher.refreshPublishedStoreApps(
+            isSignedIn: false,
+            tools: [ownedTool, downloadedTool]
+        )
+        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(downloadedTool))
+    }
+
+    @MainActor
+    @Test
+    func storePublisherIgnoresStaleOwnershipRefreshesAcrossAccountChanges() async {
+        let ownedApp = Self.publisherAppDetail()
+        let refreshPages = PublisherOwnershipRefreshPages()
+        var client = IronsmithStoreClient.unconfigured
+        client.listApps = { _, _, _, _, _, _, _ in
+            await refreshPages.nextPage()
+        }
+        let publisher = ToolLibraryStorePublisher(
+            storeClient: client,
+            iconClient: .noOp
+        )
+        let tool = Tool(
+            name: "Downloaded",
+            packageRootPath: "/tmp/downloaded",
+            storeId: ownedApp.storeId,
+            storeAppId: ownedApp.id,
+            storeVersionId: ownedApp.currentVersion.id
+        )
+
+        await publisher.refreshPublishedStoreApps(isSignedIn: true, tools: [tool])
+        #expect(publisher.isConfirmedDownloadedFromAnotherUser(tool))
+
+        let staleRefresh = Task {
+            await publisher.refreshPublishedStoreApps(isSignedIn: true, tools: [tool])
+        }
+        await refreshPages.waitForRequestCount(2)
+        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(tool))
+
+        let currentRefresh = Task {
+            await publisher.refreshPublishedStoreApps(isSignedIn: true, tools: [tool])
+        }
+        await refreshPages.waitForRequestCount(3)
+        await refreshPages.resolve(
+            request: 2,
+            with: StoreAppPage(
+                apps: [StoreAppSummary(detail: ownedApp)],
+                hasMore: false
+            )
+        )
+        await currentRefresh.value
+        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(tool))
+
+        await refreshPages.resolve(
+            request: 1,
+            with: StoreAppPage(apps: [], hasMore: false)
+        )
+        await staleRefresh.value
+        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(tool))
+    }
+
+    @MainActor
     @Test(arguments: [false, true])
     func storePublisherShowsReviewReasonsForInitialAndVersionPublishing(
         isVersion: Bool
@@ -1058,6 +1155,38 @@ private actor PublisherBuildCapture {
     func record(category: StoreAppCategory, versionNumber: Int) {
         categories.append(category)
         versionNumbers.append(versionNumber)
+    }
+}
+
+private actor PublisherOwnershipRefreshPages {
+    private var requestCount = 0
+    private var pageContinuations: [Int: CheckedContinuation<StoreAppPage, Never>] = [:]
+    private var requestWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    func nextPage() async -> StoreAppPage {
+        let request = requestCount
+        requestCount += 1
+        let readyWaiters = requestWaiters.filter { requestCount >= $0.count }
+        requestWaiters.removeAll { requestCount >= $0.count }
+        readyWaiters.forEach { $0.continuation.resume() }
+
+        guard request > 0 else {
+            return StoreAppPage(apps: [], hasMore: false)
+        }
+        return await withCheckedContinuation { continuation in
+            pageContinuations[request] = continuation
+        }
+    }
+
+    func waitForRequestCount(_ expectedCount: Int) async {
+        guard requestCount < expectedCount else { return }
+        await withCheckedContinuation { continuation in
+            requestWaiters.append((expectedCount, continuation))
+        }
+    }
+
+    func resolve(request: Int, with page: StoreAppPage) {
+        pageContinuations.removeValue(forKey: request)?.resume(returning: page)
     }
 }
 

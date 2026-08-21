@@ -8,27 +8,103 @@ import Testing
 extension AgentPipelineTests {
     @MainActor
     @Test
-    func generatedMetadataSchemaIncludesNameIconMenuBarSymbolAndCategory() throws {
-        let data = try JSONEncoder().encode(GeneratedToolMetadata.generationSchema)
+    func generatedCreationPlanSchemaIncludesMetadataAppKindAndPermissions() throws {
+        let data = try JSONEncoder().encode(GeneratedToolCreationPlan.generationSchema)
         let schema = try #require(String(data: data, encoding: .utf8))
 
         #expect(schema.contains("displayName"))
         #expect(schema.contains("iconPrompt"))
         #expect(schema.contains("menuBarSystemImage"))
         #expect(schema.contains("category"))
+        #expect(schema.contains("appKind"))
+        #expect(schema.contains("sandboxPermissions"))
+        #expect(schema.contains("resourcePermissions"))
+        #expect(schema.contains("Exact sandbox permission raw values"))
+        #expect(schema.contains("Exact resource permission raw values"))
         #expect(!(schema.contains("refinedPrompt")))
     }
 
     @MainActor
     @Test
+    func creationPlanningRequestsAndValidatesPermissions() async throws {
+        let response = StructuredMetadataResponse(
+            creationPlan: GeneratedToolCreationPlan(
+                displayName: "Camera Dot",
+                iconPrompt: "Camera with dot",
+                menuBarSystemImage: "camera",
+                category: StoreAppCategory.utilities.rawValue,
+                appKind: ToolAppKind.menuBar.rawValue,
+                sandboxPermissions: [
+                    GeneratedAppSandboxPermission.outgoingConnections.rawValue,
+                    "unknown-sandbox-permission",
+                ],
+                resourcePermissions: [
+                    GeneratedAppResourcePermission.camera.rawValue,
+                    "unknown-resource-permission",
+                ]
+            )
+        )
+
+        let suggestion = await ToolGenerationPlanningClient.live().planCreation(
+            userPrompt: "Show a camera status dot in the menu bar",
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
+        )
+
+        #expect(suggestion.suggestedAppKind == .menuBar)
+        #expect(suggestion.suggestedSandboxPermissions.enabled == [.outgoingConnections])
+        #expect(suggestion.suggestedResourcePermissions.enabled == [.camera])
+        let prompt = try #require(await response.prompts.first)
+        #expect(prompt.contains("Allowed sandboxPermissions values:"))
+        #expect(prompt.contains("Allowed resourcePermissions values:"))
+    }
+
+    @MainActor
+    @Test
+    func editPlanningRequestsOnlyAdditionalValidatedPermissions() async throws {
+        let response = StructuredMetadataResponse(
+            editPlan: GeneratedToolEditPlan(
+                additionalSandboxPermissions: [
+                    GeneratedAppSandboxPermission.downloadsFolder.rawValue,
+                    "unknown-sandbox-permission",
+                ],
+                additionalResourcePermissions: [
+                    GeneratedAppResourcePermission.microphone.rawValue,
+                    "unknown-resource-permission",
+                ]
+            )
+        )
+        let plan = await ToolGenerationPlanningClient.live().planEdit(
+            userPrompt: "Add voice note export to Downloads",
+            toolName: "Notes",
+            currentSettings: ToolGenerationSettings(
+                resourcePermissions: GeneratedAppResourcePermissions([.camera])
+            ),
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
+        )
+
+        #expect(plan.additionalSandboxPermissions.enabled == [.downloadsFolder])
+        #expect(plan.additionalResourcePermissions.enabled == [.microphone])
+        let prompt = try #require(await response.prompts.first)
+        #expect(prompt.contains("Existing app: Notes"))
+        #expect(prompt.contains("Existing resource permissions:\ncamera"))
+    }
+
+    @MainActor
+    @Test
     func liveMetadataClientUsesStructuredGenerationForNameAndIcon() async throws {
-        let metadata = GeneratedToolMetadata(
+        let metadata = GeneratedToolCreationPlan(
             displayName: "Recipe Board",
             iconPrompt: "Recipe cards"
         )
-        let response = StructuredMetadataResponse(metadata: metadata)
+        let response = StructuredMetadataResponse(creationPlan: metadata)
 
-        let suggestion = await ToolMetadataClient.live().suggestMetadata(
+        let suggestion = await ToolGenerationPlanningClient.live().planCreation(
             userPrompt: "recipes",
             invoker: Self.makeInvoker(
                 languageModel: StructuredMetadataLanguageModel(response: response),
@@ -45,6 +121,8 @@ extension AgentPipelineTests {
         #expect(prompt.contains("Allowed menuBarSystemImage values:"))
         #expect(prompt.contains("Allowed category values:"))
         #expect(prompt.contains(StoreAppCategory.graphicsDesign.rawValue))
+        #expect(prompt.contains("Allowed sandboxPermissions values:"))
+        #expect(prompt.contains("Allowed resourcePermissions values:"))
         #expect(!(prompt.contains("Planning budget:")))
         #expect(!(prompt.contains("Refined prompt:")))
         #expect(!(prompt.contains("backend")))
@@ -55,13 +133,13 @@ extension AgentPipelineTests {
     @Test
     func liveMetadataClientSelectsConceptOnlyPromptModeForHostedImages() async throws {
         let response = StructuredMetadataResponse(
-            metadata: GeneratedToolMetadata(
+            creationPlan: GeneratedToolCreationPlan(
                 displayName: "Mortgage Calc",
                 iconPrompt: "A small house sheltering a calculator, with one coin orbiting the roofline."
             )
         )
 
-        _ = await ToolMetadataClient.live().suggestMetadata(
+        _ = await ToolGenerationPlanningClient.live().planCreation(
             userPrompt: "Make a mortgage calculator",
             imageGenerationProvider: .openAI,
             invoker: Self.makeInvoker(
@@ -78,14 +156,14 @@ extension AgentPipelineTests {
     @Test
     func metadataSuggestionValidatesMenuBarSymbolAgainstAllowlist() async throws {
         let response = StructuredMetadataResponse(
-            metadata: GeneratedToolMetadata(
+            creationPlan: GeneratedToolCreationPlan(
                 displayName: "Timer",
                 iconPrompt: "Small timer",
                 menuBarSystemImage: "not.a.real.allowed.symbol"
             )
         )
 
-        let suggestion = await ToolMetadataClient.live().suggestMetadata(
+        let suggestion = await ToolGenerationPlanningClient.live().planCreation(
             userPrompt: "Build a timer",
             invoker: Self.makeInvoker(
                 languageModel: StructuredMetadataLanguageModel(response: response),
@@ -100,7 +178,7 @@ extension AgentPipelineTests {
     @Test
     func metadataSuggestionUsesValidatedStoreCategory() async throws {
         let response = StructuredMetadataResponse(
-            metadata: GeneratedToolMetadata(
+            creationPlan: GeneratedToolCreationPlan(
                 displayName: "Budget Board",
                 iconPrompt: "Ledger with coins",
                 menuBarSystemImage: ToolMenuBarSymbol.fallback,
@@ -108,7 +186,7 @@ extension AgentPipelineTests {
             )
         )
 
-        let suggestion = await ToolMetadataClient.live().suggestMetadata(
+        let suggestion = await ToolGenerationPlanningClient.live().planCreation(
             userPrompt: "Build a budget planner",
             invoker: Self.makeInvoker(
                 languageModel: StructuredMetadataLanguageModel(response: response),
@@ -121,17 +199,18 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func metadataSuggestionFallsBackForInvalidStoreCategory() async throws {
+    func metadataSuggestionFallsBackForInvalidCategoryAndAppKind() async throws {
         let response = StructuredMetadataResponse(
-            metadata: GeneratedToolMetadata(
+            creationPlan: GeneratedToolCreationPlan(
                 displayName: "Budget Board",
                 iconPrompt: "Ledger with coins",
                 menuBarSystemImage: ToolMenuBarSymbol.fallback,
-                category: "not-a-category"
+                category: "not-a-category",
+                appKind: "not-an-app-kind"
             )
         )
 
-        let suggestion = await ToolMetadataClient.live().suggestMetadata(
+        let suggestion = await ToolGenerationPlanningClient.live().planCreation(
             userPrompt: "Build a budget planner",
             invoker: Self.makeInvoker(
                 languageModel: StructuredMetadataLanguageModel(response: response),
@@ -140,6 +219,7 @@ extension AgentPipelineTests {
         )
 
         #expect(suggestion.category == .utilities)
+        #expect(suggestion.suggestedAppKind == .window)
     }
 
     @MainActor
@@ -147,7 +227,7 @@ extension AgentPipelineTests {
     func liveMetadataClientFallsBackWhenStructuredGenerationFails() async throws {
         let response = StructuredMetadataResponse(error: FakeAgentError.expected)
 
-        let suggestion = await ToolMetadataClient.live(fallbackLanguageModel: nil).suggestMetadata(
+        let suggestion = await ToolGenerationPlanningClient.live(fallbackLanguageModel: nil).planCreation(
             userPrompt: "Build a pantry tracker",
             invoker: Self.makeInvoker(
                 languageModel: StructuredMetadataLanguageModel(response: response),
@@ -162,18 +242,39 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func liveEditPlanningPreservesPermissionsWhenStructuredGenerationFails() async {
+        let response = StructuredMetadataResponse(error: FakeAgentError.expected)
+
+        let plan = await ToolGenerationPlanningClient.live(fallbackLanguageModel: nil).planEdit(
+            userPrompt: "Add a label",
+            toolName: "Pantry",
+            currentSettings: ToolGenerationSettings(
+                resourcePermissions: GeneratedAppResourcePermissions([.camera])
+            ),
+            invoker: Self.makeInvoker(
+                languageModel: StructuredMetadataLanguageModel(response: response),
+                generationOptions: GenerationOptions(maximumResponseTokens: 4096)
+            )
+        )
+
+        #expect(plan == .empty)
+        #expect(await response.prompts.count == 1)
+    }
+
+    @MainActor
+    @Test
     func liveMetadataClientUsesSystemModelAfterSelectedModelFails() async throws {
         let primaryResponse = StructuredMetadataResponse(error: FakeAgentError.expected)
         let fallbackResponse = StructuredMetadataResponse(
-            metadata: GeneratedToolMetadata(
+            creationPlan: GeneratedToolCreationPlan(
                 displayName: "Pantry Pal",
                 iconPrompt: "Pantry shelves"
             )
         )
 
-        let suggestion = await ToolMetadataClient.live(
+        let suggestion = await ToolGenerationPlanningClient.live(
             fallbackLanguageModel: StructuredMetadataLanguageModel(response: fallbackResponse)
-        ).suggestMetadata(
+        ).planCreation(
             userPrompt: "Build a pantry tracker",
             invoker: Self.makeInvoker(
                 languageModel: StructuredMetadataLanguageModel(response: primaryResponse),
@@ -329,8 +430,8 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(
                     displayName: "Timer Desk",
                     iconPrompt: ""
                 )
@@ -371,8 +472,8 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .deterministicOnly),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: ToolMetadataClient { _ in
-                ToolMetadataSuggestion(
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(
                     displayName: "Habit Desk",
                     iconPrompt: ""
                 )
@@ -415,9 +516,9 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: ToolMetadataClient { _ in
+            planningClient: ToolGenerationPlanningClient { _ in
                 await metadataCapture.record()
-                return ToolMetadataSuggestion(
+                return ToolCreationPlan(
                     displayName: "Should Not Use",
                     iconPrompt: ""
                 )

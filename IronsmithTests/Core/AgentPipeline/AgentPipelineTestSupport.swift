@@ -19,7 +19,7 @@ extension AgentPipelineTests {
         processClient: SwiftPackageProcessClient = .live,
         appBundleClient: ToolAppBundleClient = .noOp(),
         iconClient: ToolIconClient = .noOp,
-        metadataClient: ToolMetadataClient = .fallback(),
+        planningClient: ToolGenerationPlanningClient = .fallback(),
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         promptRefinementEnabled: Bool = true,
         versionBackupClient: ToolVersionBackupClient = .live,
@@ -43,7 +43,7 @@ extension AgentPipelineTests {
             processClient: processClient,
             appBundleClient: appBundleClient,
             iconClient: iconClient,
-            metadataClient: metadataClient,
+            planningClient: planningClient,
             promptRefinementClient: promptRefinementClient,
             versionBackupClient: versionBackupClient,
             codexAgentClient: codexAgentClient
@@ -456,13 +456,19 @@ actor InvocationCapture {
 }
 
 actor StructuredMetadataResponse {
-    private let metadata: GeneratedToolMetadata?
+    private let creationPlan: GeneratedToolCreationPlan?
+    private let editPlan: GeneratedToolEditPlan?
     private let error: (any Error)?
     private(set) var prompts: [String] = []
     private(set) var options: [GenerationOptions] = []
 
-    init(metadata: GeneratedToolMetadata? = nil, error: (any Error)? = nil) {
-        self.metadata = metadata
+    init(
+        creationPlan: GeneratedToolCreationPlan? = nil,
+        editPlan: GeneratedToolEditPlan? = nil,
+        error: (any Error)? = nil
+    ) {
+        self.creationPlan = creationPlan
+        self.editPlan = editPlan
         self.error = error
     }
 
@@ -478,15 +484,21 @@ actor StructuredMetadataResponse {
             throw error
         }
 
-        guard type == GeneratedToolMetadata.self, let metadata else {
-            throw FakeAgentError.unsupportedStructuredGeneration
+        if type == GeneratedToolCreationPlan.self, let creationPlan {
+            return LanguageModelSession.Response(
+                content: creationPlan as! Content,
+                rawContent: creationPlan.generatedContent,
+                transcriptEntries: []
+            )
         }
-
-        return LanguageModelSession.Response(
-            content: metadata as! Content,
-            rawContent: metadata.generatedContent,
-            transcriptEntries: []
-        )
+        if type == GeneratedToolEditPlan.self, let editPlan {
+            return LanguageModelSession.Response(
+                content: editPlan as! Content,
+                rawContent: editPlan.generatedContent,
+                transcriptEntries: []
+            )
+        }
+        throw FakeAgentError.unsupportedStructuredGeneration
     }
 }
 

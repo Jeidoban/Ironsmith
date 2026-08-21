@@ -1,27 +1,48 @@
 import AnyLanguageModel
 import Foundation
 
-struct ToolMetadataSuggestion: Equatable, Sendable {
+struct ToolCreationPlan: Equatable, Sendable {
     let displayName: String
     let iconPrompt: String
     let menuBarSystemImage: String
     let category: StoreAppCategory
+    let suggestedAppKind: ToolAppKind
+    let suggestedSandboxPermissions: GeneratedAppSandboxPermissions
+    let suggestedResourcePermissions: GeneratedAppResourcePermissions
 
     nonisolated init(
         displayName: String,
         iconPrompt: String,
         menuBarSystemImage: String = ToolMenuBarSymbol.fallback,
-        category: StoreAppCategory = .utilities
+        category: StoreAppCategory = .utilities,
+        suggestedAppKind: ToolAppKind = .window,
+        suggestedSandboxPermissions: GeneratedAppSandboxPermissions = .none,
+        suggestedResourcePermissions: GeneratedAppResourcePermissions = .none
     ) {
         self.displayName = displayName
         self.iconPrompt = iconPrompt
         self.menuBarSystemImage = ToolMenuBarSymbol.validated(menuBarSystemImage)
         self.category = category
+        self.suggestedAppKind = suggestedAppKind
+        self.suggestedSandboxPermissions = suggestedSandboxPermissions
+        self.suggestedResourcePermissions = suggestedResourcePermissions
     }
 }
 
-@Generable(description: "Metadata for a small generated macOS app.")
-struct GeneratedToolMetadata {
+struct ToolEditPlan: Equatable, Sendable {
+    let additionalSandboxPermissions: GeneratedAppSandboxPermissions
+    let additionalResourcePermissions: GeneratedAppResourcePermissions
+
+    nonisolated static var empty: Self {
+        Self(
+            additionalSandboxPermissions: .none,
+            additionalResourcePermissions: .none
+        )
+    }
+}
+
+@Generable(description: "Creation plan for a generated macOS app.")
+struct GeneratedToolCreationPlan {
     @Guide(description: "A snappy one or two word macOS playful and fun app name in Title Case")
     let displayName: String
 
@@ -40,66 +61,117 @@ struct GeneratedToolMetadata {
         description:
             "One category raw value chosen exactly from Ironsmith's allowed category list.")
     let category: String
+
+    @Guide(description: "One app type raw value chosen from the allowed app type list.")
+    let appKind: String
+
+    @Guide(
+        description:
+            "Exact sandbox permission raw values required by the explicit request, or an empty list."
+    )
+    let sandboxPermissions: [String]
+
+    @Guide(
+        description:
+            "Exact resource permission raw values required by the explicit request, or an empty list."
+    )
+    let resourcePermissions: [String]
 }
 
-extension GeneratedToolMetadata {
-    nonisolated init(displayName: String, iconPrompt: String) {
-        self.init(
-            displayName: displayName,
-            iconPrompt: iconPrompt,
-            menuBarSystemImage: ToolMenuBarSymbol.fallback,
-            category: StoreAppCategory.utilities.rawValue
-        )
-    }
-
+extension GeneratedToolCreationPlan {
     nonisolated init(
         displayName: String,
         iconPrompt: String,
-        menuBarSystemImage: String
+        menuBarSystemImage: String = ToolMenuBarSymbol.fallback,
+        category: String = StoreAppCategory.utilities.rawValue,
+        appKind: String = ToolAppKind.window.rawValue
     ) {
         self.init(
             displayName: displayName,
             iconPrompt: iconPrompt,
             menuBarSystemImage: menuBarSystemImage,
-            category: StoreAppCategory.utilities.rawValue
+            category: category,
+            appKind: appKind,
+            sandboxPermissions: [],
+            resourcePermissions: []
         )
     }
 }
 
-struct ToolMetadataRequest: Sendable {
+@Generable(description: "Plan for editing an existing generated macOS app.")
+struct GeneratedToolEditPlan {
+    @Guide(
+        description:
+            "Exact additional sandbox permission raw values required by this edit, or an empty list."
+    )
+    let additionalSandboxPermissions: [String]
+
+    @Guide(
+        description:
+            "Exact additional resource permission raw values required by this edit, or an empty list."
+    )
+    let additionalResourcePermissions: [String]
+}
+
+struct ToolCreationPlanningRequest: Sendable {
     let userPrompt: String
     let imageGenerationProvider: ToolImageGenerationProvider
     let invoker: ToolLanguageModelInvoker
 }
 
-struct ToolMetadataClient: Sendable {
-    private var suggestMetadataForRequest:
-        @Sendable (_ request: ToolMetadataRequest) async -> ToolMetadataSuggestion
+struct ToolEditPlanningRequest: Sendable {
+    let userPrompt: String
+    let toolName: String
+    let currentSettings: ToolGenerationSettings
+    let invoker: ToolLanguageModelInvoker
+}
+
+struct ToolGenerationPlanningClient: Sendable {
+    private var planCreationForRequest:
+        @Sendable (_ request: ToolCreationPlanningRequest) async -> ToolCreationPlan
+    private var planEditForRequest:
+        @Sendable (_ request: ToolEditPlanningRequest) async -> ToolEditPlan
 
     init(
-        _ suggestMetadata:
-            @escaping @Sendable (_ userPrompt: String) async -> ToolMetadataSuggestion
+        _ planCreation:
+            @escaping @Sendable (_ userPrompt: String) async -> ToolCreationPlan
     ) {
-        self.suggestMetadataForRequest = { request in
-            await suggestMetadata(request.userPrompt)
+        self.planCreationForRequest = { request in
+            await planCreation(request.userPrompt)
         }
+        self.planEditForRequest = { _ in .empty }
+    }
+
+    init(
+        planCreation:
+            @escaping @Sendable (_ userPrompt: String) async -> ToolCreationPlan,
+        planEdit:
+            @escaping @Sendable (_ request: ToolEditPlanningRequest) async -> ToolEditPlan
+    ) {
+        self.planCreationForRequest = { request in
+            await planCreation(request.userPrompt)
+        }
+        self.planEditForRequest = planEdit
     }
 
     private init(
         requestBased: Void,
-        suggestMetadataForRequest:
-            @escaping @Sendable (_ request: ToolMetadataRequest) async -> ToolMetadataSuggestion
+        planCreationForRequest:
+            @escaping @Sendable (_ request: ToolCreationPlanningRequest) async -> ToolCreationPlan,
+        planEditForRequest:
+            @escaping @Sendable (_ request: ToolEditPlanningRequest) async -> ToolEditPlan
     ) {
-        self.suggestMetadataForRequest = suggestMetadataForRequest
+        self.planCreationForRequest = planCreationForRequest
+        self.planEditForRequest = planEditForRequest
     }
 
-    func suggestMetadata(
+    func planCreation(
         userPrompt: String,
         imageGenerationProvider: ToolImageGenerationProvider = .imagePlayground,
         invoker: ToolLanguageModelInvoker
-    ) async -> ToolMetadataSuggestion {
-        await suggestMetadataForRequest(
-            ToolMetadataRequest(
+    ) async -> ToolCreationPlan {
+        await planCreationForRequest(
+            ToolCreationPlanningRequest(
                 userPrompt: userPrompt,
                 imageGenerationProvider: imageGenerationProvider,
                 invoker: invoker
@@ -107,9 +179,25 @@ struct ToolMetadataClient: Sendable {
         )
     }
 
+    func planEdit(
+        userPrompt: String,
+        toolName: String,
+        currentSettings: ToolGenerationSettings,
+        invoker: ToolLanguageModelInvoker
+    ) async -> ToolEditPlan {
+        await planEditForRequest(
+            ToolEditPlanningRequest(
+                userPrompt: userPrompt,
+                toolName: toolName,
+                currentSettings: currentSettings,
+                invoker: invoker
+            )
+        )
+    }
+
     static func fallback() -> Self {
         Self { userPrompt in
-            ToolMetadataSuggestion.fallback(for: userPrompt)
+            ToolCreationPlan.fallback(for: userPrompt)
         }
     }
 
@@ -118,9 +206,9 @@ struct ToolMetadataClient: Sendable {
     ) -> Self {
         Self(
             requestBased: (),
-            suggestMetadataForRequest: { request in
+            planCreationForRequest: { request in
                 let userPrompt = request.userPrompt
-                let fallback = ToolMetadataSuggestion.fallback(for: userPrompt)
+                let fallback = ToolCreationPlan.fallback(for: userPrompt)
 
                 do {
                     return try await Self.generateMetadata(
@@ -171,15 +259,110 @@ struct ToolMetadataClient: Sendable {
                     }
                     return fallback
                 }
-            })
+            },
+            planEditForRequest: { request in
+                do {
+                    return try await Self.generateEditPlan(request, invoker: request.invoker)
+                } catch let primaryError {
+                    AgentDiagnosticsLog.append(
+                        """
+                        Tool edit planning failed with the selected model.
+                        prompt: \(AgentDiagnosticsLog.compact(request.userPrompt, limit: 240))
+                        error:
+                        \(AgentDiagnosticsLog.renderError(primaryError, limit: 500))
+                        """
+                    )
+
+                    if let fallbackLanguageModel, fallbackLanguageModel.isAvailable {
+                        let fallbackConfiguration = ToolGenerationStageConfiguration(
+                            stage: .metadata,
+                            languageModel: fallbackLanguageModel,
+                            generationOptions: GenerationOptions(
+                                maximumResponseTokens: ToolGenerationOptionsResolver
+                                    .metadataMaximumResponseTokens
+                            ),
+                            streaming: ToolGenerationOptionsResolver.defaultStreaming
+                        )
+                        do {
+                            return try await Self.generateEditPlan(
+                                request,
+                                invoker: request.invoker.replacingMetadata(
+                                    with: fallbackConfiguration
+                                )
+                            )
+                        } catch {
+                            AgentDiagnosticsLog.append(
+                                """
+                                Tool edit planning also failed with the system language model; preserving current permissions.
+                                prompt: \(AgentDiagnosticsLog.compact(request.userPrompt, limit: 240))
+                                error:
+                                \(AgentDiagnosticsLog.renderError(error, limit: 500))
+                                """
+                            )
+                        }
+                    }
+                    return .empty
+                }
+            }
+        )
+    }
+
+    private static func generateEditPlan(
+        _ request: ToolEditPlanningRequest,
+        invoker: ToolLanguageModelInvoker
+    ) async throws -> ToolEditPlan {
+        let session = invoker.makeSession(
+            for: .metadata,
+            instructions: """
+                You plan an edit to an existing generated macOS SwiftUI app.
+                Return only permissions newly required by the requested change.
+                Select only permissions required by the explicit request, never hypothetical features.
+                Do not remove or repeat existing permissions. Use only exact values from the allowed lists.
+                Use an empty list when no additional permission in a group is required.
+                """
+        )
+        let response = try await invoker.respond(
+            stage: .metadata,
+            in: session,
+            to: """
+                Existing app: \(request.toolName)
+                Requested change:
+                \(request.userPrompt)
+
+                Existing sandbox permissions:
+                \(request.currentSettings.sandboxPermissions.enabledPermissions.map(\.rawValue).joined(separator: ", "))
+
+                Existing resource permissions:
+                \(request.currentSettings.resourcePermissions.enabledPermissions.map(\.rawValue).joined(separator: ", "))
+
+                Allowed additionalSandboxPermissions values:
+                \(GeneratedAppSandboxPermission.allCases.map(\.rawValue).joined(separator: ", "))
+
+                Allowed additionalResourcePermissions values:
+                \(GeneratedAppResourcePermission.allCases.map(\.rawValue).joined(separator: ", "))
+                """,
+            generating: GeneratedToolEditPlan.self
+        )
+        return ToolEditPlan(
+            additionalSandboxPermissions: GeneratedAppSandboxPermissions(
+                response.additionalSandboxPermissions.compactMap(
+                    GeneratedAppSandboxPermission.init(rawValue:)
+                )
+            ),
+            additionalResourcePermissions: GeneratedAppResourcePermissions(
+                response.additionalResourcePermissions.compactMap(
+                    GeneratedAppResourcePermission.init(rawValue:)
+                )
+            )
+        )
     }
 
     private static func generateMetadata(
         userPrompt: String,
         imageGenerationProvider: ToolImageGenerationProvider,
         invoker: ToolLanguageModelInvoker,
-        fallback: ToolMetadataSuggestion
-    ) async throws -> ToolMetadataSuggestion {
+        fallback: ToolCreationPlan
+    ) async throws -> ToolCreationPlan {
         let session = invoker.makeSession(
             for: .metadata,
             instructions: metadataInstructions(for: imageGenerationProvider)
@@ -191,7 +374,7 @@ struct ToolMetadataClient: Sendable {
                 for: userPrompt,
                 imageGenerationProvider: imageGenerationProvider
             ),
-            generating: GeneratedToolMetadata.self
+            generating: GeneratedToolCreationPlan.self
         )
         return Self.metadataSuggestion(response, fallback: fallback)
     }
@@ -212,6 +395,15 @@ struct ToolMetadataClient: Sendable {
 
         Allowed category values:
         \(StoreAppCategory.allCases.map(\.rawValue).joined(separator: ", "))
+
+        Allowed appKind values:
+        \(ToolAppKind.allCases.map(\.rawValue).joined(separator: ", "))
+
+        Allowed sandboxPermissions values:
+        \(GeneratedAppSandboxPermission.allCases.map(\.rawValue).joined(separator: ", "))
+
+        Allowed resourcePermissions values:
+        \(GeneratedAppResourcePermission.allCases.map(\.rawValue).joined(separator: ", "))
         """
     }
 
@@ -240,6 +432,17 @@ struct ToolMetadataClient: Sendable {
         - Must be one exact raw value from the allowed category list in the prompt.
         - Choose the category that best represents the app's primary purpose.
         - Use utilities only when no more specific category applies.
+
+        appKind:
+        - Choose menu_bar when the user asks for it or if the app the user requests only makes sense as a menu bar app.
+        - Choose window for everything else.
+        - Use exactly one allowed raw value.
+
+        sandboxPermissions and resourcePermissions:
+        - Select only permissions required to implement the user's explicit request.
+        - Do not add permissions for hypothetical future features.
+        - Use only exact values from the corresponding allowed lists.
+        - Use an empty list when no permission in a group is required.
         """
     }
 
@@ -277,9 +480,9 @@ struct ToolMetadataClient: Sendable {
     }
 
     nonisolated private static func metadataSuggestion(
-        _ response: GeneratedToolMetadata,
-        fallback: ToolMetadataSuggestion
-    ) -> ToolMetadataSuggestion {
+        _ response: GeneratedToolCreationPlan,
+        fallback: ToolCreationPlan
+    ) -> ToolCreationPlan {
         let displayName = response.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let iconPrompt = response.iconPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let menuBarSystemImage = ToolMenuBarSymbol.validated(response.menuBarSystemImage)
@@ -288,11 +491,22 @@ struct ToolMetadataClient: Sendable {
                 rawValue: response.category.trimmingCharacters(in: .whitespacesAndNewlines)
             )
             ?? fallback.category
-        return ToolMetadataSuggestion(
+        return ToolCreationPlan(
             displayName: displayName.isEmpty ? fallback.displayName : displayName,
             iconPrompt: iconPrompt.isEmpty ? fallback.iconPrompt : iconPrompt,
             menuBarSystemImage: menuBarSystemImage,
-            category: category
+            category: category,
+            suggestedAppKind: ToolAppKind(
+                rawValue: response.appKind.trimmingCharacters(in: .whitespacesAndNewlines)
+            ) ?? fallback.suggestedAppKind,
+            suggestedSandboxPermissions: GeneratedAppSandboxPermissions(
+                response.sandboxPermissions.compactMap(
+                    GeneratedAppSandboxPermission.init(rawValue:))
+            ),
+            suggestedResourcePermissions: GeneratedAppResourcePermissions(
+                response.resourcePermissions.compactMap(
+                    GeneratedAppResourcePermission.init(rawValue:))
+            )
         )
     }
 }
@@ -479,10 +693,10 @@ struct ToolPromptRefinementClient: Sendable {
     }
 }
 
-extension ToolMetadataSuggestion {
-    nonisolated static func fallback(for userPrompt: String) -> ToolMetadataSuggestion {
+extension ToolCreationPlan {
+    nonisolated static func fallback(for userPrompt: String) -> ToolCreationPlan {
         let displayName = ToolNameSanitizer.displayName(fromPrompt: userPrompt)
-        return ToolMetadataSuggestion(
+        return ToolCreationPlan(
             displayName: displayName,
             iconPrompt: "",
             menuBarSystemImage: ToolMenuBarSymbol.fallback,

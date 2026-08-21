@@ -75,6 +75,7 @@ extension AgentPipelineTests {
             source: Self.originalEditableSource
         )
         let responses = LanguageModelResponseQueue([Self.renameOldToNewUnifiedDiff])
+        let planningCapture = InvocationCapture()
         let runtime = Self.makeRuntime(
             languageModel: StubAgentLanguageModel { _, _ in
                 try await responses.next()
@@ -83,7 +84,13 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: .fallback()
+            planningClient: ToolGenerationPlanningClient(
+                planCreation: { ToolCreationPlan.fallback(for: $0) },
+                planEdit: { _ in
+                    await planningCapture.record()
+                    return .empty
+                }
+            )
         )
         let result = try await runtime.generateTool(
             for: "Change old to new",
@@ -100,6 +107,128 @@ extension AgentPipelineTests {
         #expect(!(contentView.contains(#"Text("old")"#)))
         #expect(previousSource.contains(#"Text("old")"#))
         #expect(await responses.count == 1)
+        #expect(await planningCapture.count == 0)
+    }
+
+    @MainActor
+    @Test
+    func automaticEditPlanningOnlyAddsSuggestedAndAlwaysIncludedPermissions() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: "Calculator",
+            source: Self.originalEditableSource
+        )
+        let planningCapture = InvocationCapture()
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel.fixed(Self.renameOldToNewUnifiedDiff),
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            planningClient: ToolGenerationPlanningClient(
+                planCreation: { ToolCreationPlan.fallback(for: $0) },
+                planEdit: { _ in
+                    await planningCapture.record()
+                    return ToolEditPlan(
+                        additionalSandboxPermissions: GeneratedAppSandboxPermissions([
+                            .downloadsFolder
+                        ]),
+                        additionalResourcePermissions: GeneratedAppResourcePermissions([
+                            .microphone
+                        ])
+                    )
+                }
+            )
+        )
+        let settings = ToolGenerationSettings(
+            sandboxPermissions: GeneratedAppSandboxPermissions([.outgoingConnections]),
+            resourcePermissions: GeneratedAppResourcePermissions([.camera])
+        )
+        let policy = ToolGenerationPlanningPolicy(
+            appKindPreference: .window,
+            automaticallySelectPermissions: true,
+            alwaysIncludedSandboxPermissions: GeneratedAppSandboxPermissions([
+                .userSelectedFiles
+            ]),
+            alwaysIncludedResourcePermissions: GeneratedAppResourcePermissions([.location])
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Add voice export to Downloads",
+            existingTool: tool,
+            settings: settings,
+            planningPolicy: policy
+        )
+
+        #expect(await planningCapture.count == 1)
+        #expect(result.settings.appKind == .window)
+        #expect(result.settings.sandboxPermissions.enabled == [
+            .outgoingConnections, .userSelectedFiles, .downloadsFolder,
+        ])
+        #expect(result.settings.resourcePermissions.enabled == [.camera, .location, .microphone])
+    }
+
+    @MainActor
+    @Test
+    func resumedAutomaticEditReusesPreviouslyResolvedPermissions() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: "Calculator",
+            source: Self.originalEditableSource
+        )
+        tool.generationState = .stopped
+        tool.generationPhase = .generatingEditDiff
+        tool.generationMode = .edit
+        let pendingSettings = ToolGenerationSettings(
+            sandboxPermissions: GeneratedAppSandboxPermissions([.downloadsFolder]),
+            resourcePermissions: GeneratedAppResourcePermissions([.microphone])
+        )
+        try ToolVersionBackupClient.live.stagePendingGenerationSettings(
+            tool.packageRootURL,
+            pendingSettings
+        )
+
+        let planningCapture = InvocationCapture()
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel.fixed(Self.renameOldToNewUnifiedDiff),
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            planningClient: ToolGenerationPlanningClient(
+                planCreation: { ToolCreationPlan.fallback(for: $0) },
+                planEdit: { _ in
+                    await planningCapture.record()
+                    return .empty
+                }
+            )
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Change old to new",
+            existingTool: tool,
+            settings: .default,
+            planningPolicy: ToolGenerationPlanningPolicy(
+                appKindPreference: .window,
+                automaticallySelectPermissions: true,
+                alwaysIncludedSandboxPermissions: .none,
+                alwaysIncludedResourcePermissions: .none
+            )
+        )
+
+        #expect(await planningCapture.count == 0)
+        #expect(result.settings == pendingSettings)
+        #expect(!(FileManager.default.fileExists(atPath: tool.packageLayout.pendingGenerationSettingsURL.path)))
     }
 
     @MainActor
@@ -127,7 +256,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -177,7 +306,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -228,7 +357,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -279,7 +408,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -318,7 +447,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         let result = try await runtime.generateTool(
@@ -368,7 +497,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithSpark(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
         let remoteRuntime = Self.makeRuntime(
             languageModel: model,
@@ -376,7 +505,7 @@ extension AgentPipelineTests {
             pipelineConfiguration: .ironsmithFlame(repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: ToolGenerationRepairPolicy.largeModelPatchBlocksPerTurn)),
             toolsDirectoryURL: toolsDirectory,
             processClient: Self.successfulProcessClient(),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         _ = try await localRuntime.generateTool(
@@ -440,7 +569,7 @@ extension AgentPipelineTests {
                 launch: { _ in },
                 stripQuarantine: { _ in }
             ),
-            metadataClient: .fallback()
+            planningClient: .fallback()
         )
 
         do {

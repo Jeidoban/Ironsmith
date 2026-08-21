@@ -6,6 +6,8 @@ import SwiftData
 @Observable
 final class ToolLibraryStorePublisher {
     var publishedStoreAppsByID: [String: StoreAppSummary] = [:]
+    private(set) var hasResolvedPublishedStoreApps = false
+    private var publishedStoreAppsRefreshGeneration: UInt = 0
     var publishingToolID: UUID?
     var publishShortDescription = ""
     var publishDescription = ""
@@ -63,6 +65,13 @@ final class ToolLibraryStorePublisher {
     func canUpdateStoreVersion(for tool: Tool) -> Bool {
         guard let storeAppId = tool.storeAppId else { return false }
         return publishedStoreAppsByID[storeAppId] != nil
+    }
+
+    func isConfirmedDownloadedFromAnotherUser(_ tool: Tool) -> Bool {
+        guard let storeAppId = tool.storeAppId,
+            hasResolvedPublishedStoreApps
+        else { return false }
+        return publishedStoreAppsByID[storeAppId] == nil
     }
 
     func hasStoreSourceChanges(for tool: Tool) -> Bool {
@@ -130,8 +139,12 @@ final class ToolLibraryStorePublisher {
         isSignedIn: Bool,
         tools: [Tool]
     ) async {
+        publishedStoreAppsRefreshGeneration &+= 1
+        let refreshGeneration = publishedStoreAppsRefreshGeneration
+        publishedStoreAppsByID = [:]
+        hasResolvedPublishedStoreApps = false
+
         guard isSignedIn else {
-            publishedStoreAppsByID = [:]
             return
         }
         let storeIDs = Set(
@@ -141,7 +154,7 @@ final class ToolLibraryStorePublisher {
             }
         )
         guard !storeIDs.isEmpty else {
-            publishedStoreAppsByID = [:]
+            hasResolvedPublishedStoreApps = true
             return
         }
 
@@ -161,6 +174,9 @@ final class ToolLibraryStorePublisher {
                         nil,
                         nil
                     )
+                    guard refreshGeneration == publishedStoreAppsRefreshGeneration else {
+                        return
+                    }
                     for app in page.apps {
                         guard linkedAppIDs.contains(app.id) else { continue }
                         ownedAppsByID[app.id] = app
@@ -169,9 +185,13 @@ final class ToolLibraryStorePublisher {
                     hasMore = page.hasMore
                 } while hasMore
             }
+            guard refreshGeneration == publishedStoreAppsRefreshGeneration else { return }
             publishedStoreAppsByID = ownedAppsByID
+            hasResolvedPublishedStoreApps = true
         } catch {
+            guard refreshGeneration == publishedStoreAppsRefreshGeneration else { return }
             publishedStoreAppsByID = [:]
+            hasResolvedPublishedStoreApps = false
         }
     }
 
