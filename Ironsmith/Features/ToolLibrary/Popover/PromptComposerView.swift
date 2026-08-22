@@ -260,11 +260,8 @@ struct PromptComposerView: View {
         Menu {
             Picker("App Type", selection: $appKindPreference) {
                 ForEach(ToolAppKindPreference.allCases, id: \.self) { preference in
-                    Label(
-                        preference.displayName,
-                        systemImage: appKindSystemImage(preference)
-                    )
-                    .tag(preference)
+                    Text(preference.displayName)
+                        .tag(preference)
                 }
             }
 
@@ -451,14 +448,6 @@ struct PromptComposerView: View {
 
     private var sandboxHelpText: String {
         "Controls whether generated apps include App Sandbox entitlements."
-    }
-
-    private func appKindSystemImage(_ preference: ToolAppKindPreference) -> String {
-        switch preference {
-        case .automatic: "wand.and.sparkles"
-        case .window: "macwindow"
-        case .menuBar: "menubar.rectangle"
-        }
     }
 
     private func checkedSelectionButton<Value: Equatable>(
