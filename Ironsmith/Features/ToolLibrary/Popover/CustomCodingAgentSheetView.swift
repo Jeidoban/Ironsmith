@@ -34,7 +34,8 @@ struct AddCustomCodingAgentSheetView: View {
 
             CustomCodingAgentEditorFields(
                 draft: $draft,
-                errorMessage: errorMessage
+                errorMessage: errorMessage,
+                validate: store.validate
             )
 
             Label(
@@ -117,8 +118,10 @@ struct ManageCustomCodingAgentsSheetView: View {
 
                 CustomCodingAgentEditorFields(
                     draft: draftBinding(fallback: draft),
-                    errorMessage: errorMessage
+                    errorMessage: errorMessage,
+                    validate: store.validate
                 )
+                .id(draft.id)
             } else {
                 ContentUnavailableView(
                     "No Custom Agents",
@@ -216,6 +219,8 @@ struct ManageCustomCodingAgentsSheetView: View {
 private struct CustomCodingAgentEditorFields: View {
     @Binding var draft: CustomCodingAgent
     let errorMessage: String?
+    let validate: (CustomCodingAgent) throws -> CustomCodingAgent
+    @State private var testStore = CustomCodingAgentTestStore()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -241,12 +246,56 @@ private struct CustomCodingAgentEditorFields: View {
                 .labelsHidden()
             }
 
+            field("Test Agent") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        testStore.run(agent: draft, validate: validate)
+                    } label: {
+                        HStack(spacing: 6) {
+                            if testStore.isRunning {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(testStore.isRunning ? "Testing…" : "Test")
+                        }
+                    }
+                    .disabled(testStore.isRunning)
+
+                    if let output = testStore.output {
+                        ScrollView {
+                            Text(output)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(height: 82)
+                        .padding(8)
+                        .background(
+                            .quaternary.opacity(0.3),
+                            in: RoundedRectangle(cornerRadius: 7)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7)
+                                .strokeBorder(.secondary.opacity(0.15))
+                        }
+                    }
+
+                    if let testError = testStore.errorMessage {
+                        Text(testError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)
                     .foregroundStyle(.red)
             }
         }
+        .onChange(of: draft) { _, _ in testStore.reset() }
+        .onDisappear { testStore.reset() }
     }
 
     private func field<Content: View>(

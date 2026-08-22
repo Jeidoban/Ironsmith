@@ -37,6 +37,56 @@ nonisolated struct CustomCodingAgentResult: Equatable, Sendable {
     let transcriptURL: URL
 }
 
+nonisolated enum CustomCodingAgentTestError: LocalizedError, Equatable {
+    case commandFailed(status: Int32)
+
+    var errorDescription: String? {
+        switch self {
+        case .commandFailed(let status):
+            "The coding agent test exited with status \(status)."
+        }
+    }
+}
+
+nonisolated struct CustomCodingAgentTestClient: Sendable {
+    static let prompt = "This is a test, respond only with 'Test successful!'"
+
+    var run: @Sendable (
+        _ agent: CustomCodingAgent,
+        _ onOutput: @escaping @Sendable (CustomCodingAgentOutput) async -> Void
+    ) async throws -> Void
+
+    static func live(
+        agentClient: CustomCodingAgentClient = .live,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory
+    ) -> Self {
+        Self { agent, onOutput in
+            let packageRootURL = temporaryDirectory.appendingPathComponent(
+                "ironsmith-custom-agent-test-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(
+                at: packageRootURL,
+                withIntermediateDirectories: true
+            )
+            defer { try? FileManager.default.removeItem(at: packageRootURL) }
+
+            do {
+                _ = try await agentClient.run(
+                    CustomCodingAgentRequest(
+                        agent: agent,
+                        packageRootURL: packageRootURL,
+                        prompt: prompt,
+                        onOutput: onOutput
+                    )
+                )
+            } catch CustomCodingAgentError.commandFailed(let status, _) {
+                throw CustomCodingAgentTestError.commandFailed(status: status)
+            }
+        }
+    }
+}
+
 enum CustomCodingAgentError: LocalizedError {
     case commandFailed(status: Int32, transcriptURL: URL)
 

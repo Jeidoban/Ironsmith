@@ -97,6 +97,94 @@ struct CustomCodingAgentTests {
     }
 
     @Test
+    func testClientUsesExactPromptAndRemovesItsIsolatedWorkspace() async throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "custom-agent-test-client-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let requestRecorder = CustomAgentTestRequestRecorder()
+        let outputRecorder = CustomOutputRecorder()
+        let agent = CustomCodingAgent(
+            name: "Test Runner",
+            command: "runner {{prompt}}"
+        )
+        let agentClient = CustomCodingAgentClient { request in
+            await requestRecorder.record(request)
+            await request.onOutput(
+                CustomCodingAgentOutput(
+                    timestamp: .now,
+                    runner: request.agent.name,
+                    stream: .stdout,
+                    text: "Test successful!"
+                )
+            )
+            return CustomCodingAgentResult(
+                terminationStatus: 0,
+                transcriptURL: request.packageRootURL.appendingPathComponent("test.jsonl")
+            )
+        }
+        let client = CustomCodingAgentTestClient.live(
+            agentClient: agentClient,
+            temporaryDirectory: temporaryDirectory
+        )
+
+        try await client.run(agent) { output in
+            await outputRecorder.append(output)
+        }
+
+        let captured = try #require(await requestRecorder.request)
+        #expect(captured.agent == agent)
+        #expect(captured.prompt == "This is a test, respond only with 'Test successful!'")
+        #expect(captured.packageRootExisted)
+        #expect(!FileManager.default.fileExists(atPath: captured.packageRootURL.path))
+        #expect(await outputRecorder.outputs.map(\.text) == ["Test successful!"])
+    }
+
+    @MainActor
+    @Test
+    func testStoreRevealsOnlyDisplayableAgentOutput() async {
+        let client = CustomCodingAgentTestClient { _, onOutput in
+            await onOutput(
+                CustomCodingAgentOutput(
+                    timestamp: .now,
+                    runner: "Claude Code",
+                    stream: .stdout,
+                    text: #"{"type":"system","subtype":"init","session_id":"session"}"#
+                )
+            )
+            await onOutput(
+                CustomCodingAgentOutput(
+                    timestamp: .now,
+                    runner: "Claude Code",
+                    stream: .stdout,
+                    text: #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Test successful!"}]}}"#
+                )
+            )
+        }
+        let testStore = CustomCodingAgentTestStore(client: client)
+        let agent = CustomCodingAgent(
+            name: "Claude Code",
+            command: "claude",
+            promptDelivery: .standardInput
+        )
+
+        #expect(testStore.output == nil)
+        testStore.run(agent: agent) { $0 }
+        await AgentPipelineTests.eventually {
+            await MainActor.run { !testStore.isRunning }
+        }
+
+        #expect(testStore.output == "Test successful!")
+        #expect(testStore.errorMessage == nil)
+    }
+
+    @Test
     func liveClientStreamsBothOutputsAndWritesJSONL() async throws {
         let packageRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
             "custom-agent-test-\(UUID().uuidString)",
@@ -359,5 +447,25 @@ private actor CustomOutputRecorder {
 
     func append(_ output: CustomCodingAgentOutput) {
         outputs.append(output)
+    }
+}
+
+private actor CustomAgentTestRequestRecorder {
+    struct Request: Sendable {
+        let agent: CustomCodingAgent
+        let prompt: String
+        let packageRootURL: URL
+        let packageRootExisted: Bool
+    }
+
+    private(set) var request: Request?
+
+    func record(_ request: CustomCodingAgentRequest) {
+        self.request = Request(
+            agent: request.agent,
+            prompt: request.prompt,
+            packageRootURL: request.packageRootURL,
+            packageRootExisted: FileManager.default.fileExists(atPath: request.packageRootURL.path)
+        )
     }
 }
