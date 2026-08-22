@@ -24,6 +24,15 @@ extension InferenceStore {
             provider: provider
         )
         let shouldRefreshIronsmithCredits = provider?.kind == .ironsmith
+        let customCodingAgent: CustomCodingAgent?
+        if codingAgent == .custom {
+            guard let selectedAgent = customCodingAgents.selectedAgent else {
+                throw InferenceStoreError.missingCustomCodingAgent
+            }
+            customCodingAgent = selectedAgent
+        } else {
+            customCodingAgent = nil
+        }
         return AgentLanguageModelContext(
             codingAgent: ToolGenerationOptionsResolver.stageConfiguration(
                 for: .codingAgent,
@@ -61,6 +70,7 @@ extension InferenceStore {
                 provider: provider,
                 codingAgent: codingAgent
             ),
+            customCodingAgent: customCodingAgent,
             codingAgentSupportsImageInput: ToolAttachmentSupport.isSupported(
                 model: selectedModel,
                 provider: provider,
@@ -168,6 +178,8 @@ extension InferenceStore {
             )
         case .codex:
             return .codex()
+        case .custom:
+            return .custom()
         }
     }
 

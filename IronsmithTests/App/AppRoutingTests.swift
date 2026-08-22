@@ -111,7 +111,8 @@ struct AppRoutingTests {
             },
             openToolLibraryPopover: {
                 popoverCapture.open()
-            }
+            },
+            isStoreFeatureEnabled: { true }
         )
 
         store.open(.store(.publishedApp("app-1")))
@@ -142,6 +143,30 @@ struct AppRoutingTests {
 
         #expect(storeCapture.openCount == 0)
         #expect(store.pendingStoreRoute == nil)
+    }
+
+    @MainActor
+    @Test
+    func routeStoreIgnoresPublishingButKeepsToolSelectionWhenStoreFeatureIsDisabled() throws {
+        let popoverCapture = SettingsWindowOpenCapture()
+        let toolID = try #require(UUID(uuidString: "11111111-2222-4333-8444-555555555555"))
+        let store = IronsmithRouteStore(
+            openSettingsWindow: {},
+            openToolLibraryPopover: {
+                popoverCapture.open()
+            },
+            isStoreFeatureEnabled: { false }
+        )
+
+        store.open(.toolLibrary(.publishTool(toolID)))
+
+        #expect(popoverCapture.openCount == 0)
+        #expect(store.pendingToolLibraryRoute == nil)
+
+        store.open(.toolLibrary(.selectTool(id: toolID, focusPrompt: true)))
+
+        #expect(popoverCapture.openCount == 1)
+        #expect(store.consumeToolLibraryRoute() == .selectTool(id: toolID, focusPrompt: true))
     }
 
     @MainActor

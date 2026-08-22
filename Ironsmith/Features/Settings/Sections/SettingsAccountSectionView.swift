@@ -4,6 +4,8 @@ import SwiftUI
 struct SettingsAccountSectionView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled) private var isStoreFeatureEnabled =
+        false
     let onManageAccount: () -> Void
     @State private var isSigningIn = false
     #if DEBUG
@@ -41,23 +43,32 @@ struct SettingsAccountSectionView: View {
                     .disabled(isEmailPasswordAuthenticationDisabled)
                 }
                 #endif
-                Text("Sign in to publish apps, manage your creator identity, and use Ironsmith credits.")
+                Text(accountSignInDescription)
                     .foregroundStyle(.secondary)
             } else {
                 if let email = inferenceStore.ironsmithAccountSummary?.user.email {
                     LabeledContent("Email", value: email)
                 }
-                LabeledContent("Display Name") {
-                    Text(displayName ?? "Not set")
-                        .foregroundStyle(displayName == nil ? .secondary : .primary)
-                }
-                LabeledContent("Creator Handle") {
-                    Text(handleText)
-                        .foregroundStyle(handle == nil ? .secondary : .primary)
+                if isStoreFeatureEnabled {
+                    LabeledContent("Display Name") {
+                        Text(displayName ?? "Not set")
+                            .foregroundStyle(displayName == nil ? .secondary : .primary)
+                    }
+                    LabeledContent("Creator Handle") {
+                        Text(handleText)
+                            .foregroundStyle(handle == nil ? .secondary : .primary)
+                    }
                 }
                 Button("Manage Account…", action: onManageAccount)
             }
         }
+    }
+
+    private var accountSignInDescription: String {
+        if isStoreFeatureEnabled {
+            return "Sign in to publish apps, manage your creator identity, and use Ironsmith credits."
+        }
+        return "Sign in to use Ironsmith models and credits."
     }
 
     private var handle: String? {

@@ -227,7 +227,9 @@ enum ToolRowGenerationStatusResolver {
         repairErrorCount: Int?,
         activeCodingAgent: ToolCodingAgent?
     ) -> String {
-        if activeCodingAgent == .codex && isCodexOwnedPhase(phase) {
+        if (activeCodingAgent == .codex || activeCodingAgent == .custom)
+            && isCodexOwnedPhase(phase)
+        {
             return "Agent is working"
         }
 

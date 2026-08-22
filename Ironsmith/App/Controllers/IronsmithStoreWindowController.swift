@@ -49,6 +49,7 @@ final class IronsmithStoreWindowController: NSWindowController {
     }
 
     func show() {
+        guard IronsmithFeatureFlags.isStoreEnabled() else { return }
         guard let window else { return }
         if !hasCenteredWindow {
             window.center()
