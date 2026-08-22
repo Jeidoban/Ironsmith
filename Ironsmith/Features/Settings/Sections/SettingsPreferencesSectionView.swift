@@ -5,6 +5,8 @@ struct SettingsPreferencesSectionView: View {
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
     @AppStorage(IronsmithPreferenceKeys.diagnosticsLoggingEnabled) private
         var diagnosticsLoggingEnabled = false
+    @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled) private var isStoreFeatureEnabled =
+        false
     @AppStorage(IronsmithPreferenceKeys.generatesIdentityForNewRemixes) private
         var generatesIdentityForNewRemixes = true
     @State private var isConfirmingUnsandboxedTools = false
@@ -30,16 +32,18 @@ struct SettingsPreferencesSectionView: View {
                     .foregroundStyle(.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(
-                    "Generate a new name and icon for remixes",
-                    isOn: $generatesIdentityForNewRemixes
-                )
-                .toggleStyle(.switch)
+            if isStoreFeatureEnabled {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle(
+                        "Generate a new name and icon for remixes",
+                        isOn: $generatesIdentityForNewRemixes
+                    )
+                    .toggleStyle(.switch)
 
-                Text("Applies when you edit a downloaded app for the first time.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text("Applies when you edit a downloaded app for the first time.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Toggle("Allow unsandboxed apps", isOn: sandboxOverrideBinding)
@@ -90,8 +94,8 @@ struct SettingsPreferencesSectionView: View {
                     Text(
                         inferenceStore.generationPreferences
                             .automaticallySelectGeneratedAppPermissions
-                            ? "Ironsmith selects permissions from each prompt. Permissions below are always included."
-                            : "Permissions below provide the defaults shown when generating an app."
+                            ? "Ironsmith chooses permissions for you. Permissions selected below are always included."
+                            : "Apps default to the permissions selected below."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)

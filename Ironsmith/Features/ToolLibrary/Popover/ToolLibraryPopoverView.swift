@@ -286,6 +286,7 @@ struct ToolLibraryPopoverView: View {
                     storePublisher.pendingCreatorProfileToolID = nil
                 },
                 onSave: {
+                    guard isStoreFeatureEnabled else { return }
                     Task {
                         await storePublisher.saveCreatorProfile(
                             inferenceStore: inferenceStore,
@@ -688,6 +689,7 @@ struct ToolLibraryPopoverView: View {
                     storePublisher.isShowingPublishSheet = false
                 },
                 onPublish: {
+                    guard isStoreFeatureEnabled else { return }
                     Task {
                         await storePublisher.publish(
                             tool,
@@ -983,6 +985,7 @@ struct ToolLibraryPopoverView: View {
                 )
             }
             guard let resumePublishingToolID,
+                isStoreFeatureEnabled,
                 inferenceStore.ironsmithSession != nil,
                 let tool = tools.first(where: { $0.id == resumePublishingToolID })
             else { return }
@@ -1023,6 +1026,7 @@ struct ToolLibraryPopoverView: View {
         }
         switch toolLibraryStore.remixIdentitySubmissionAction(
             for: tool,
+            isStoreFeatureEnabled: isStoreFeatureEnabled,
             generatesIdentity: generatesIdentityForNewRemixes,
             hasPresentedNotice: hasPresentedRemixIdentityNotice,
             isConfirmedDownloadedFromAnotherUser: storePublisher
@@ -1038,7 +1042,7 @@ struct ToolLibraryPopoverView: View {
     }
 
     private func startRemixIdentityGeneration(for tool: Tool) {
-        guard remixIdentityGenerationTask == nil else { return }
+        guard isStoreFeatureEnabled, remixIdentityGenerationTask == nil else { return }
         let operationID = UUID()
         remixIdentityGeneratingToolID = tool.id
         remixIdentityGenerationOperationID = operationID
