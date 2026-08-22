@@ -278,7 +278,9 @@ final class ToolLibraryStore {
 
     func canShowAgentOutput(for tool: Tool) -> Bool {
         activeCodingAgentByToolID[tool.id] == .codex
+            || activeCodingAgentByToolID[tool.id] == .custom
             || CodexAgentTranscriptReader.hasTranscript(for: tool.packageRootURL)
+            || CustomCodingAgentTranscriptReader.hasTranscript(for: tool.packageRootURL)
     }
 
     func refreshRestoreAvailability(for tools: [Tool]) async {

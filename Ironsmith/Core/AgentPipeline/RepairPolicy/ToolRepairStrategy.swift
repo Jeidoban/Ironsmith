@@ -5,6 +5,7 @@ enum ToolCodingAgentPreference: String, Codable, CaseIterable, Identifiable, Sen
     case ironsmithSpark = "small_model"
     case ironsmithFlame = "large_model"
     case codex
+    case custom
 
     var id: String { rawValue }
 
@@ -18,6 +19,8 @@ enum ToolCodingAgentPreference: String, Codable, CaseIterable, Identifiable, Sen
             return "Ironsmith Flame"
         case .codex:
             return "Codex"
+        case .custom:
+            return "Custom"
         }
     }
 }
@@ -26,6 +29,7 @@ enum ToolCodingAgent: String, Codable, Equatable, Sendable {
     case ironsmithSpark = "small_model"
     case ironsmithFlame = "large_model"
     case codex
+    case custom
 
     var displayName: String {
         switch self {
@@ -35,6 +39,8 @@ enum ToolCodingAgent: String, Codable, Equatable, Sendable {
             return "Ironsmith Flame"
         case .codex:
             return "Codex"
+        case .custom:
+            return "Custom"
         }
     }
 }
@@ -140,6 +146,7 @@ nonisolated enum ToolCodingAgentSupport {
             .automatic,
             .ironsmithSpark,
             .ironsmithFlame,
+            .custom,
         ]
         if supportsCodex(model: model, provider: provider) {
             supported.insert(.codex)
@@ -190,6 +197,8 @@ nonisolated enum ToolCodingAgentResolver {
             return .ironsmithFlame
         case .codex:
             return .codex
+        case .custom:
+            return .custom
         case .automatic:
             if context.requiresAttachmentSupport,
                ToolAttachmentSupport.canUseCodexAttachments(model: model, provider: provider)
@@ -269,6 +278,8 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
             return .extractModelEnvelope
         case .codex:
             return .none
+        case .custom:
+            return .none
         }
     }
 
@@ -309,6 +320,21 @@ struct ToolGenerationPipelineConfiguration: Equatable, Sendable {
     static func codex() -> Self {
         ToolGenerationPipelineConfiguration(
             codingAgent: .codex,
+            repairStrategy: .deterministicOnly,
+            maximumGenerationAttempts: 1,
+            batchesRepairDiagnostics: false,
+            restoresBestCandidateOnFailure: false,
+            rollsBackModelRepairWhenErrorCountIncreases: false,
+            regeneratesAfterModelRepairStall: false,
+            fallsBackToWholeFileEditAfterInvalidInitialPatch: false,
+            diagnosticWholeFileRewriteEnabled: false,
+            maximumModelRepairAttempts: nil
+        )
+    }
+
+    static func custom() -> Self {
+        ToolGenerationPipelineConfiguration(
+            codingAgent: .custom,
             repairStrategy: .deterministicOnly,
             maximumGenerationAttempts: 1,
             batchesRepairDiagnostics: false,

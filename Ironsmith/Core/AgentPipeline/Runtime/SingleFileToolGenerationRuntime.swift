@@ -305,8 +305,10 @@ struct SingleFileToolGenerationRuntime {
                 )
             }
 
-            if context.pipelineConfiguration.codingAgent == .codex {
-                try await generateWithCodexAgent(
+            if context.pipelineConfiguration.codingAgent == .codex
+                || context.pipelineConfiguration.codingAgent == .custom
+            {
+                try await generateWithWorkspaceAgent(
                     displayName: setup.displayName,
                     layout: setup.layout,
                     contentViewPath: setup.contentViewPath,
@@ -621,8 +623,10 @@ struct SingleFileToolGenerationRuntime {
                 to: layout.appEntrySourcePath,
                 packageRootURL: layout.packageRootURL
             )
-            if context.pipelineConfiguration.codingAgent == .codex {
-                try await generateWithCodexAgent(
+            if context.pipelineConfiguration.codingAgent == .codex
+                || context.pipelineConfiguration.codingAgent == .custom
+            {
+                try await generateWithWorkspaceAgent(
                     displayName: existingTool.name,
                     layout: layout,
                     contentViewPath: contentViewPath,
@@ -814,6 +818,107 @@ struct SingleFileToolGenerationRuntime {
                 """
             )
             throw error
+        }
+    }
+
+    private func generateWithWorkspaceAgent(
+        displayName: String,
+        layout: ToolPackageLayout,
+        contentViewPath: String,
+        userPrompt: String,
+        settings: ToolGenerationSettings,
+        lifecycle: ToolGenerationLifecycle
+    ) async throws {
+        switch context.pipelineConfiguration.codingAgent {
+        case .codex:
+            try await generateWithCodexAgent(
+                displayName: displayName,
+                layout: layout,
+                contentViewPath: contentViewPath,
+                userPrompt: userPrompt,
+                settings: settings,
+                lifecycle: lifecycle
+            )
+        case .custom:
+            try await generateWithCustomCodingAgent(
+                displayName: displayName,
+                layout: layout,
+                contentViewPath: contentViewPath,
+                userPrompt: userPrompt,
+                settings: settings,
+                lifecycle: lifecycle
+            )
+        case .ironsmithSpark, .ironsmithFlame:
+            preconditionFailure("Only workspace coding agents use this path.")
+        }
+    }
+
+    private func generateWithCustomCodingAgent(
+        displayName: String,
+        layout: ToolPackageLayout,
+        contentViewPath: String,
+        userPrompt: String,
+        settings: ToolGenerationSettings,
+        lifecycle: ToolGenerationLifecycle
+    ) async throws {
+        guard let agent = context.customCodingAgent else {
+            throw InferenceStoreError.missingCustomCodingAgent
+        }
+        let attachments = try context.attachmentStorage.currentRun(layout)
+        let prompt = CustomCodingAgentPrompt.compose(
+            userPrompt: userPrompt,
+            displayName: displayName,
+            executableName: layout.executableName,
+            appKind: settings.appKind,
+            sandboxEnabled: settings.sandboxEnabled,
+            attachments: attachments
+        )
+        try await lifecycle.updatePhase(.generating, .generatingSource, nil)
+        let protectedFileBaselines = try codexProtectedFileBaselines(layout: layout)
+        AgentDiagnosticsLog.append(
+            "Custom coding agent started. runner: \(agent.name), packageRoot: \(layout.packageRootURL.path)"
+        )
+        do {
+            let result = try await context.customCodingAgentClient.run(
+                CustomCodingAgentRequest(
+                    agent: agent,
+                    packageRootURL: layout.packageRootURL,
+                    prompt: prompt
+                ) { output in
+                    guard output.stream == .stderr, !output.text.isEmpty else { return }
+                    try? await lifecycle.updatePhase(
+                        .generating,
+                        .generatingSource,
+                        output.text
+                    )
+                }
+            )
+            try Task.checkCancellation()
+            try validateCodexProtectedFiles(layout: layout, baselines: protectedFileBaselines)
+            try await verifyCodexGeneratedSource(
+                layout: layout,
+                contentViewPath: contentViewPath,
+                lifecycle: lifecycle
+            )
+            AgentDiagnosticsLog.append(
+                "Custom coding agent completed. runner: \(agent.name), transcript: \(result.transcriptURL.path)"
+            )
+        } catch {
+            let originalError = error
+            do {
+                try validateCodexProtectedFiles(
+                    layout: layout,
+                    baselines: protectedFileBaselines
+                )
+            } catch CodexAgentError.protectedFileChanged(_) {
+                // The validator restored all protected files; preserve the runner's failure.
+            } catch {
+                throw error
+            }
+            AgentDiagnosticsLog.append(
+                "Custom coding agent failed. runner: \(agent.name), error: \(AgentDiagnosticsLog.renderError(originalError, limit: 1_500))"
+            )
+            throw originalError
         }
     }
 

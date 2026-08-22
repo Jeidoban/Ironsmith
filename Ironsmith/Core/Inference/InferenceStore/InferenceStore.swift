@@ -65,6 +65,7 @@ final class InferenceStore {
         }
     }
     var generationPreferences: GenerationPreferencesStore
+    var customCodingAgents: CustomCodingAgentStore
     var modelSelection: ModelSelectionStore
 
     // Internal coordination state shared by the responsibility-focused InferenceStore extensions.
@@ -78,6 +79,7 @@ final class InferenceStore {
     init(
         dependencies: InferenceDependencies? = nil,
         generationPreferences: GenerationPreferencesStore? = nil,
+        customCodingAgents: CustomCodingAgentStore? = nil,
         modelSelection: ModelSelectionStore? = nil,
         appleFoundationModelPreferenceStore: AppleFoundationModelPreferenceStore? = nil
     ) {
@@ -85,6 +87,7 @@ final class InferenceStore {
             appleFoundationModelPreferenceStore ?? AppleFoundationModelPreferenceStore()
         self.dependencies = dependencies ?? .live
         self.generationPreferences = generationPreferences ?? GenerationPreferencesStore()
+        self.customCodingAgents = customCodingAgents ?? CustomCodingAgentStore()
         self.modelSelection = modelSelection ?? ModelSelectionStore()
         self.appleFoundationModelPreferenceStore = appleFoundationModelPreferenceStore
         self.isAppleFoundationModelEnabled = appleFoundationModelPreferenceStore.isEnabled
@@ -186,12 +189,15 @@ final class InferenceStore {
 
 enum InferenceStoreError: LocalizedError {
     case missingSelectedModel
+    case missingCustomCodingAgent
     case insufficientIronsmithCredits
 
     var errorDescription: String? {
         switch self {
         case .missingSelectedModel:
             return InferenceMessages.noAvailableModels
+        case .missingCustomCodingAgent:
+            return "Choose or add a custom coding agent before generating an app."
         case .insufficientIronsmithCredits:
             return
                 "Your AI credits have run out. Buy more below, or switch to a local or API-key model to keep going."

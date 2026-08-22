@@ -7,6 +7,8 @@ struct AgentOutputWindowView: View {
 
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @State private var snapshot = CodexAgentTranscriptSnapshot.empty
+    @State private var customEntries: [CustomCodingAgentOutput] = []
+    @State private var showsCustomTranscript = false
     @State private var loadError: String?
 
     private var tool: Tool? {
@@ -67,7 +69,7 @@ struct AgentOutputWindowView: View {
     private func timeline(for tool: Tool) -> some View {
         if let loadError {
             emptyState(loadError)
-        } else if snapshot.entries.isEmpty {
+        } else if visibleEntryCount == 0 {
             VStack(spacing: 12) {
                 emptyState(isWorking ? "Waiting for agent output" : "No agent output")
                 if isWorking {
@@ -80,12 +82,19 @@ struct AgentOutputWindowView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(snapshot.entries) { entry in
-                            AgentOutputEventRow(
-                                entry: entry,
-                                packageRootURL: tool.packageRootURL
-                            )
-                            .id(entry.id)
+                        if showsCustomTranscript {
+                            ForEach(Array(customEntries.enumerated()), id: \.offset) { index, entry in
+                                CustomAgentOutputRow(entry: entry)
+                                    .id(index)
+                            }
+                        } else {
+                            ForEach(snapshot.entries) { entry in
+                                AgentOutputEventRow(
+                                    entry: entry,
+                                    packageRootURL: tool.packageRootURL
+                                )
+                                .id(entry.id)
+                            }
                         }
 
                         if isWorking {
@@ -100,7 +109,7 @@ struct AgentOutputWindowView: View {
                 .onAppear {
                     scrollToBottom(proxy)
                 }
-                .onChange(of: snapshot.entries.count) { _, _ in
+                .onChange(of: visibleEntryCount) { _, _ in
                     scrollToBottom(proxy)
                 }
             }
@@ -149,10 +158,26 @@ struct AgentOutputWindowView: View {
         }
 
         do {
-            snapshot = try CodexAgentTranscriptReader.snapshot(for: tool.packageRootURL)
+            let codexURL = CodexAgentTranscriptReader.latestTranscriptURL(
+                for: tool.packageRootURL
+            )
+            let customURL = CustomCodingAgentTranscriptReader.latestTranscriptURL(
+                for: tool.packageRootURL
+            )
+            showsCustomTranscript = Self.isNewer(customURL, than: codexURL)
+            if showsCustomTranscript {
+                customEntries = try CustomCodingAgentTranscriptReader.entries(
+                    for: tool.packageRootURL
+                )
+                snapshot = .empty
+            } else {
+                snapshot = try CodexAgentTranscriptReader.snapshot(for: tool.packageRootURL)
+                customEntries = []
+            }
             loadError = nil
         } catch {
             snapshot = .empty
+            customEntries = []
             loadError = error.localizedDescription
         }
     }
@@ -160,13 +185,55 @@ struct AgentOutputWindowView: View {
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         guard isWorking else { return }
         Task { @MainActor in
-            if snapshot.entries.isEmpty {
+            if visibleEntryCount == 0 {
                 proxy.scrollTo("working", anchor: .bottom)
             } else {
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo("working", anchor: .bottom)
                 }
             }
+        }
+    }
+
+    private var visibleEntryCount: Int {
+        showsCustomTranscript ? customEntries.count : snapshot.entries.count
+    }
+
+    nonisolated private static func isNewer(_ lhs: URL?, than rhs: URL?) -> Bool {
+        guard let lhs else { return false }
+        guard let rhs else { return true }
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey]
+        let lhsDate = (try? lhs.resourceValues(forKeys: keys).contentModificationDate)
+            ?? .distantPast
+        let rhsDate = (try? rhs.resourceValues(forKeys: keys).contentModificationDate)
+            ?? .distantPast
+        return lhsDate >= rhsDate
+    }
+}
+
+private struct CustomAgentOutputRow: View {
+    let entry: CustomCodingAgentOutput
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: entry.stream == .stderr ? "exclamationmark.triangle" : "terminal")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(entry.stream == .stderr ? Color.orange : Color.accentColor)
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(entry.runner) · \(entry.stream.rawValue)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(entry.text)
+                    .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(entry.stream == .stderr ? Color.orange : Color.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         }
     }
 }

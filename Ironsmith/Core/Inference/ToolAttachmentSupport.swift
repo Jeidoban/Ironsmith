@@ -6,7 +6,14 @@ nonisolated enum ToolAttachmentSupport {
         provider: ProviderConfig?,
         codingAgent: ToolCodingAgent
     ) -> Bool {
-        codingAgent == .codex && canUseCodexAttachments(model: model, provider: provider)
+        switch codingAgent {
+        case .custom:
+            return true
+        case .codex:
+            return canUseCodexAttachments(model: model, provider: provider)
+        case .ironsmithSpark, .ironsmithFlame:
+            return false
+        }
     }
 
     static func canUseCodexAttachments(
@@ -33,6 +40,11 @@ nonisolated enum ToolAttachmentSupport {
     static func preferenceAfterAddingAttachments(
         _ preference: ToolCodingAgentPreference
     ) -> ToolCodingAgentPreference {
-        preference == .automatic ? .automatic : .codex
+        switch preference {
+        case .automatic, .custom:
+            return preference
+        case .ironsmithSpark, .ironsmithFlame, .codex:
+            return .codex
+        }
     }
 }

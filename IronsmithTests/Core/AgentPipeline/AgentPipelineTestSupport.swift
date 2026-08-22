@@ -24,8 +24,10 @@ extension AgentPipelineTests {
         promptRefinementEnabled: Bool = true,
         versionBackupClient: ToolVersionBackupClient = .live,
         codexAgentClient: CodexAgentClient = .unconfigured,
+        customCodingAgentClient: CustomCodingAgentClient = .unconfigured,
         codingAgentModelIdentifier: String = "",
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
+        customCodingAgent: CustomCodingAgent? = nil,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
     ) -> SingleFileToolGenerationRuntime {
         let languageModelContext = AgentLanguageModelContext(
@@ -35,6 +37,7 @@ extension AgentPipelineTests {
             promptRefinementEnabled: promptRefinementEnabled,
             codingAgentModelIdentifier: codingAgentModelIdentifier,
             codexAgentAuthentication: codexAgentAuthentication,
+            customCodingAgent: customCodingAgent,
             afterLanguageModelInvocation: afterLanguageModelInvocation
         )
         let dependencies = ToolGenerationRuntimeDependencies(
@@ -46,7 +49,8 @@ extension AgentPipelineTests {
             planningClient: planningClient,
             promptRefinementClient: promptRefinementClient,
             versionBackupClient: versionBackupClient,
-            codexAgentClient: codexAgentClient
+            codexAgentClient: codexAgentClient,
+            customCodingAgentClient: customCodingAgentClient
         )
         return SingleFileToolGenerationRuntime(
             context: ToolGenerationRuntimeContext(

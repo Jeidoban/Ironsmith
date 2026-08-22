@@ -39,6 +39,8 @@ struct ToolLibraryPopoverView: View {
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
     @State private var isShowingModelPicker = false
+    @State private var isShowingCustomCodingAgents = false
+    @State private var startsCustomCodingAgentSheetWithNewAgent = false
     @State private var isSigningInToIronsmith = false
     @State private var isSearchPresented = false
     @State private var isPromptExpanded = false
@@ -296,6 +298,12 @@ struct ToolLibraryPopoverView: View {
         .sheet(isPresented: $isShowingModelPicker) {
             ModelPickerSheetView()
         }
+        .sheet(isPresented: $isShowingCustomCodingAgents) {
+            CustomCodingAgentSheetView(
+                store: inferenceStore.customCodingAgents,
+                startsWithNewAgent: startsCustomCodingAgentSheetWithNewAgent
+            )
+        }
     }
 
     // The menu bar popover stays intentionally small: tool list first, prompt last.
@@ -350,7 +358,10 @@ struct ToolLibraryPopoverView: View {
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating || remixIdentityGeneratingToolID != nil,
                 isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(.codex),
-                showsAttachmentControls: selectedModelCanUseCodexAttachments,
+                customCodingAgents: inferenceStore.customCodingAgents.agents,
+                selectedCustomCodingAgentID: inferenceStore.customCodingAgents.selectedAgentID,
+                showsAttachmentControls: selectedModelCanUseCodexAttachments
+                    || inferenceStore.generationPreferences.codingAgentPreference == .custom,
                 supportsAttachments: selectedModelSupportsAttachments,
                 attachments: toolLibraryStore.attachments,
                 supportedReasoningEfforts: inferenceStore.selectedModelSupportedReasoningEfforts,
@@ -377,6 +388,18 @@ struct ToolLibraryPopoverView: View {
                 },
                 onRemoveAttachment: { id in
                     toolLibraryStore.removeAttachment(id: id)
+                },
+                onSelectCustomCodingAgent: { id in
+                    inferenceStore.customCodingAgents.selectedAgentID = id
+                    inferenceStore.generationPreferences.codingAgentPreference = .custom
+                },
+                onAddCustomCodingAgent: {
+                    startsCustomCodingAgentSheetWithNewAgent = true
+                    isShowingCustomCodingAgents = true
+                },
+                onManageCustomCodingAgents: {
+                    startsCustomCodingAgentSheetWithNewAgent = false
+                    isShowingCustomCodingAgents = true
                 }
             )
             .frame(maxHeight: isPromptExpanded ? .infinity : nil)

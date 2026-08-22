@@ -155,6 +155,7 @@ struct ToolGenerationRuntimeDependencies {
     let packageMaterializer: ToolPackageMaterializer
     let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
+    let customCodingAgentClient: CustomCodingAgentClient
 
     init(
         toolsDirectoryURL: URL,
@@ -168,7 +169,8 @@ struct ToolGenerationRuntimeDependencies {
         versionBackupClient: ToolVersionBackupClient,
         packageMaterializer: ToolPackageMaterializer? = nil,
         attachmentStorage: ToolPromptAttachmentStorage = .live,
-        codexAgentClient: CodexAgentClient = .unconfigured
+        codexAgentClient: CodexAgentClient = .unconfigured,
+        customCodingAgentClient: CustomCodingAgentClient = .unconfigured
     ) {
         self.toolsDirectoryURL = toolsDirectoryURL
         self.fileClient = fileClient
@@ -182,6 +184,7 @@ struct ToolGenerationRuntimeDependencies {
         self.packageMaterializer = packageMaterializer ?? ToolPackageMaterializer(fileClient: fileClient)
         self.attachmentStorage = attachmentStorage
         self.codexAgentClient = codexAgentClient
+        self.customCodingAgentClient = customCodingAgentClient
     }
 
     @MainActor
@@ -197,7 +200,8 @@ struct ToolGenerationRuntimeDependencies {
         versionBackupClient: ToolVersionBackupClient = .live,
         packageMaterializer: ToolPackageMaterializer? = nil,
         attachmentStorage: ToolPromptAttachmentStorage = .live,
-        codexAgentClient: CodexAgentClient = .live()
+        codexAgentClient: CodexAgentClient = .live(),
+        customCodingAgentClient: CustomCodingAgentClient = .live
     ) -> Self {
         Self(
             toolsDirectoryURL: toolsDirectoryURL,
@@ -211,7 +215,8 @@ struct ToolGenerationRuntimeDependencies {
             versionBackupClient: versionBackupClient,
             packageMaterializer: packageMaterializer,
             attachmentStorage: attachmentStorage,
-            codexAgentClient: codexAgentClient
+            codexAgentClient: codexAgentClient,
+            customCodingAgentClient: customCodingAgentClient
         )
     }
 }
@@ -233,10 +238,12 @@ struct ToolGenerationRuntimeContext {
     let packageMaterializer: ToolPackageMaterializer
     let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
+    let customCodingAgentClient: CustomCodingAgentClient
     let codingAgentModelIdentifier: String
     let codingAgentModelFamily: ToolModelFamily
     let codingAgentContextWindowTokens: Int?
     let codexAgentAuthentication: CodexAgentAuthentication?
+    let customCodingAgent: CustomCodingAgent?
     let reasoningEffort: ToolReasoningEffort
     let codingAgentSupportsImageInput: Bool
 
@@ -280,10 +287,12 @@ struct ToolGenerationRuntimeContext {
         self.packageMaterializer = dependencies.packageMaterializer
         self.attachmentStorage = dependencies.attachmentStorage
         self.codexAgentClient = dependencies.codexAgentClient
+        self.customCodingAgentClient = dependencies.customCodingAgentClient
         self.codingAgentModelIdentifier = languageModelContext.codingAgentModelIdentifier
         self.codingAgentModelFamily = languageModelContext.codingAgentModelFamily
         self.codingAgentContextWindowTokens = languageModelContext.codingAgentContextWindowTokens
         self.codexAgentAuthentication = languageModelContext.codexAgentAuthentication
+        self.customCodingAgent = languageModelContext.customCodingAgent
         self.reasoningEffort = languageModelContext.reasoningEffort
         self.codingAgentSupportsImageInput = languageModelContext.codingAgentSupportsImageInput
     }
