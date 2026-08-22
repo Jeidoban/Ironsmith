@@ -309,6 +309,7 @@ struct PromptComposerView: View {
                     }
                     Button("Add Agent…", action: onAddCustomCodingAgent)
                     Button("Manage Agents…", action: onManageCustomCodingAgents)
+                        .disabled(customCodingAgents.isEmpty)
                 }
             }
 

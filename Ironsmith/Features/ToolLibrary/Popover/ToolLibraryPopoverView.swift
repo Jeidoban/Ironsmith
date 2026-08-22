@@ -4,6 +4,13 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+private enum CustomCodingAgentSheet: String, Identifiable {
+    case add
+    case manage
+
+    var id: String { rawValue }
+}
+
 struct ToolLibraryPopoverView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(InferenceStore.self) private var inferenceStore
@@ -39,8 +46,7 @@ struct ToolLibraryPopoverView: View {
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
     @State private var isShowingModelPicker = false
-    @State private var isShowingCustomCodingAgents = false
-    @State private var startsCustomCodingAgentSheetWithNewAgent = false
+    @State private var customCodingAgentSheet: CustomCodingAgentSheet?
     @State private var isSigningInToIronsmith = false
     @State private var isSearchPresented = false
     @State private var isPromptExpanded = false
@@ -298,11 +304,13 @@ struct ToolLibraryPopoverView: View {
         .sheet(isPresented: $isShowingModelPicker) {
             ModelPickerSheetView()
         }
-        .sheet(isPresented: $isShowingCustomCodingAgents) {
-            CustomCodingAgentSheetView(
-                store: inferenceStore.customCodingAgents,
-                startsWithNewAgent: startsCustomCodingAgentSheetWithNewAgent
-            )
+        .sheet(item: $customCodingAgentSheet) { sheet in
+            switch sheet {
+            case .add:
+                AddCustomCodingAgentSheetView(store: inferenceStore.customCodingAgents)
+            case .manage:
+                ManageCustomCodingAgentsSheetView(store: inferenceStore.customCodingAgents)
+            }
         }
     }
 
@@ -394,12 +402,10 @@ struct ToolLibraryPopoverView: View {
                     inferenceStore.generationPreferences.codingAgentPreference = .custom
                 },
                 onAddCustomCodingAgent: {
-                    startsCustomCodingAgentSheetWithNewAgent = true
-                    isShowingCustomCodingAgents = true
+                    customCodingAgentSheet = .add
                 },
                 onManageCustomCodingAgents: {
-                    startsCustomCodingAgentSheetWithNewAgent = false
-                    isShowingCustomCodingAgents = true
+                    customCodingAgentSheet = .manage
                 }
             )
             .frame(maxHeight: isPromptExpanded ? .infinity : nil)

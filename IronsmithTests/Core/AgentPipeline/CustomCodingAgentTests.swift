@@ -11,9 +11,9 @@ struct CustomCodingAgentTests {
         #expect(claude.name == "Claude Code")
         #expect(
             claude.command
-                == "claude -p --permission-mode auto --output-format stream-json --verbose --model sonnet {{prompt}}"
+                == "claude -p --permission-mode auto --output-format stream-json --verbose --model sonnet"
         )
-        #expect(claude.promptDelivery == .placeholder)
+        #expect(claude.promptDelivery == .standardInput)
 
         let openCode = CustomCodingAgentPreset.openCode.agent
         #expect(openCode.name == "OpenCode")
@@ -149,7 +149,7 @@ struct CustomCodingAgentTests {
                 timestamp: timestamp,
                 runner: "Claude Code",
                 stream: .stdout,
-                text: #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"private"},{"type":"text","text":"Now I'll write the ContentView."},{"type":"tool_use","name":"Write"}]}}"#
+                text: #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Considering the simplest layout.","signature":"opaque-signature"},{"type":"thinking","thinking":"","signature":"encrypted-only"},{"type":"text","text":"Now I'll write the ContentView."},{"type":"tool_use","name":"Write"}]}}"#
             ),
             CustomCodingAgentOutput(
                 timestamp: timestamp,
@@ -174,6 +174,7 @@ struct CustomCodingAgentTests {
         let displayed = CustomCodingAgentTranscriptReader.displayEntries(from: entries)
 
         #expect(displayed.map(\.text) == [
+            "Considering the simplest layout.",
             "Now I'll write the ContentView.",
             #"{"status":"ordinary JSON"}"#,
             "warning",

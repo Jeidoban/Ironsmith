@@ -401,7 +401,7 @@ nonisolated enum CustomCodingAgentTranscriptReader {
     static func displayEntries(
         from entries: [CustomCodingAgentOutput]
     ) -> [CustomCodingAgentOutput] {
-        entries.flatMap { entry in
+        entries.flatMap { entry -> [CustomCodingAgentOutput] in
             guard entry.stream == .stdout,
                   let event = try? JSONDecoder().decode(
                       ClaudeStreamEvent.self,
@@ -414,8 +414,12 @@ nonisolated enum CustomCodingAgentTranscriptReader {
 
             guard event.type == "assistant" else { return [] }
             return event.message?.content.compactMap { block in
-                guard block.type == "text",
-                      let text = block.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                let displayText: String? = switch block.type {
+                case "text": block.text
+                case "thinking": block.thinking
+                default: nil
+                }
+                guard let text = displayText?.trimmingCharacters(in: .whitespacesAndNewlines),
                       !text.isEmpty
                 else { return nil }
                 return CustomCodingAgentOutput(
@@ -434,6 +438,7 @@ private nonisolated struct ClaudeStreamEvent: Decodable {
         struct Content: Decodable {
             let type: String
             let text: String?
+            let thinking: String?
         }
 
         let role: String
