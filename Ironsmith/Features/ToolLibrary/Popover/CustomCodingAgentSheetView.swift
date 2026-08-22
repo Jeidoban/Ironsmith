@@ -37,6 +37,13 @@ struct AddCustomCodingAgentSheetView: View {
                 errorMessage: errorMessage
             )
 
+            Label(
+                "Ironsmith doesn't manage your custom agent's active model or installation. A selected Ironsmith model is still required to generate app metadata.",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(.orange)
+
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
@@ -233,13 +240,6 @@ private struct CustomCodingAgentEditorFields: View {
                 }
                 .labelsHidden()
             }
-
-            Label(
-                "This command runs with your normal shell permissions. Ironsmith does not manage its installation, login, model, sandbox, or approvals.",
-                systemImage: "exclamationmark.triangle.fill"
-            )
-            .font(.caption)
-            .foregroundStyle(.orange)
 
             if let errorMessage {
                 Text(errorMessage)
