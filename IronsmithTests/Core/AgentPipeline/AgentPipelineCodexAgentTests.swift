@@ -1053,7 +1053,7 @@ extension AgentPipelineTests {
     }
 
     @Test
-    func codexAgentStatusOneSuggestsUsageLimit() {
+    func codexAgentStatusOnePresentsUsageAsOnePossibleCause() {
         let transcriptURL = URL(fileURLWithPath: "/tmp/agent.jsonl")
         let error = CodexAgentError.commandFailed(
             status: 1,
@@ -1063,7 +1063,19 @@ extension AgentPipelineTests {
 
         #expect(
             error.errorDescription
-                == "Codex couldn't continue. You might be out of Codex usage. Check your usage in Codex and try again after it resets. Transcript: /tmp/agent.jsonl"
+                == "The coding agent couldn't continue. You might be out of usage, but this can also be caused by another agent error. Check your usage and the transcript, then try again. Transcript: /tmp/agent.jsonl"
+        )
+    }
+
+    @Test
+    func sharedCodingAgentErrorsUseGenericAgentLanguage() {
+        #expect(
+            CodingAgentError.protectedFileChanged("Package.swift").errorDescription
+                == "The coding agent changed Package.swift, but Ironsmith only allows the agent to edit ContentView.swift."
+        )
+        #expect(
+            CodingAgentError.missingContentView.errorDescription
+                == "The coding agent did not create ContentView.swift."
         )
     }
 
@@ -1306,7 +1318,7 @@ extension AgentPipelineTests {
             codexAgentAuthentication: .apiKey("sk-test")
         )
 
-        await #expect(throws: CodexAgentError.protectedFileChanged("Package.swift")) {
+        await #expect(throws: CodingAgentError.protectedFileChanged("Package.swift")) {
             _ = try await runtime.generateTool(for: "Make a Codex demo", settings: .default)
         }
 
