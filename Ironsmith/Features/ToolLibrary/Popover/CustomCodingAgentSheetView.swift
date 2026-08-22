@@ -44,6 +44,8 @@ struct AddCustomCodingAgentSheetView: View {
             )
             .font(.caption)
             .foregroundStyle(.orange)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
 
             HStack {
                 Spacer()
