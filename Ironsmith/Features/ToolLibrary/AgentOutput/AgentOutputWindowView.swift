@@ -166,7 +166,7 @@ struct AgentOutputWindowView: View {
             )
             showsCustomTranscript = Self.isNewer(customURL, than: codexURL)
             if showsCustomTranscript {
-                customEntries = try CustomCodingAgentTranscriptReader.entries(
+                customEntries = try CustomCodingAgentTranscriptReader.displayEntries(
                     for: tool.packageRootURL
                 )
                 snapshot = .empty

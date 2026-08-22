@@ -45,7 +45,7 @@ nonisolated enum CustomCodingAgentPreset: String, CaseIterable, Identifiable, Se
         case .claudeCode:
             CustomCodingAgent(
                 name: displayName,
-                command: "claude -p {{prompt}}"
+                command: "claude -p --permission-mode auto --output-format stream-json --verbose --model sonnet {{prompt}}"
             )
         case .openCode:
             CustomCodingAgent(

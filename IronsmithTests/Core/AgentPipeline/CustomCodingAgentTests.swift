@@ -9,7 +9,10 @@ struct CustomCodingAgentTests {
     func presetsAreEditableRunnerConfigurations() {
         let claude = CustomCodingAgentPreset.claudeCode.agent
         #expect(claude.name == "Claude Code")
-        #expect(claude.command == "claude -p {{prompt}}")
+        #expect(
+            claude.command
+                == "claude -p --permission-mode auto --output-format stream-json --verbose --model sonnet {{prompt}}"
+        )
         #expect(claude.promptDelivery == .placeholder)
 
         let openCode = CustomCodingAgentPreset.openCode.agent
@@ -130,6 +133,51 @@ struct CustomCodingAgentTests {
         let persisted = try CustomCodingAgentTranscriptReader.entries(for: packageRoot)
         #expect(persisted.count == 2)
         #expect(CustomCodingAgentTranscriptReader.hasTranscript(for: packageRoot))
+    }
+
+    @Test
+    func displayEntriesShowOnlyClaudeAssistantTextWhilePreservingOtherOutput() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let entries = [
+            CustomCodingAgentOutput(
+                timestamp: timestamp,
+                runner: "Claude Code",
+                stream: .stdout,
+                text: #"{"type":"system","subtype":"init","session_id":"session"}"#
+            ),
+            CustomCodingAgentOutput(
+                timestamp: timestamp,
+                runner: "Claude Code",
+                stream: .stdout,
+                text: #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"private"},{"type":"text","text":"Now I'll write the ContentView."},{"type":"tool_use","name":"Write"}]}}"#
+            ),
+            CustomCodingAgentOutput(
+                timestamp: timestamp,
+                runner: "Claude Code",
+                stream: .stdout,
+                text: #"{"type":"result","session_id":"session","result":"Duplicate final text"}"#
+            ),
+            CustomCodingAgentOutput(
+                timestamp: timestamp,
+                runner: "Other Runner",
+                stream: .stdout,
+                text: #"{"status":"ordinary JSON"}"#
+            ),
+            CustomCodingAgentOutput(
+                timestamp: timestamp,
+                runner: "Claude Code",
+                stream: .stderr,
+                text: "warning"
+            ),
+        ]
+
+        let displayed = CustomCodingAgentTranscriptReader.displayEntries(from: entries)
+
+        #expect(displayed.map(\.text) == [
+            "Now I'll write the ContentView.",
+            #"{"status":"ordinary JSON"}"#,
+            "warning",
+        ])
     }
 
     @Test(.timeLimit(.minutes(1)))

@@ -393,6 +393,75 @@ nonisolated enum CustomCodingAgentTranscriptReader {
             try? decoder.decode(CustomCodingAgentOutput.self, from: Data(line.utf8))
         }
     }
+
+    static func displayEntries(for packageRootURL: URL) throws -> [CustomCodingAgentOutput] {
+        displayEntries(from: try entries(for: packageRootURL))
+    }
+
+    static func displayEntries(
+        from entries: [CustomCodingAgentOutput]
+    ) -> [CustomCodingAgentOutput] {
+        entries.flatMap { entry in
+            guard entry.stream == .stdout,
+                  let event = try? JSONDecoder().decode(
+                      ClaudeStreamEvent.self,
+                      from: Data(entry.text.utf8)
+                  ),
+                  event.isClaudeStreamEvent
+            else {
+                return [entry]
+            }
+
+            guard event.type == "assistant" else { return [] }
+            return event.message?.content.compactMap { block in
+                guard block.type == "text",
+                      let text = block.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !text.isEmpty
+                else { return nil }
+                return CustomCodingAgentOutput(
+                    timestamp: entry.timestamp,
+                    runner: entry.runner,
+                    stream: entry.stream,
+                    text: text
+                )
+            } ?? []
+        }
+    }
+}
+
+private nonisolated struct ClaudeStreamEvent: Decodable {
+    struct Message: Decodable {
+        struct Content: Decodable {
+            let type: String
+            let text: String?
+        }
+
+        let role: String
+        let content: [Content]
+    }
+
+    let type: String
+    let subtype: String?
+    let sessionID: String?
+    let message: Message?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case subtype
+        case sessionID = "session_id"
+        case message
+    }
+
+    var isClaudeStreamEvent: Bool {
+        switch type {
+        case "assistant":
+            message?.role == "assistant"
+        case "system", "user", "result":
+            sessionID != nil
+        default:
+            false
+        }
+    }
 }
 
 private nonisolated struct CustomCodingAgentTranscriptFile: Sendable {
