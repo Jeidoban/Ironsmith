@@ -4,20 +4,36 @@ import SwiftUI
 
 @MainActor
 final class IronsmithAgentOutputWindowController: NSWindowController {
+    private let rootViewBuilder: @MainActor (UUID) -> AnyView
+    private var agentOutputWindow: NSWindow?
     private var hasCenteredWindow = false
-    private let modelContainer: ModelContainer
 
-    init(modelContainer: ModelContainer) {
-        self.modelContainer = modelContainer
+    var hasCreatedWindow: Bool { agentOutputWindow != nil }
 
+    convenience init(modelContainer: ModelContainer) {
+        self.init { toolID in
+            AnyView(
+                AgentOutputWindowView(toolID: toolID)
+                    .modelContainer(modelContainer)
+            )
+        }
+    }
+
+    init(rootViewBuilder: @escaping @MainActor (UUID) -> AnyView) {
+        self.rootViewBuilder = rootViewBuilder
+        super.init(window: nil)
+    }
+
+    private func loadAgentOutputWindowIfNeeded() {
+        guard agentOutputWindow == nil else { return }
         let window = NSWindow()
         window.title = "Agent Output"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 560, height: 420)
         window.setContentSize(NSSize(width: 680, height: 560))
-
-        super.init(window: window)
+        self.window = window
+        agentOutputWindow = window
     }
 
     @available(*, unavailable)
@@ -26,12 +42,10 @@ final class IronsmithAgentOutputWindowController: NSWindowController {
     }
 
     func show(toolID: UUID) {
-        guard let window else { return }
+        loadAgentOutputWindowIfNeeded()
+        guard let window = agentOutputWindow else { return }
         window.contentViewController = NSHostingController(
-            rootView: AnyView(
-                AgentOutputWindowView(toolID: toolID)
-                    .modelContainer(modelContainer)
-            )
+            rootView: rootViewBuilder(toolID)
         )
 
         if !hasCenteredWindow {
@@ -44,6 +58,5 @@ final class IronsmithAgentOutputWindowController: NSWindowController {
         window.orderFrontRegardless()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        NSRunningApplication.current.activate(options: [.activateAllWindows])
     }
 }

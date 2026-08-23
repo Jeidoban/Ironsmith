@@ -8,12 +8,24 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
     private let hostingController: NSHostingController<AnyView>
     private let presentationStore: MenuBarPopoverPresentationStore?
 
-    init(
+    convenience init(
         rootView: AnyView,
         presentationStore: MenuBarPopoverPresentationStore? = nil
     ) {
+        self.init(
+            rootView: rootView,
+            presentationStore: presentationStore,
+            popover: NSPopover()
+        )
+    }
+
+    init(
+        rootView: AnyView,
+        presentationStore: MenuBarPopoverPresentationStore?,
+        popover: NSPopover
+    ) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        popover = NSPopover()
+        self.popover = popover
         hostingController = NSHostingController(rootView: rootView)
         self.presentationStore = presentationStore
 
@@ -50,9 +62,7 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
 
     @objc private func togglePopover(_ sender: Any?) {
         if popover.isShown {
-            presentationStore?.willClose()
-            dismissAttachedSheetIfNeeded()
-            popover.performClose(sender)
+            closePopover(sender)
         } else {
             showPopover()
         }
@@ -60,6 +70,10 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
 
     func show() {
         showPopover()
+    }
+
+    func applicationDidResignActive() {
+        closePopover(nil)
     }
 
     private func showPopover() {
@@ -75,13 +89,19 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
             popoverWindow.level = .normal
             popoverWindow.makeKey()
         }
-        NSRunningApplication.current.activate(options: [.activateAllWindows])
         button.state = .on
         presentationStore?.didShow()
     }
 
     func popoverDidClose(_ notification: Notification) {
         statusItem.button?.state = .off
+    }
+
+    private func closePopover(_ sender: Any?) {
+        guard popover.isShown else { return }
+        presentationStore?.willClose()
+        dismissAttachedSheetIfNeeded()
+        popover.performClose(sender)
     }
 
     private func dismissAttachedSheetIfNeeded() {

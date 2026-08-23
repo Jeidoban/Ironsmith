@@ -7,21 +7,42 @@ final class IronsmithStoreWindowController: NSWindowController {
     private static let initialContentSize = NSSize(width: 1000, height: 660)
     private static let minimumContentSize = NSSize(width: 600, height: 400)
 
+    private let rootViewBuilder: @MainActor () -> AnyView
+    private let isStoreFeatureEnabled: @MainActor () -> Bool
+    private var storeWindow: NSWindow?
     private var hasCenteredWindow = false
 
-    init(
+    var hasCreatedWindow: Bool { storeWindow != nil }
+
+    convenience init(
         modelContainer: ModelContainer,
         inferenceStore: InferenceStore,
         routeStore: IronsmithRouteStore
     ) {
-        let hostingController = NSHostingController(
-            rootView: AnyView(
+        self.init {
+            AnyView(
                 StoreWindowView()
                     .modelContainer(modelContainer)
                     .environment(inferenceStore)
                     .environment(routeStore)
             )
-        )
+        }
+    }
+
+    init(
+        rootViewBuilder: @escaping @MainActor () -> AnyView,
+        isStoreFeatureEnabled: @escaping @MainActor () -> Bool = {
+            IronsmithFeatureFlags.isStoreEnabled()
+        }
+    ) {
+        self.rootViewBuilder = rootViewBuilder
+        self.isStoreFeatureEnabled = isStoreFeatureEnabled
+        super.init(window: nil)
+    }
+
+    private func loadStoreWindowIfNeeded() {
+        guard storeWindow == nil else { return }
+        let hostingController = NSHostingController(rootView: rootViewBuilder())
         hostingController.sceneBridgingOptions = [.toolbars]
         let window = NSWindow()
         window.title = "Ironsmith Store"
@@ -39,8 +60,8 @@ final class IronsmithStoreWindowController: NSWindowController {
         window.contentViewController = hostingController
         window.minSize = Self.minimumContentSize
         window.setContentSize(Self.initialContentSize)
-
-        super.init(window: window)
+        self.window = window
+        storeWindow = window
     }
 
     @available(*, unavailable)
@@ -49,8 +70,9 @@ final class IronsmithStoreWindowController: NSWindowController {
     }
 
     func show() {
-        guard IronsmithFeatureFlags.isStoreEnabled() else { return }
-        guard let window else { return }
+        guard isStoreFeatureEnabled() else { return }
+        loadStoreWindowIfNeeded()
+        guard let window = storeWindow else { return }
         if !hasCenteredWindow {
             window.center()
             hasCenteredWindow = true
@@ -61,6 +83,5 @@ final class IronsmithStoreWindowController: NSWindowController {
         window.orderFrontRegardless()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        NSRunningApplication.current.activate(options: [.activateAllWindows])
     }
 }
