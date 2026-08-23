@@ -74,7 +74,7 @@ struct CustomCodingAgentTests {
         )
 
         #expect(CustomCodingAgentClient.shellArguments(for: request) == [
-            "-lc",
+            "-ilc",
             #"tool --prompt "$1""#,
             "Runner",
             prompt,
@@ -93,7 +93,7 @@ struct CustomCodingAgentTests {
             packageRootURL: URL(fileURLWithPath: "/tmp"),
             prompt: "secret prompt"
         )
-        #expect(CustomCodingAgentClient.shellArguments(for: request) == ["-lc", "tool --stdin"])
+        #expect(CustomCodingAgentClient.shellArguments(for: request) == ["-ilc", "tool --stdin"])
     }
 
     @Test

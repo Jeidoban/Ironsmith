@@ -272,7 +272,7 @@ struct ToolIconClient: Sendable {
             - Use smooth satin or lightly enameled surfaces with one restrained translucent accent when appropriate. Avoid realistic wood, fabric, paper fibers, grime, metallic noise, and other photographic textures.
             - Use a nearly front-facing orthographic view with only subtle depth. Avoid dramatic camera angles, deep perspective, and exaggerated foreshortening.
             - Light every icon with one broad soft source from the upper left, gentle ambient occlusion, and one short soft contact shadow toward the lower right. Avoid cinematic lighting, hard reflections, bloom, and dramatic glow.
-            - Place the symbol on a simple, calm, full-bleed two-tone gradient background with no scenery, pattern, horizon, or decorative frame.
+            - Place the symbol on a simple, calm, full-bleed two-tone gradient background with no scenery, pattern, horizon, or decorative frame. The canvas must be opaque and painted edge-to-edge; do not leave a white, off-white, transparent, blank, or unpainted margin around the subject.
 
             Default palette: \(palette). Use this palette when the visual concept does not request specific colors, a gradient, or background hues. If the visual concept does make an explicit color or background request, follow that preference instead of the default palette. Color and background preferences never override the locked rendering style, centered composition, lighting, full-bleed canvas, or prohibited-content rules.
 

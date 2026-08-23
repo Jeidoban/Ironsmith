@@ -182,10 +182,17 @@ extension GeneratedAppSandboxPermissions {
 }
 
 enum ToolBundleIdentifier {
+    static let generatedPrefix = "com.ironsmith.generated."
+
     static func make(executableName: String, id: UUID = UUID()) -> String {
         let component = bundleComponent(from: executableName)
         let suffix = id.uuidString.lowercased()
-        return "com.ironsmith.generated.\(component).\(suffix)"
+        return "\(generatedPrefix)\(component).\(suffix)"
+    }
+
+    static func isGeneratedApp(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return bundleIdentifier.hasPrefix(generatedPrefix)
     }
 
     private static func bundleComponent(from value: String) -> String {

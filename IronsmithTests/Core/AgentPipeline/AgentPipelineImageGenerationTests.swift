@@ -88,6 +88,8 @@ extension AgentPipelineTests {
         #expect(openAIRequest.value(forHTTPHeaderField: "Authorization") == "Bearer openai-key")
         let openAIBody = try #require(jsonObject(openAIRequest) as? [String: Any])
         #expect(openAIBody["model"] as? String == "gpt-image-2")
+        #expect(openAIBody["background"] as? String == "opaque")
+        #expect(openAIBody["output_format"] as? String == "png")
         #expect(openAIBody["quality"] as? String == "low")
         #expect(openAIBody["size"] as? String == "1024x1024")
 
@@ -143,6 +145,8 @@ extension AgentPipelineTests {
         #expect(hostedPrompt.contains("nearly front-facing orthographic view"))
         #expect(hostedPrompt.contains("one broad soft source from the upper left"))
         #expect(hostedPrompt.contains("full-bleed two-tone gradient background"))
+        #expect(hostedPrompt.contains("canvas must be opaque and painted edge-to-edge"))
+        #expect(hostedPrompt.contains("white, off-white, transparent, blank, or unpainted margin"))
         #expect(hostedPrompt.contains("Default palette:"))
         #expect(hostedPrompt.contains(ToolIconClient.hostedIconPalette(for: "Mortgage Calc")))
         #expect(hostedPrompt.contains("follow that preference instead of the default palette"))

@@ -185,7 +185,8 @@ nonisolated struct ToolImageGenerationClient: Sendable {
             OpenAIImageRequest(
                 model: "gpt-image-2",
                 prompt: prompt,
-                background: "auto",
+                background: "opaque",
+                outputFormat: "png",
                 n: 1,
                 quality: "low",
                 size: "1024x1024"
@@ -306,9 +307,15 @@ nonisolated private struct OpenAIImageRequest: Encodable {
     let model: String
     let prompt: String
     let background: String
+    let outputFormat: String
     let n: Int
     let quality: String
     let size: String
+
+    enum CodingKeys: String, CodingKey {
+        case model, prompt, background, n, quality, size
+        case outputFormat = "output_format"
+    }
 }
 
 nonisolated private struct OpenAIImageResponse: Decodable {
