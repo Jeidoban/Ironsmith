@@ -33,6 +33,7 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
 
         configurePopover()
         configureStatusItem()
+        configureWorkspaceApplicationObservation()
     }
 
     private func configurePopover() {
@@ -72,8 +73,82 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
         showPopover()
     }
 
-    func applicationDidResignActive() {
-        closePopover(nil)
+    static func popoverWindowLevel(
+        activatedApplicationBundleIdentifier: String?,
+        isCurrentApplication: Bool
+    ) -> NSWindow.Level {
+        if isCurrentApplication || ToolBundleIdentifier.isGeneratedApp(activatedApplicationBundleIdentifier) {
+            return .normal
+        }
+        return .floating
+    }
+
+    func updatePopoverWindowLevel(
+        activatedApplicationBundleIdentifier: String?,
+        isCurrentApplication: Bool
+    ) {
+        guard let popoverWindow = popover.contentViewController?.view.window else { return }
+
+        popoverWindow.level = Self.popoverWindowLevel(
+            activatedApplicationBundleIdentifier: activatedApplicationBundleIdentifier,
+            isCurrentApplication: isCurrentApplication
+        )
+        if isCurrentApplication {
+            orderPopoverBehindIronsmithWindows(popoverWindow)
+        }
+    }
+
+    func orderPopoverBehindIronsmithWindows(
+        _ popoverWindow: NSWindow
+    ) {
+        orderPopoverBehindIronsmithWindows(
+            popoverWindow,
+            orderedWindows: NSApp.orderedWindows
+        ) { popoverWindow, otherWindow in
+            popoverWindow.order(.below, relativeTo: otherWindow.windowNumber)
+        }
+    }
+
+    func orderPopoverBehindIronsmithWindows(
+        _ popoverWindow: NSWindow,
+        orderedWindows: [NSWindow],
+        performOrder: @MainActor (NSWindow, NSWindow) -> Void
+    ) {
+        guard
+            let backmostNormalWindow = orderedWindows.last(where: {
+                $0 !== popoverWindow
+                    && $0.isVisible
+                    && !$0.isMiniaturized
+                    && $0.level == .normal
+            })
+        else {
+            return
+        }
+
+        performOrder(popoverWindow, backmostNormalWindow)
+    }
+
+    private func configureWorkspaceApplicationObservation() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceApplicationDidActivate(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+    }
+
+    @objc private func workspaceApplicationDidActivate(_ notification: Notification) {
+        guard
+            let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                as? NSRunningApplication
+        else {
+            return
+        }
+
+        updatePopoverWindowLevel(
+            activatedApplicationBundleIdentifier: application.bundleIdentifier,
+            isCurrentApplication: application.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        )
     }
 
     private func showPopover() {
@@ -82,12 +157,14 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         if let popoverWindow = popover.contentViewController?.view.window {
-            // NSPopover uses a menu-style window level by default, which can cover
-            // the app's Settings, About, Store, Agent Output, and open panels.
-            // Ironsmith keeps this popover open while those windows are presented,
-            // so use the normal app-window level and let key-window ordering win.
-            popoverWindow.level = .normal
+            // Keep Ironsmith and its generated apps above the popover. Workspace
+            // activation notifications raise it only while an unrelated app is active.
+            popoverWindow.level = Self.popoverWindowLevel(
+                activatedApplicationBundleIdentifier: Bundle.main.bundleIdentifier,
+                isCurrentApplication: true
+            )
             popoverWindow.makeKey()
+            orderPopoverBehindIronsmithWindows(popoverWindow)
         }
         button.state = .on
         presentationStore?.didShow()
@@ -113,5 +190,13 @@ final class IronsmithMenuBarController: NSObject, NSPopoverDelegate {
         }
 
         window.endSheet(attachedSheet)
+    }
+
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(
+            self,
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
     }
 }

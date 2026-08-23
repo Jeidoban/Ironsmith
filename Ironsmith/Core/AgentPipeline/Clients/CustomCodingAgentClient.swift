@@ -221,9 +221,9 @@ nonisolated struct CustomCodingAgentClient: Sendable {
                 of: "{{prompt}}",
                 with: #""$1""#
             )
-            return ["-lc", command, request.agent.name, request.prompt]
+            return ["-ilc", command, request.agent.name, request.prompt]
         case .standardInput:
-            return ["-lc", request.agent.command]
+            return ["-ilc", request.agent.command]
         }
     }
 

@@ -23,10 +23,6 @@ final class IronsmithAppDelegate: NSObject, NSApplicationDelegate {
         applicationController?.applicationDidBecomeActive()
     }
 
-    func applicationDidResignActive(_ notification: Notification) {
-        applicationController?.applicationDidResignActive()
-    }
-
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
@@ -180,10 +176,6 @@ final class IronsmithApplicationController {
         Task {
             await inferenceStore.refreshIronsmithAccountSummaryIfNeededAfterCheckout()
         }
-    }
-
-    func applicationDidResignActive() {
-        menuBarController?.applicationDidResignActive()
     }
 
     func showToolLibraryPopover() {
