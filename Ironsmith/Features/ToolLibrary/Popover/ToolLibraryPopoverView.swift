@@ -980,9 +980,7 @@ struct ToolLibraryPopoverView: View {
             await MainActor.run {
                 isSigningInToIronsmith = false
                 guard didFinishProviderSetup else { return }
-                inferenceStore.selectIronsmithModel(
-                    identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier
-                )
+                inferenceStore.selectPreferredIronsmithModel()
             }
             guard let resumePublishingToolID,
                 isStoreFeatureEnabled,

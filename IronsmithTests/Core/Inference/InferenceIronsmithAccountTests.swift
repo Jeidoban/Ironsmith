@@ -96,11 +96,12 @@ extension InferenceTests {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
         let callbackURL = URL(string: "com.jeidoban.ironsmith://auth/callback?code=test")!
+        let deepSeekFlashVariant = "deepseek/deepseek-v4-flash-0324"
         let inferenceStore = InferenceStore(
             dependencies: Self.dependencies(
                 remoteModelIDs: [
                     "openai/gpt-5",
-                    InferenceStore.onboardingPreferredIronsmithModelIdentifier,
+                    deepSeekFlashVariant,
                 ],
                 accountClient: Self.accountClient()
             ),
@@ -111,13 +112,11 @@ extension InferenceTests {
         let didSignIn = await inferenceStore.signInToIronsmithWithAppleOAuth { _ in
             callbackURL
         }
-        let didSelectDeepSeek = inferenceStore.selectIronsmithModel(
-            identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier
-        )
+        let didSelectDeepSeek = inferenceStore.selectPreferredIronsmithModel()
 
         #expect(didSignIn)
         #expect(didSelectDeepSeek)
-        #expect(inferenceStore.selectedModel?.identifier == InferenceStore.onboardingPreferredIronsmithModelIdentifier)
+        #expect(inferenceStore.selectedModel?.identifier == deepSeekFlashVariant)
         #expect(inferenceStore.modelSelection.selectedModelID == inferenceStore.selectedModelID)
     }
 

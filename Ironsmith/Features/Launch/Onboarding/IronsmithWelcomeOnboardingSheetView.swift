@@ -166,9 +166,7 @@ struct IronsmithWelcomeOnboardingSheetView: View {
             await MainActor.run {
                 isSigningIn = false
                 guard didSignIn else { return }
-                inferenceStore.selectIronsmithModel(
-                    identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier
-                )
+                inferenceStore.selectPreferredIronsmithModel()
                 onComplete()
             }
         }
