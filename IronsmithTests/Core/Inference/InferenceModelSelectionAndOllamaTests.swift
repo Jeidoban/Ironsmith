@@ -629,26 +629,43 @@ extension InferenceTests {
 
     @MainActor
     @Test
-    func selectIronsmithModelSelectsMatchingRemoteModel() throws {
+    func selectPreferredIronsmithModelSelectsFirstDeepSeekFlashVariant() throws {
         let store = InferenceStore(
             dependencies: Self.dependencies(),
             modelSelection: Self.modelSelection()
         )
         let provider = try #require(ProviderCatalog.makeProvider(for: .ironsmith))
+        let firstDeepSeekFlashModel = ModelConfig(
+            identifier: "deepseek/deepseek-v4-flash-0324",
+            displayName: "DeepSeek V4 Flash 0324",
+            providerIdentifier: provider.identifier,
+            source: .remote,
+            installState: .installed
+        )
         let deepSeekModel = ModelConfig(
-            identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier,
-            displayName: "DeepSeek V4 Flash",
+            identifier: "deepseek/deepseek-v4-flash-671b",
+            displayName: "DeepSeek V4 Flash 671B",
             providerIdentifier: provider.identifier,
             source: .remote,
             installState: .installed
         )
 
         store.providers = [provider]
-        store.remoteModels = [deepSeekModel]
+        store.remoteModels = [
+            ModelConfig(
+                identifier: "openai/gpt-5",
+                displayName: "GPT-5",
+                providerIdentifier: provider.identifier,
+                source: .remote,
+                installState: .installed
+            ),
+            firstDeepSeekFlashModel,
+            deepSeekModel,
+        ]
 
-        #expect(store.selectIronsmithModel(identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier))
-        #expect(store.selectedModelID == deepSeekModel.selectionIdentifier)
-        #expect(store.modelSelection.selectedModelID == deepSeekModel.selectionIdentifier)
+        #expect(store.selectPreferredIronsmithModel())
+        #expect(store.selectedModelID == firstDeepSeekFlashModel.selectionIdentifier)
+        #expect(store.modelSelection.selectedModelID == firstDeepSeekFlashModel.selectionIdentifier)
     }
 
     @MainActor
@@ -671,7 +688,7 @@ extension InferenceTests {
         store.remoteModels = [selectedModel]
         store.selectModel(selectedModel.selectionIdentifier)
 
-        #expect(!store.selectIronsmithModel(identifier: InferenceStore.onboardingPreferredIronsmithModelIdentifier))
+        #expect(!store.selectPreferredIronsmithModel())
         #expect(store.selectedModelID == selectedModel.selectionIdentifier)
         #expect(store.modelSelection.selectedModelID == selectedModel.selectionIdentifier)
     }

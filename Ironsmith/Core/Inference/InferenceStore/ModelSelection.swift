@@ -44,6 +44,22 @@ extension InferenceStore {
         return true
     }
 
+    @discardableResult
+    func selectPreferredIronsmithModel() -> Bool {
+        guard let provider = providers.first(where: { $0.kind == .ironsmith }),
+            let model = remoteModels.first(where: {
+                guard $0.providerIdentifier == provider.identifier else { return false }
+                let searchableName = "\($0.identifier) \($0.displayName)".lowercased()
+                return searchableName.contains("deepseek") && searchableName.contains("flash")
+            })
+        else {
+            return false
+        }
+
+        selectModel(model.selectionIdentifier)
+        return true
+    }
+
     func reconcileSelectedModel() {
         if let selectedModelID,
             availableModels.contains(where: { $0.selectionIdentifier == selectedModelID })

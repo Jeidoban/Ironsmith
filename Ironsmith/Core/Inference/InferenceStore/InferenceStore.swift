@@ -27,8 +27,6 @@ enum InferenceMessages {
 @MainActor
 @Observable
 final class InferenceStore {
-    static let onboardingPreferredIronsmithModelIdentifier = "deepseek/deepseek-v4-flash"
-
     struct ProviderChoice: Identifiable, Hashable {
         let kind: ProviderKind
         let title: String
