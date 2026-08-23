@@ -120,7 +120,9 @@ final class IronsmithRouteStore {
         openSettingsWindow: @escaping @MainActor @Sendable () -> Void,
         openStoreWindow: @escaping @MainActor @Sendable () -> Void = {},
         openToolLibraryPopover: @escaping @MainActor @Sendable () -> Void = {},
-        isStoreFeatureEnabled: @escaping @MainActor @Sendable () -> Bool = { true }
+        isStoreFeatureEnabled: @escaping @MainActor @Sendable () -> Bool = {
+            IronsmithFeatureFlags.isStoreEnabled()
+        }
     ) {
         self.openAgentOutputWindow = openAgentOutputWindow
         self.openSettingsWindow = openSettingsWindow
@@ -141,6 +143,9 @@ final class IronsmithRouteStore {
             pendingStoreRoute = storeRoute
             openStoreWindow()
         case .toolLibrary(let toolLibraryRoute):
+            if case .publishTool = toolLibraryRoute {
+                guard isStoreFeatureEnabled() else { return }
+            }
             pendingToolLibraryRoute = toolLibraryRoute
             openToolLibraryPopover()
         }

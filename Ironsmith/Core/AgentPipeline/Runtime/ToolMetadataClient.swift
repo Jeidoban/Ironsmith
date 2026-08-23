@@ -635,7 +635,7 @@ struct ToolPromptRefinementClient: Sendable {
         switch codingAgent {
         case .ironsmithSpark:
             return sparkPromptRefinementInstructions
-        case .ironsmithFlame, .codex:
+        case .ironsmithFlame, .codex, .custom:
             return additivePromptRefinementInstructions
         }
     }

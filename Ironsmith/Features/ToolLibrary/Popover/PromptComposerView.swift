@@ -25,6 +25,8 @@ struct PromptComposerView: View {
     let isSubmitEnabled: Bool
     let isSubmitting: Bool
     let isCodexAgentSupported: Bool
+    let customCodingAgents: [CustomCodingAgent]
+    let selectedCustomCodingAgentID: UUID?
     let showsAttachmentControls: Bool
     let supportsAttachments: Bool
     let attachments: [ToolPromptAttachment]
@@ -35,6 +37,9 @@ struct PromptComposerView: View {
     let onCancel: () -> Void
     let onAddAttachments: ([URL]) -> Void
     let onRemoveAttachment: (UUID) -> Void
+    let onSelectCustomCodingAgent: (UUID) -> Void
+    let onAddCustomCodingAgent: () -> Void
+    let onManageCustomCodingAgents: () -> Void
     @State private var pendingPermission: GeneratedAppResourcePermission?
     @State private var isAttachmentDropTargeted = false
 
@@ -255,11 +260,8 @@ struct PromptComposerView: View {
         Menu {
             Picker("App Type", selection: $appKindPreference) {
                 ForEach(ToolAppKindPreference.allCases, id: \.self) { preference in
-                    Label(
-                        preference.displayName,
-                        systemImage: appKindSystemImage(preference)
-                    )
-                    .tag(preference)
+                    Text(preference.displayName)
+                        .tag(preference)
                 }
             }
 
@@ -285,6 +287,27 @@ struct PromptComposerView: View {
                     displayName: ToolCodingAgentPreference.codex.displayName,
                     isEnabled: isCodexAgentSupported
                 )
+                Menu("Custom") {
+                    ForEach(customCodingAgents) { agent in
+                        Button {
+                            onSelectCustomCodingAgent(agent.id)
+                        } label: {
+                            if codingAgentPreference == .custom
+                                && selectedCustomCodingAgentID == agent.id
+                            {
+                                Label(agent.name, systemImage: "checkmark")
+                            } else {
+                                Text(agent.name)
+                            }
+                        }
+                    }
+                    if !customCodingAgents.isEmpty {
+                        Divider()
+                    }
+                    Button("Add Agent…", action: onAddCustomCodingAgent)
+                    Button("Manage Agents…", action: onManageCustomCodingAgents)
+                        .disabled(customCodingAgents.isEmpty)
+                }
             }
 
             if !supportedReasoningEfforts.isEmpty {
@@ -425,14 +448,6 @@ struct PromptComposerView: View {
 
     private var sandboxHelpText: String {
         "Controls whether generated apps include App Sandbox entitlements."
-    }
-
-    private func appKindSystemImage(_ preference: ToolAppKindPreference) -> String {
-        switch preference {
-        case .automatic: "wand.and.sparkles"
-        case .window: "macwindow"
-        case .menuBar: "menubar.rectangle"
-        }
     }
 
     private func checkedSelectionButton<Value: Equatable>(
@@ -651,6 +666,8 @@ private struct PromptComposerPreview: View {
             isSubmitEnabled: isEditing,
             isSubmitting: false,
             isCodexAgentSupported: true,
+            customCodingAgents: [],
+            selectedCustomCodingAgentID: nil,
             showsAttachmentControls: true,
             supportsAttachments: true,
             attachments: [],
@@ -660,7 +677,10 @@ private struct PromptComposerPreview: View {
             onSubmit: {},
             onCancel: {},
             onAddAttachments: { _ in },
-            onRemoveAttachment: { _ in }
+            onRemoveAttachment: { _ in },
+            onSelectCustomCodingAgent: { _ in },
+            onAddCustomCodingAgent: {},
+            onManageCustomCodingAgents: {}
         )
         .padding()
         .frame(width: 360, height: 440)

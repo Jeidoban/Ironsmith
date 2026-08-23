@@ -278,7 +278,9 @@ final class ToolLibraryStore {
 
     func canShowAgentOutput(for tool: Tool) -> Bool {
         activeCodingAgentByToolID[tool.id] == .codex
+            || activeCodingAgentByToolID[tool.id] == .custom
             || CodexAgentTranscriptReader.hasTranscript(for: tool.packageRootURL)
+            || CustomCodingAgentTranscriptReader.hasTranscript(for: tool.packageRootURL)
     }
 
     func refreshRestoreAvailability(for tools: [Tool]) async {
@@ -1136,11 +1138,13 @@ final class ToolLibraryStore {
 
     func remixIdentitySubmissionAction(
         for tool: Tool,
+        isStoreFeatureEnabled: Bool,
         generatesIdentity: Bool,
         hasPresentedNotice: Bool,
         isConfirmedDownloadedFromAnotherUser: Bool
     ) -> ToolRemixIdentitySubmissionAction {
-        guard isConfirmedDownloadedFromAnotherUser,
+        guard isStoreFeatureEnabled,
+            isConfirmedDownloadedFromAnotherUser,
             isFirstEditOfDownloadedApp(tool),
             generatesIdentity
         else { return .submit }

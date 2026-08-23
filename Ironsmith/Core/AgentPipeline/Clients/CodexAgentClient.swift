@@ -832,8 +832,6 @@ enum CodexAgentError: LocalizedError, Equatable {
     case unsupportedProvider
     case missingAuthenticationForRuntime
     case commandFailed(status: Int32, stderr: String, transcriptURL: URL)
-    case protectedFileChanged(String)
-    case missingContentView
 
     var errorDescription: String? {
         switch self {
@@ -846,7 +844,7 @@ enum CodexAgentError: LocalizedError, Equatable {
         case .commandFailed(let status, let stderr, let transcriptURL):
             if status == 1 {
                 return
-                    "Codex couldn't continue. You might be out of Codex usage. Check your usage in Codex and try again after it resets. Transcript: \(transcriptURL.path)"
+                    "The coding agent couldn't continue. You might be out of usage, but this can also be caused by another agent error. Check your usage and the transcript, then try again. Transcript: \(transcriptURL.path)"
             }
             let output = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             if output.isEmpty {
@@ -854,11 +852,6 @@ enum CodexAgentError: LocalizedError, Equatable {
             }
             return
                 "Codex exited with status \(status): \(AgentDiagnosticsLog.compact(redactSecrets(output), limit: 1_500)). Transcript: \(transcriptURL.path)"
-        case .protectedFileChanged(let path):
-            return
-                "Codex changed \(path), but Ironsmith only allows Codex to edit ContentView.swift."
-        case .missingContentView:
-            return "Codex did not create ContentView.swift."
         }
     }
 

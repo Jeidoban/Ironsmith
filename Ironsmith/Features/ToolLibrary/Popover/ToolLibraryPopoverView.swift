@@ -4,6 +4,13 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+private enum CustomCodingAgentSheet: String, Identifiable {
+    case add
+    case manage
+
+    var id: String { rawValue }
+}
+
 struct ToolLibraryPopoverView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(InferenceStore.self) private var inferenceStore
@@ -39,6 +46,7 @@ struct ToolLibraryPopoverView: View {
     @State private var hasCheckedWelcomeOnboarding = false
     @State private var isShowingWelcomeOnboarding = false
     @State private var isShowingModelPicker = false
+    @State private var customCodingAgentSheet: CustomCodingAgentSheet?
     @State private var isSigningInToIronsmith = false
     @State private var isSearchPresented = false
     @State private var isPromptExpanded = false
@@ -278,6 +286,7 @@ struct ToolLibraryPopoverView: View {
                     storePublisher.pendingCreatorProfileToolID = nil
                 },
                 onSave: {
+                    guard isStoreFeatureEnabled else { return }
                     Task {
                         await storePublisher.saveCreatorProfile(
                             inferenceStore: inferenceStore,
@@ -295,6 +304,14 @@ struct ToolLibraryPopoverView: View {
         }
         .sheet(isPresented: $isShowingModelPicker) {
             ModelPickerSheetView()
+        }
+        .sheet(item: $customCodingAgentSheet) { sheet in
+            switch sheet {
+            case .add:
+                AddCustomCodingAgentSheetView(store: inferenceStore.customCodingAgents)
+            case .manage:
+                ManageCustomCodingAgentsSheetView(store: inferenceStore.customCodingAgents)
+            }
         }
     }
 
@@ -350,7 +367,10 @@ struct ToolLibraryPopoverView: View {
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating || remixIdentityGeneratingToolID != nil,
                 isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(.codex),
-                showsAttachmentControls: selectedModelCanUseCodexAttachments,
+                customCodingAgents: inferenceStore.customCodingAgents.agents,
+                selectedCustomCodingAgentID: inferenceStore.customCodingAgents.selectedAgentID,
+                showsAttachmentControls: selectedModelCanUseCodexAttachments
+                    || inferenceStore.generationPreferences.codingAgentPreference == .custom,
                 supportsAttachments: selectedModelSupportsAttachments,
                 attachments: toolLibraryStore.attachments,
                 supportedReasoningEfforts: inferenceStore.selectedModelSupportedReasoningEfforts,
@@ -377,6 +397,16 @@ struct ToolLibraryPopoverView: View {
                 },
                 onRemoveAttachment: { id in
                     toolLibraryStore.removeAttachment(id: id)
+                },
+                onSelectCustomCodingAgent: { id in
+                    inferenceStore.customCodingAgents.selectedAgentID = id
+                    inferenceStore.generationPreferences.codingAgentPreference = .custom
+                },
+                onAddCustomCodingAgent: {
+                    customCodingAgentSheet = .add
+                },
+                onManageCustomCodingAgents: {
+                    customCodingAgentSheet = .manage
                 }
             )
             .frame(maxHeight: isPromptExpanded ? .infinity : nil)
@@ -659,6 +689,7 @@ struct ToolLibraryPopoverView: View {
                     storePublisher.isShowingPublishSheet = false
                 },
                 onPublish: {
+                    guard isStoreFeatureEnabled else { return }
                     Task {
                         await storePublisher.publish(
                             tool,
@@ -954,6 +985,7 @@ struct ToolLibraryPopoverView: View {
                 )
             }
             guard let resumePublishingToolID,
+                isStoreFeatureEnabled,
                 inferenceStore.ironsmithSession != nil,
                 let tool = tools.first(where: { $0.id == resumePublishingToolID })
             else { return }
@@ -994,6 +1026,7 @@ struct ToolLibraryPopoverView: View {
         }
         switch toolLibraryStore.remixIdentitySubmissionAction(
             for: tool,
+            isStoreFeatureEnabled: isStoreFeatureEnabled,
             generatesIdentity: generatesIdentityForNewRemixes,
             hasPresentedNotice: hasPresentedRemixIdentityNotice,
             isConfirmedDownloadedFromAnotherUser: storePublisher
@@ -1009,7 +1042,7 @@ struct ToolLibraryPopoverView: View {
     }
 
     private func startRemixIdentityGeneration(for tool: Tool) {
-        guard remixIdentityGenerationTask == nil else { return }
+        guard isStoreFeatureEnabled, remixIdentityGenerationTask == nil else { return }
         let operationID = UUID()
         remixIdentityGeneratingToolID = tool.id
         remixIdentityGenerationOperationID = operationID

@@ -12,6 +12,7 @@ nonisolated struct AgentLanguageModelContext {
     let codingAgentModelFamily: ToolModelFamily
     let codingAgentContextWindowTokens: Int?
     let codexAgentAuthentication: CodexAgentAuthentication?
+    let customCodingAgent: CustomCodingAgent?
     let codingAgentSupportsImageInput: Bool
     let reasoningEffort: ToolReasoningEffort
 
@@ -37,6 +38,7 @@ nonisolated struct AgentLanguageModelContext {
         codingAgentModelFamily: ToolModelFamily = .other,
         codingAgentContextWindowTokens: Int? = nil,
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
+        customCodingAgent: CustomCodingAgent? = nil,
         codingAgentSupportsImageInput: Bool = false,
         reasoningEffort: ToolReasoningEffort = .default,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
@@ -56,6 +58,7 @@ nonisolated struct AgentLanguageModelContext {
         self.codingAgentModelFamily = codingAgentModelFamily
         self.codingAgentContextWindowTokens = codingAgentContextWindowTokens
         self.codexAgentAuthentication = codexAgentAuthentication
+        self.customCodingAgent = customCodingAgent
         self.codingAgentSupportsImageInput = codingAgentSupportsImageInput
         self.reasoningEffort = reasoningEffort
     }
@@ -72,6 +75,7 @@ nonisolated struct AgentLanguageModelContext {
         codingAgentModelFamily: ToolModelFamily = .other,
         codingAgentContextWindowTokens: Int? = nil,
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
+        customCodingAgent: CustomCodingAgent? = nil,
         codingAgentSupportsImageInput: Bool = false,
         reasoningEffort: ToolReasoningEffort = .default,
         afterLanguageModelInvocation: @escaping @MainActor @Sendable () async -> Void = {}
@@ -102,6 +106,7 @@ nonisolated struct AgentLanguageModelContext {
             codingAgentModelFamily: codingAgentModelFamily,
             codingAgentContextWindowTokens: codingAgentContextWindowTokens,
             codexAgentAuthentication: codexAgentAuthentication,
+            customCodingAgent: customCodingAgent,
             codingAgentSupportsImageInput: codingAgentSupportsImageInput,
             reasoningEffort: reasoningEffort,
             afterLanguageModelInvocation: afterLanguageModelInvocation
@@ -379,6 +384,7 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let packageMetadataDirectoryName = ".ironsmith"
     nonisolated static let attachmentsDirectoryName = "attachments"
     nonisolated static let currentRunAttachmentsDirectoryName = "current-run"
+    nonisolated static let customAgentTranscriptsDirectoryName = "custom-agent-transcripts"
     nonisolated static let versionsDirectoryName = "versions"
     nonisolated static let pendingContentViewDraftFilename = "pending-ContentView.swift"
     nonisolated static let pendingContentViewDraftPath =
@@ -413,6 +419,10 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated var currentRunAttachmentsDirectoryURL: URL {
         attachmentsDirectoryURL
             .appendingPathComponent(Self.currentRunAttachmentsDirectoryName, isDirectory: true)
+    }
+
+    nonisolated var customAgentTranscriptsDirectoryURL: URL {
+        Self.customAgentTranscriptsDirectoryURL(for: packageRootURL)
     }
 
     nonisolated var pendingContentViewDraftURL: URL {
@@ -538,6 +548,11 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static func versionsDirectoryURL(for packageRootURL: URL) -> URL {
         packageMetadataDirectoryURL(for: packageRootURL)
             .appendingPathComponent(versionsDirectoryName, isDirectory: true)
+    }
+
+    nonisolated static func customAgentTranscriptsDirectoryURL(for packageRootURL: URL) -> URL {
+        packageMetadataDirectoryURL(for: packageRootURL)
+            .appendingPathComponent(customAgentTranscriptsDirectoryName, isDirectory: true)
     }
 
     nonisolated static func pendingContentViewDraftURL(for packageRootURL: URL) -> URL {

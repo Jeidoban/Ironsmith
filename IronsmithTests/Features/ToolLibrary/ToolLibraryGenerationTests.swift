@@ -34,6 +34,7 @@ extension ToolLibraryTests {
         #expect(
             store.remixIdentitySubmissionAction(
                 for: tool,
+                isStoreFeatureEnabled: true,
                 generatesIdentity: true,
                 hasPresentedNotice: false,
                 isConfirmedDownloadedFromAnotherUser: true
@@ -42,6 +43,7 @@ extension ToolLibraryTests {
         #expect(
             store.remixIdentitySubmissionAction(
                 for: tool,
+                isStoreFeatureEnabled: true,
                 generatesIdentity: true,
                 hasPresentedNotice: true,
                 isConfirmedDownloadedFromAnotherUser: true
@@ -50,6 +52,7 @@ extension ToolLibraryTests {
         #expect(
             store.remixIdentitySubmissionAction(
                 for: tool,
+                isStoreFeatureEnabled: true,
                 generatesIdentity: false,
                 hasPresentedNotice: false,
                 isConfirmedDownloadedFromAnotherUser: true
@@ -58,9 +61,19 @@ extension ToolLibraryTests {
         #expect(
             store.remixIdentitySubmissionAction(
                 for: tool,
+                isStoreFeatureEnabled: true,
                 generatesIdentity: true,
                 hasPresentedNotice: false,
                 isConfirmedDownloadedFromAnotherUser: false
+            ) == .submit
+        )
+        #expect(
+            store.remixIdentitySubmissionAction(
+                for: tool,
+                isStoreFeatureEnabled: false,
+                generatesIdentity: true,
+                hasPresentedNotice: false,
+                isConfirmedDownloadedFromAnotherUser: true
             ) == .submit
         )
         try (source + "// changed\n").write(
@@ -72,6 +85,7 @@ extension ToolLibraryTests {
         #expect(
             store.remixIdentitySubmissionAction(
                 for: tool,
+                isStoreFeatureEnabled: true,
                 generatesIdentity: true,
                 hasPresentedNotice: false,
                 isConfirmedDownloadedFromAnotherUser: true
