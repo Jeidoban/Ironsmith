@@ -15,6 +15,7 @@ struct StoreWindowView: View {
     @State private var store = StoreWindowStore()
     @State private var path: [StoreNavigationDestination] = []
     @State private var sidebarSelection: StoreSidebarSelection? = .discover
+    @State private var navigationPathPolicy = StoreNavigationPathPolicy()
     @State private var categoryRefreshToken = 0
     @State private var searchTask: Task<Void, Never>?
     @State private var isSigningInToIronsmith = false
@@ -113,7 +114,9 @@ struct StoreWindowView: View {
             }
         }
         .onChange(of: sidebarSelection) { _, selection in
-            path = []
+            if navigationPathPolicy.shouldClearPathForSidebarChange() {
+                path = []
+            }
             if selection != .discover {
                 store.searchText = ""
             }
@@ -325,7 +328,31 @@ struct StoreWindowView: View {
                     path = [.app(StoreAppRoute(app: app))]
                 }
             }
+        case .app(let storeID, let appID):
+            navigationPathPolicy.preservePathForNextSidebarChange(
+                sidebarSelection != .discover
+            )
+            sidebarSelection = .discover
+            store.searchText = ""
+            store.select(storeID: storeID, appID: appID, forceReload: true)
+            path = [.app(StoreAppRoute(appID: appID, storeID: storeID))]
         }
+    }
+}
+
+struct StoreNavigationPathPolicy {
+    private var preservesNextSidebarChange = false
+
+    mutating func preservePathForNextSidebarChange(_ selectionWillChange: Bool) {
+        if selectionWillChange {
+            preservesNextSidebarChange = true
+        }
+    }
+
+    mutating func shouldClearPathForSidebarChange() -> Bool {
+        guard preservesNextSidebarChange else { return true }
+        preservesNextSidebarChange = false
+        return false
     }
 }
 

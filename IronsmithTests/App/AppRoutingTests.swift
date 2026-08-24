@@ -56,9 +56,43 @@ struct AppRoutingTests {
     func appRouteParsesStoreURLs() throws {
         let rootURL = try #require(URL(string: "com.jeidoban.ironsmith://store"))
         let publishedURL = try #require(URL(string: "com.jeidoban.ironsmith://store/published"))
+        let detailURL = try #require(
+            URL(
+                string:
+                    "com.jeidoban.ironsmith://store/app/00000000-0000-4000-8000-000000000011/11111111-2222-4333-8444-555555555555"
+            )
+        )
 
         #expect(IronsmithAppRoute(url: rootURL) == .store(.root))
         #expect(IronsmithAppRoute(url: publishedURL) == .store(.published))
+        #expect(
+            IronsmithAppRoute(url: detailURL)
+                == .store(
+                    .app(
+                        storeID: "00000000-0000-4000-8000-000000000011",
+                        appID: "11111111-2222-4333-8444-555555555555"
+                    )
+                )
+        )
+    }
+
+    @Test
+    func appRouteRejectsMalformedStoreDetailURLs() throws {
+        let malformedStoreID = try #require(
+            URL(
+                string:
+                    "com.jeidoban.ironsmith://store/app/not-a-store/11111111-2222-4333-8444-555555555555"
+            )
+        )
+        let malformedAppID = try #require(
+            URL(
+                string:
+                    "com.jeidoban.ironsmith://store/app/00000000-0000-4000-8000-000000000011/not-an-app"
+            )
+        )
+
+        #expect(IronsmithAppRoute(url: malformedStoreID) == nil)
+        #expect(IronsmithAppRoute(url: malformedAppID) == nil)
     }
 
     @Test
@@ -129,6 +163,28 @@ struct AppRoutingTests {
 
     @MainActor
     @Test
+    func routeStoreStoresPendingStoreAppRoute() {
+        let storeCapture = SettingsWindowOpenCapture()
+        let store = IronsmithRouteStore(
+            openSettingsWindow: {},
+            openStoreWindow: {
+                storeCapture.open()
+            }
+        )
+        let route = IronsmithStoreRoute.app(
+            storeID: "00000000-0000-4000-8000-000000000011",
+            appID: "11111111-2222-4333-8444-555555555555"
+        )
+
+        store.open(.store(route))
+
+        #expect(storeCapture.openCount == 1)
+        #expect(store.consumeStoreRoute() == route)
+        #expect(store.pendingStoreRoute == nil)
+    }
+
+    @MainActor
+    @Test
     func routeStoreIgnoresStoreRoutesWhenStoreFeatureIsDisabled() {
         let storeCapture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(
@@ -167,6 +223,28 @@ struct AppRoutingTests {
 
         #expect(popoverCapture.openCount == 1)
         #expect(store.consumeToolLibraryRoute() == .selectTool(id: toolID, focusPrompt: true))
+    }
+
+    @MainActor
+    @Test
+    func routeStoreOpensDirectAppLinksWhenStoreFeatureIsDisabled() {
+        let storeCapture = SettingsWindowOpenCapture()
+        let store = IronsmithRouteStore(
+            openSettingsWindow: {},
+            openStoreWindow: {
+                storeCapture.open()
+            },
+            isStoreFeatureEnabled: { false }
+        )
+        let route = IronsmithStoreRoute.app(
+            storeID: "00000000-0000-4000-8000-000000000011",
+            appID: "11111111-2222-4333-8444-555555555555"
+        )
+
+        store.open(.store(route))
+
+        #expect(storeCapture.openCount == 1)
+        #expect(store.consumeStoreRoute() == route)
     }
 
     @MainActor

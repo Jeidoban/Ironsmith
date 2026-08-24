@@ -75,6 +75,12 @@ enum IronsmithStoreRoute: Equatable {
     case root
     case published
     case publishedApp(String)
+    case app(storeID: String, appID: String)
+
+    var isDirectAppLink: Bool {
+        if case .app = self { return true }
+        return false
+    }
 
     init?(url: URL) {
         guard url.scheme == IronsmithOAuthRedirect.appCallbackScheme else {
@@ -93,7 +99,14 @@ enum IronsmithStoreRoute: Equatable {
         case ["published"]:
             self = .published
         default:
-            return nil
+            guard path.count == 3,
+                path[0] == "app",
+                UUID(uuidString: path[1]) != nil,
+                UUID(uuidString: path[2]) != nil
+            else {
+                return nil
+            }
+            self = .app(storeID: path[1], appID: path[2])
         }
     }
 }
@@ -139,7 +152,7 @@ final class IronsmithRouteStore {
             pendingSettingsRoute = settingsRoute
             openSettingsWindow()
         case .store(let storeRoute):
-            guard isStoreFeatureEnabled() else { return }
+            guard isStoreFeatureEnabled() || storeRoute.isDirectAppLink else { return }
             pendingStoreRoute = storeRoute
             openStoreWindow()
         case .toolLibrary(let toolLibraryRoute):
