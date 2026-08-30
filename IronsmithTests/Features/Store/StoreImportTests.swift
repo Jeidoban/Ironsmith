@@ -39,10 +39,11 @@ struct StoreImportTests {
         let error = IronsmithStoreClient.backendError(statusCode: 422, data: data)
 
         #expect(
-            error == .reviewRejected(reasons: [
-                "The source embeds a service credential directly. (ContentView.swift line 7)",
-                "The listing says data stays local, but the app uploads clipboard contents.",
-            ])
+            error
+                == .reviewRejected(reasons: [
+                    "The source embeds a service credential directly. (ContentView.swift line 7)",
+                    "The listing says data stays local, but the app uploads clipboard contents.",
+                ])
         )
         #expect(error.localizedDescription.contains("service credential"))
         #expect(error.localizedDescription.contains("uploads clipboard contents"))
@@ -59,13 +60,15 @@ struct StoreImportTests {
         let deleted = try JSONDecoder().decode(
             StoreRemixMetadata.self,
             from: Data(
-                #"{"storeId":"store","appId":"app","appName":"[Deleted]","versionId":"version","versionNumber":2,"isDeleted":true}"#.utf8
+                #"{"storeId":"store","appId":"app","appName":"[Deleted]","versionId":"version","versionNumber":2,"isDeleted":true}"#
+                    .utf8
             )
         )
         let legacy = try JSONDecoder().decode(
             StoreRemixMetadata.self,
             from: Data(
-                #"{"storeId":"store","appId":"app","appName":"Original","versionId":"version","versionNumber":1}"#.utf8
+                #"{"storeId":"store","appId":"app","appName":"Original","versionId":"version","versionNumber":1}"#
+                    .utf8
             )
         )
 
@@ -149,7 +152,8 @@ struct StoreImportTests {
         #expect(store.workingAppID == nil)
         #expect(store.workingVersionID == nil)
         #expect(store.errorMessage == nil)
-        guard case .version(let pendingVersion, let pendingApp) = store.pendingDownloadRequest else {
+        guard case .version(let pendingVersion, let pendingApp) = store.pendingDownloadRequest
+        else {
             Issue.record("Expected the historical version request to remain pending for sign-in.")
             return
         }
@@ -1468,16 +1472,17 @@ struct StoreImportTests {
                 )
         )
 
-        #expect(items.map(\.title) == [
-            "Incoming connections (server)",
-            "Internet access",
-            "User-selected files",
-            "Downloads folder",
-            "Pictures folder",
-            "Music folder",
-            "Movies folder",
-            "Microphone",
-        ])
+        #expect(
+            items.map(\.title) == [
+                "Incoming connections (server)",
+                "Internet access",
+                "User-selected files",
+                "Downloads folder",
+                "Pictures folder",
+                "Music folder",
+                "Movies folder",
+                "Microphone",
+            ])
         #expect(
             items.map(\.explanation) == [
                 "Accept connections from other devices",
@@ -1491,16 +1496,17 @@ struct StoreImportTests {
             ]
         )
         #expect(Set(items.map(\.explanation)).count == items.count)
-        #expect(items.map(\.systemImage) == [
-            "server.rack",
-            "network",
-            "folder.badge.plus",
-            "tray.and.arrow.down",
-            "photo.on.rectangle",
-            "music.note",
-            "film",
-            "mic",
-        ])
+        #expect(
+            items.map(\.systemImage) == [
+                "server.rack",
+                "network",
+                "folder.badge.plus",
+                "tray.and.arrow.down",
+                "photo.on.rectangle",
+                "music.note",
+                "film",
+                "mic",
+            ])
 
         let emptyVersion = Self.versionMetadata(
             versionNumber: 1,

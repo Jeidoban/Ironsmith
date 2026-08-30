@@ -17,9 +17,12 @@ struct PromptComposerView: View {
     @Binding var resourcePermissions: GeneratedAppResourcePermissions
     @Binding var codingAgentPreference: ToolCodingAgentPreference
     @Binding var reasoningEffort: ToolReasoningEffort
+    @Binding var autoRemixEnabled: Bool
     let placeholder: String
     let showsSandboxControl: Bool
     let showsPermissionControls: Bool
+    let showsAutoRemixControl: Bool
+    let isAutoRemixAvailable: Bool
     let modelPickerTitle: String
     let isModelPickerEnabled: Bool
     let isSubmitEnabled: Bool
@@ -126,9 +129,9 @@ struct PromptComposerView: View {
                 isSubmitEnabled: isSubmitEnabled,
                 onSubmit: onSubmit
             )
-                .padding(.horizontal, PromptEditorLayout.textEditorHorizontalPadding)
-                .padding(.top, PromptEditorLayout.textEditorTopPadding)
-                .accessibilityIdentifier("tool-prompt-field")
+            .padding(.horizontal, PromptEditorLayout.textEditorHorizontalPadding)
+            .padding(.top, PromptEditorLayout.textEditorTopPadding)
+            .accessibilityIdentifier("tool-prompt-field")
 
             if prompt.isEmpty {
                 Text(placeholder)
@@ -263,6 +266,16 @@ struct PromptComposerView: View {
                     Text(preference.displayName)
                         .tag(preference)
                 }
+            }
+
+            if showsAutoRemixControl {
+                Toggle("Auto-remix from Store", isOn: $autoRemixEnabled)
+                    .disabled(!isAutoRemixAvailable)
+                    .help(
+                        isAutoRemixAvailable
+                            ? "Find a compatible Store app and reusable capabilities before generating."
+                            : "Sign in with Ironsmith to use Store-assisted generation."
+                    )
             }
 
             Menu("Coding Agent") {
@@ -656,11 +669,14 @@ private struct PromptComposerPreview: View {
             ),
             codingAgentPreference: .constant(.automatic),
             reasoningEffort: .constant(.default),
+            autoRemixEnabled: .constant(true),
             placeholder: isEditing
                 ? "Describe changes for Clipboard Cleaner…"
                 : "Describe a new app to build…",
             showsSandboxControl: isEditing,
             showsPermissionControls: true,
+            showsAutoRemixControl: !isEditing,
+            isAutoRemixAvailable: true,
             modelPickerTitle: "DeepSeek V4 Flash",
             isModelPickerEnabled: true,
             isSubmitEnabled: isEditing,

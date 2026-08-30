@@ -34,7 +34,8 @@ extension StoreToolImportClient {
     ) -> Self {
         StoreToolImportClient { request, modelContext in
             try IronsmithStoreClient.verifySourceHash(request.version)
-            let licenses = [request.version.license]
+            let licenses =
+                [request.version.license]
                 + request.version.legalAttributions.map(\.license)
             if let unsupportedLicense = licenses.first(where: {
                 !$0.isSupportedForPublication
@@ -101,6 +102,7 @@ extension StoreToolImportClient {
                 createdAt: now,
                 updatedAt: now
             )
+            tool.storeInspiredByVersionIds = request.version.inspiredByVersionIds ?? []
             modelContext.insert(tool)
             do {
                 try modelContext.save()

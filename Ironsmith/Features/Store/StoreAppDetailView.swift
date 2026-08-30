@@ -382,6 +382,7 @@ private struct StoreDetailMetadataStrip: View {
     let onOpenCreator: (String, String) -> Void
     let onOpenRemix: (StoreRemixMetadata) -> Void
     @State private var isShowingLicense = false
+    @State private var isShowingInspirations = false
 
     private var columns: [GridItem] {
         if app.remix != nil {
@@ -391,37 +392,53 @@ private struct StoreDetailMetadataStrip: View {
     }
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-            if let handle = app.authorHandle, !handle.isEmpty {
-                StoreDetailCreatorMetadataItem(
-                    displayName: app.authorDisplayName,
-                    handle: handle,
-                    action: { onOpenCreator(app.authorDisplayName, handle) }
-                )
-            } else {
-                StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
-            }
-            if let remix = app.remix {
-                if remix.isDeleted {
-                    StoreDetailMetadataItem(title: "Remixed From", value: "[Deleted]")
-                } else {
-                    StoreDetailLinkedMetadataItem(
-                        title: "Remixed From",
-                        value: remix.appName,
-                        action: { onOpenRemix(remix) }
+        VStack(alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                if let handle = app.authorHandle, !handle.isEmpty {
+                    StoreDetailCreatorMetadataItem(
+                        displayName: app.authorDisplayName,
+                        handle: handle,
+                        action: { onOpenCreator(app.authorDisplayName, handle) }
                     )
+                } else {
+                    StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
                 }
+                if let remix = app.remix {
+                    if remix.isDeleted {
+                        StoreDetailMetadataItem(title: "Remixed From", value: "[Deleted]")
+                    } else {
+                        StoreDetailLinkedMetadataItem(
+                            title: "Remixed From",
+                            value: remix.appName,
+                            action: { onOpenRemix(remix) }
+                        )
+                    }
+                }
+                StoreDetailMetadataItem(
+                    title: "Version",
+                    value: String(app.currentVersion.versionNumber)
+                )
+                StoreDetailMetadataItem(title: "Category", value: app.category.title)
+                StoreDetailLinkedMetadataItem(
+                    title: "License",
+                    value: app.currentVersion.license.title,
+                    action: { isShowingLicense = true }
+                )
             }
-            StoreDetailMetadataItem(
-                title: "Version",
-                value: String(app.currentVersion.versionNumber)
-            )
-            StoreDetailMetadataItem(title: "Category", value: app.category.title)
-            StoreDetailLinkedMetadataItem(
-                title: "License",
-                value: app.currentVersion.license.title,
-                action: { isShowingLicense = true }
-            )
+            if let inspirationIDs = app.currentVersion.inspiredByVersionIds,
+                !inspirationIDs.isEmpty
+            {
+                DisclosureGroup(
+                    "Inspired by \(inspirationIDs.count) Store app\(inspirationIDs.count == 1 ? "" : "s")",
+                    isExpanded: $isShowingInspirations
+                ) {
+                    Text("Capability inspirations are recorded in this version's attribution metadata.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 6)
+                }
+                .font(.caption.weight(.medium))
+            }
         }
         .padding(.vertical, 16)
         .overlay(alignment: .top) { Divider() }

@@ -30,6 +30,8 @@ struct ToolItemActions {
     let onEditDetails: () -> Void
     let onRebuild: () -> Void
     let onPublishToStore: () -> Void
+    let onOpenStoreSource: () -> Void
+    let onOpenStoreInspiration: (StoreGenerationCapabilityContext) -> Void
     let onRevert: () -> Void
     let onExport: () -> Void
     let onShowInFinder: () -> Void
@@ -48,6 +50,8 @@ struct ToolItemActions {
         onEditDetails: {},
         onRebuild: {},
         onPublishToStore: {},
+        onOpenStoreSource: {},
+        onOpenStoreInspiration: { _ in },
         onRevert: {},
         onExport: {},
         onShowInFinder: {},
@@ -98,6 +102,20 @@ struct ToolItemActionsMenu: View {
         Button("Rebuild App", action: actions.onRebuild)
             .disabled(!tool.isGenerationReady || state.isBusy)
         if state.showsStoreActions {
+            if tool.storeGenerationBaseAppId != nil {
+                Button("View Remix Source in Store", action: actions.onOpenStoreSource)
+            }
+            if let capabilities = tool.storeGenerationContextSnapshot?.plan.capabilities,
+                !capabilities.isEmpty
+            {
+                Menu("Inspired by") {
+                    ForEach(capabilities, id: \.id) { capability in
+                        Button(capability.appName) {
+                            actions.onOpenStoreInspiration(capability)
+                        }
+                    }
+                }
+            }
             Button(storePublishActionTitle, action: actions.onPublishToStore)
                 .disabled(
                     !tool.isGenerationReady || state.isBusy || !state.hasStoreSourceChanges

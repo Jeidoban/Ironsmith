@@ -31,6 +31,7 @@ enum ToolGenerationPhase: String, Codable, CaseIterable, Equatable, Sendable {
     case generatingIcon
     case waitingForIcon
     case refiningPrompt
+    case searchingStore
     case generatingSource
     case generatingEditDiff
     case generatingRepairDiff
@@ -44,9 +45,27 @@ enum ToolGenerationMode: String, Codable, CaseIterable, Equatable, Sendable {
     case edit
 }
 
-typealias Tool = IronsmithSchemaV7.Tool
+typealias Tool = IronsmithSchemaV8.Tool
 
 extension Tool {
+    var storeGenerationContextSnapshot: StoreGenerationContextSnapshot? {
+        get {
+            guard let storeGenerationContextPayloadJSON,
+                let data = storeGenerationContextPayloadJSON.data(using: .utf8)
+            else { return nil }
+            return try? JSONDecoder().decode(StoreGenerationContextSnapshot.self, from: data)
+        }
+        set {
+            guard let newValue,
+                let data = try? JSONEncoder().encode(newValue)
+            else {
+                storeGenerationContextPayloadJSON = nil
+                return
+            }
+            storeGenerationContextPayloadJSON = String(decoding: data, as: UTF8.self)
+        }
+    }
+
     var appVersionNumber: Int {
         max(1, storeVersionNumber ?? 1)
     }
@@ -112,6 +131,26 @@ extension Tool {
         generationState == .ready
     }
 
+    var storeInspiredByVersionIds: [String] {
+        get { Self.stringList(from: storeInspiredByVersionIdsRawValue) }
+        set {
+            storeInspiredByVersionIdsRawValue =
+                newValue.isEmpty ? nil : newValue.joined(separator: ",")
+        }
+    }
+
+    var storeCapabilityTitles: [String] {
+        get { Self.stringList(from: storeCapabilityTitlesRawValue) }
+        set {
+            storeCapabilityTitlesRawValue =
+                newValue.isEmpty ? nil : newValue.joined(separator: "\n")
+        }
+    }
+
+    private static func stringList(from value: String?) -> [String] {
+        value?.split(whereSeparator: { $0 == "," || $0 == "\n" }).map(String.init) ?? []
+    }
+
     var packageRootURL: URL {
         URL(fileURLWithPath: packageRootPath, isDirectory: true)
     }
@@ -133,7 +172,8 @@ extension Tool {
     }
 
     var appBundleURL: URL {
-        packageRootURL.appendingPathComponent("\(ToolNameSanitizer.appBundleName(from: name)).app", isDirectory: true)
+        packageRootURL.appendingPathComponent(
+            "\(ToolNameSanitizer.appBundleName(from: name)).app", isDirectory: true)
     }
 }
 
@@ -196,11 +236,16 @@ enum ToolBundleIdentifier {
     }
 
     private static func bundleComponent(from value: String) -> String {
-        let asciiValue = value
-            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+        let asciiValue =
+            value
+            .folding(
+                options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
             .lowercased()
         let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
-        let words = asciiValue
+        let words =
+            asciiValue
             .components(separatedBy: allowedCharacters.inverted)
             .filter { !$0.isEmpty }
         let component = words.joined(separator: "-")

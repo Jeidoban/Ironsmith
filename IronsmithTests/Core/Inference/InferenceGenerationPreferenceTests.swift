@@ -780,7 +780,7 @@ extension InferenceTests {
 
         #expect(context.pipelineConfiguration.codingAgent == .codex)
         #expect(context.codingAgentModelFamily == .openAI)
-        #expect(context.codingAgentContextWindowTokens == nil)
+        #expect(context.codingAgentContextWindowTokens == 100_000)
         #expect(codexProvider.configurationIdentifier == "ironsmith_ollama")
         #expect(codexProvider.sessionProviderIdentifier == "ollama")
         #expect(codexProvider.baseURL.absoluteString == "http://localhost:11434/v1/")

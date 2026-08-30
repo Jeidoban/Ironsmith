@@ -900,6 +900,7 @@ final class StoreWindowStore {
         tool.storeSourceSha256 = version.sourceSha256
         tool.storeImportedAt = Date()
         tool.storeRemixedFromVersionId = version.remixedFromVersionId
+        tool.storeInspiredByVersionIds = version.inspiredByVersionIds ?? []
         tool.updatedAt = Date()
     }
 

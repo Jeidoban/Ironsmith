@@ -55,16 +55,15 @@ extension InferenceStore {
                 languageModel: languageModel,
                 reasoningEffort: reasoningEffort
             ),
-            pipelineConfiguration: pipelineConfiguration(for: selectedModel, codingAgent: codingAgent),
+            pipelineConfiguration: pipelineConfiguration(
+                for: selectedModel, codingAgent: codingAgent),
             promptRefinementEnabled: generationPreferences.generatedPromptRefinementEnabled,
             codingAgentModelIdentifier: selectedModel.identifier,
             codingAgentModelFamily: ToolModelFamily.resolved(
                 model: selectedModel,
                 provider: provider
             ),
-            codingAgentContextWindowTokens: provider?.kind == .ironsmith
-                ? selectedModel.contextWindowTokens
-                : nil,
+            codingAgentContextWindowTokens: selectedModel.contextWindowTokens,
             codexAgentAuthentication: try await codexAgentAuthentication(
                 for: selectedModel,
                 provider: provider,
@@ -216,8 +215,8 @@ extension InferenceStore {
                 return .chatGPTLogin
             }
             guard let reference = provider.apiKeyReference,
-                  let apiKey = try dependencies.credentialClient.loadAPIKey(reference),
-                  !apiKey.isEmpty
+                let apiKey = try dependencies.credentialClient.loadAPIKey(reference),
+                !apiKey.isEmpty
             else {
                 throw LanguageModelClientError.missingAPIKey
             }
@@ -237,7 +236,8 @@ extension InferenceStore {
             return .customResponsesProvider(
                 try codexCustomResponsesProvider(
                     provider,
-                    configurationIdentifier: "ironsmith_custom_\(provider.id.uuidString.replacingOccurrences(of: "-", with: "").lowercased())",
+                    configurationIdentifier:
+                        "ironsmith_custom_\(provider.id.uuidString.replacingOccurrences(of: "-", with: "").lowercased())",
                     baseURL: codexProviderBaseURL(provider)
                 )
             )
@@ -251,11 +251,12 @@ extension InferenceStore {
         configurationIdentifier: String,
         baseURL: URL
     ) throws -> CodexAgentCustomResponsesProvider {
-        let apiKey: String? = if let reference = provider.apiKeyReference {
-            try dependencies.credentialClient.loadAPIKey(reference)
-        } else {
-            nil
-        }
+        let apiKey: String? =
+            if let reference = provider.apiKeyReference {
+                try dependencies.credentialClient.loadAPIKey(reference)
+            } else {
+                nil
+            }
         let trimmedAPIKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasAPIKey = trimmedAPIKey?.isEmpty == false
         return CodexAgentCustomResponsesProvider(
@@ -280,7 +281,8 @@ extension InferenceStore {
 
     private func codexProviderBaseURL(_ provider: ProviderConfig) throws -> URL {
         let descriptor = ProviderCatalog.descriptor(for: provider.kind)
-        let baseURLString = provider.baseURLString.isEmpty
+        let baseURLString =
+            provider.baseURLString.isEmpty
             ? descriptor?.defaultBaseURLString ?? ""
             : provider.baseURLString
         guard let baseURL = try? ProviderBaseURLValidator.validatedURL(from: baseURLString) else {

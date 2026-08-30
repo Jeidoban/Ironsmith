@@ -63,7 +63,9 @@ nonisolated struct ToolLanguageModelInvoker: @unchecked Sendable {
         streaming: Bool? = nil,
         onSnapshot: (@MainActor (Content.PartiallyGenerated) throws -> Void)? = nil
     ) async throws -> Content
-    where Content: Generable, Content.PartiallyGenerated: Sendable, PromptContent: PromptRepresentable {
+    where
+        Content: Generable, Content.PartiallyGenerated: Sendable, PromptContent: PromptRepresentable
+    {
         let configuration = configuration(for: stage)
         do {
             let content: Content
@@ -119,7 +121,9 @@ nonisolated struct ToolLanguageModelInvoker: @unchecked Sendable {
         options: GenerationOptions,
         onSnapshot: (@MainActor (Content.PartiallyGenerated) throws -> Void)?
     ) async throws -> Content
-    where Content: Generable, Content.PartiallyGenerated: Sendable, PromptContent: PromptRepresentable {
+    where
+        Content: Generable, Content.PartiallyGenerated: Sendable, PromptContent: PromptRepresentable
+    {
         var latestRawContent: GeneratedContent?
         let stream = session.streamResponse(
             to: Prompt(prompt),
@@ -156,6 +160,7 @@ struct ToolGenerationRuntimeDependencies {
     let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
     let customCodingAgentClient: CustomCodingAgentClient
+    let storeClient: IronsmithStoreClient
 
     init(
         toolsDirectoryURL: URL,
@@ -170,7 +175,8 @@ struct ToolGenerationRuntimeDependencies {
         packageMaterializer: ToolPackageMaterializer? = nil,
         attachmentStorage: ToolPromptAttachmentStorage = .live,
         codexAgentClient: CodexAgentClient = .unconfigured,
-        customCodingAgentClient: CustomCodingAgentClient = .unconfigured
+        customCodingAgentClient: CustomCodingAgentClient = .unconfigured,
+        storeClient: IronsmithStoreClient = .unconfigured
     ) {
         self.toolsDirectoryURL = toolsDirectoryURL
         self.fileClient = fileClient
@@ -181,10 +187,12 @@ struct ToolGenerationRuntimeDependencies {
         self.planningClient = planningClient
         self.promptRefinementClient = promptRefinementClient
         self.versionBackupClient = versionBackupClient
-        self.packageMaterializer = packageMaterializer ?? ToolPackageMaterializer(fileClient: fileClient)
+        self.packageMaterializer =
+            packageMaterializer ?? ToolPackageMaterializer(fileClient: fileClient)
         self.attachmentStorage = attachmentStorage
         self.codexAgentClient = codexAgentClient
         self.customCodingAgentClient = customCodingAgentClient
+        self.storeClient = storeClient
     }
 
     @MainActor
@@ -201,7 +209,8 @@ struct ToolGenerationRuntimeDependencies {
         packageMaterializer: ToolPackageMaterializer? = nil,
         attachmentStorage: ToolPromptAttachmentStorage = .live,
         codexAgentClient: CodexAgentClient = .live(),
-        customCodingAgentClient: CustomCodingAgentClient = .live
+        customCodingAgentClient: CustomCodingAgentClient = .live,
+        storeClient: IronsmithStoreClient? = nil
     ) -> Self {
         Self(
             toolsDirectoryURL: toolsDirectoryURL,
@@ -216,7 +225,8 @@ struct ToolGenerationRuntimeDependencies {
             packageMaterializer: packageMaterializer,
             attachmentStorage: attachmentStorage,
             codexAgentClient: codexAgentClient,
-            customCodingAgentClient: customCodingAgentClient
+            customCodingAgentClient: customCodingAgentClient,
+            storeClient: storeClient ?? .live
         )
     }
 }
@@ -239,6 +249,7 @@ struct ToolGenerationRuntimeContext {
     let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
     let customCodingAgentClient: CustomCodingAgentClient
+    let storeClient: IronsmithStoreClient
     let codingAgentModelIdentifier: String
     let codingAgentModelFamily: ToolModelFamily
     let codingAgentContextWindowTokens: Int?
@@ -288,6 +299,7 @@ struct ToolGenerationRuntimeContext {
         self.attachmentStorage = dependencies.attachmentStorage
         self.codexAgentClient = dependencies.codexAgentClient
         self.customCodingAgentClient = dependencies.customCodingAgentClient
+        self.storeClient = dependencies.storeClient
         self.codingAgentModelIdentifier = languageModelContext.codingAgentModelIdentifier
         self.codingAgentModelFamily = languageModelContext.codingAgentModelFamily
         self.codingAgentContextWindowTokens = languageModelContext.codingAgentContextWindowTokens
@@ -313,7 +325,8 @@ struct ToolGenerationRuntimeContext {
         to path: String,
         packageRootURL: URL
     ) throws {
-        try fileClient.writeString(content, packageFileURL(for: path, packageRootURL: packageRootURL))
+        try fileClient.writeString(
+            content, packageFileURL(for: path, packageRootURL: packageRootURL))
     }
 
     func readIfPresent(_ path: String, packageRootURL: URL) throws -> String {
@@ -368,12 +381,14 @@ struct ToolGenerationRuntimeContext {
             }
 
             let contentStart = openingIndex + 1
-            let closingIndex = lines[(contentStart)...].firstIndex { line in
-                line.trimmingCharacters(in: .whitespacesAndNewlines) == "```"
-            } ?? lines.endIndex
+            let closingIndex =
+                lines[(contentStart)...].firstIndex { line in
+                    line.trimmingCharacters(in: .whitespacesAndNewlines) == "```"
+                } ?? lines.endIndex
             let candidateLines = lines[contentStart..<closingIndex]
             if candidateLines.contains(where: { isLikelySwiftSourceLine($0) }) {
-                return candidateLines
+                return
+                    candidateLines
                     .joined(separator: "\n")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }
@@ -390,7 +405,7 @@ struct ToolGenerationRuntimeContext {
             #"<think>[\s\S]*?</think>"#,
             #"<thinking>[\s\S]*?</thinking>"#,
             #"<reasoning>[\s\S]*?</reasoning>"#,
-            #"<\|channel\>(thought|analysis)[\s\S]*?<channel\|>"#
+            #"<\|channel\>(thought|analysis)[\s\S]*?<channel\|>"#,
         ]
 
         for pattern in patterns {
@@ -473,6 +488,6 @@ enum ToolGenerationError: LocalizedError, Equatable {
         "exceeds context",
         "exceeded context",
         "too many tokens",
-        "token limit"
+        "token limit",
     ]
 }

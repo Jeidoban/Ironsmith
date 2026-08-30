@@ -75,6 +75,7 @@ enum IronsmithStoreRoute: Equatable {
     case root
     case published
     case publishedApp(String)
+    case app(storeId: String, appId: String)
 
     init?(url: URL) {
         guard url.scheme == IronsmithOAuthRedirect.appCallbackScheme else {
@@ -93,7 +94,11 @@ enum IronsmithStoreRoute: Equatable {
         case ["published"]:
             self = .published
         default:
-            return nil
+            if path.count == 3, path[0] == "app" {
+                self = .app(storeId: path[1], appId: path[2])
+            } else {
+                return nil
+            }
         }
     }
 }

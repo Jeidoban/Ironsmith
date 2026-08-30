@@ -325,6 +325,11 @@ struct StoreWindowView: View {
                     path = [.app(StoreAppRoute(app: app))]
                 }
             }
+        case .app(let storeID, let appID):
+            sidebarSelection = .discover
+            path = []
+            store.select(storeID: storeID, appID: appID, forceReload: true)
+            path = [.app(StoreAppRoute(storeID: storeID, appID: appID))]
         }
     }
 }
@@ -341,6 +346,11 @@ private struct StoreAppRoute: Hashable {
     init(app: StoreAppSummary) {
         appID = app.id
         storeID = app.storeId
+    }
+
+    init(storeID: String, appID: String) {
+        self.appID = appID
+        self.storeID = storeID
     }
 
     init(appID: String, storeID: String) {

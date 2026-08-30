@@ -26,12 +26,28 @@ struct ToolRowView: View {
                             .lineLimit(1)
 
                         if let generationStatusText {
-                            Text(generationStatusText)
-                                .font(.caption)
-                                .foregroundStyle(statusStyle)
-                                .lineLimit(1)
+                            if tool.generationState == .generating,
+                                let baseAppName = tool.storeGenerationBaseAppName
+                            {
+                                Button("Remixing \(baseAppName) · \(generationStatusText)") {
+                                    actions.onOpenStoreSource()
+                                }
+                                .buttonStyle(.plain)
+                                .help("View \(baseAppName) in the Store")
+                            } else if tool.generationState == .generating,
+                                !tool.storeInspiredByVersionIds.isEmpty
+                            {
+                                Text(
+                                    "Using ideas from \(tool.storeInspiredByVersionIds.count) apps · \(generationStatusText)"
+                                )
+                            } else {
+                                Text(generationStatusText)
+                            }
                         }
                     }
+                    .font(.caption)
+                    .foregroundStyle(statusStyle)
+                    .lineLimit(1)
 
                     Spacer()
                 }
@@ -206,6 +222,8 @@ struct ToolRowView: View {
             onEditDetails: {},
             onRebuild: {},
             onPublishToStore: {},
+            onOpenStoreSource: {},
+            onOpenStoreInspiration: { _ in },
             onRevert: {},
             onExport: {},
             onShowInFinder: {},
@@ -244,6 +262,8 @@ enum ToolRowGenerationStatusResolver {
             return "Waiting for icon"
         case .refiningPrompt:
             return "Enhancing prompt"
+        case .searchingStore:
+            return "Finding a starting point"
         case .generatingSource:
             return "Generating source"
         case .generatingEditDiff:
@@ -264,6 +284,7 @@ enum ToolRowGenerationStatusResolver {
         case .generatingSource, .generatingEditDiff, .generatingRepairDiff, .repairing:
             return true
         case .initializing, .planning, .generatingIcon, .waitingForIcon, .refiningPrompt,
+            .searchingStore,
             .packaging,
             .completed, nil:
             return false

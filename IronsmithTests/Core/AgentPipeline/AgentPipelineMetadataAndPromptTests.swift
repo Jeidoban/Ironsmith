@@ -495,6 +495,145 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func storeAssistedCreateMaterializesBaseAndUsesItAsAnEditContext() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let refinedPrompt = "Build a focused timer with selectable presets."
+        let promptCapture = PromptCapture()
+        let storeCapture = StoreGenerationCapture()
+        let plan = StoreGenerationContextPlan(
+            id: "plan-1",
+            mode: .baseWithCapabilities,
+            matchScore: 0.82,
+            explanation: "The base matches the timer workflow.",
+            confidenceBand: "high",
+            resolvedAppKind: .window,
+            retrievedContextBudgetTokens: 6_000,
+            coveredRequirements: [
+                StoreGenerationRequirement(
+                    id: "timer",
+                    description: "Run a focused timer",
+                    priority: "core"
+                )
+            ],
+            missingRequirements: [
+                StoreGenerationRequirement(
+                    id: "presets",
+                    description: "Offer selectable presets",
+                    priority: "optional"
+                )
+            ],
+            adaptationInstructions: StoreGenerationAdaptationInstructions(
+                preserve: ["Run a focused timer"],
+                implement: ["Offer selectable presets"],
+                removeUnrelatedBehavior: true
+            ),
+            base: StoreGenerationBaseContext(
+                versionId: "version-base",
+                storeId: "store-1",
+                appId: "app-1",
+                appName: "Simple Timer",
+                versionNumber: 3,
+                runtimeVersion: IronsmithStoreConstants.runtimeVersion,
+                appKind: .window,
+                summary: "A small timer app.",
+                coreWorkflow: "Start and stop a timer.",
+                useCases: ["Focus"],
+                frameworks: ["SwiftUI"],
+                sandboxPermissions: "",
+                resourcePermissions: "",
+                sourceTokenEstimate: 100,
+                score: 1,
+                sourceCode: Self.originalEditableSource,
+                sourceSha256: "sha256",
+                generationSettings: StoreGenerationSettingsDTO(settings: .default),
+                license: .mit,
+                legalAttributions: []
+            ),
+            capabilities: [
+                StoreGenerationCapabilityContext(
+                    id: "capability-1",
+                    versionId: "version-capability",
+                    storeId: "store-1",
+                    appId: "app-2",
+                    appName: "Preset Timer",
+                    title: "Selectable presets",
+                    summary: "Lets the user choose a duration before starting.",
+                    blueprint: "Represent presets as values and bind the selected value in view state.",
+                    frameworks: ["SwiftUI"],
+                    requirements: ["Keep preset selection visible"],
+                    constraints: ["Do not add permissions"],
+                    validationSteps: ["Select a preset and start the timer"]
+                )
+            ],
+            inspiredByVersionIds: ["version-capability"],
+            planner: StoreGenerationPlannerMetadata(
+                provider: "openrouter",
+                model: "openai/gpt-5.6-luna",
+                promptVersion: 1
+            ),
+            embedding: StoreGenerationEmbeddingMetadata(
+                model: "text-embedding-3-small",
+                dimensions: 1_024
+            )
+        )
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.prepareGenerationContext = { request in
+            await storeCapture.record(request: request)
+            return plan
+        }
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await promptCapture.record(prompt)
+                return Self.renameOldToNewUnifiedDiff
+            },
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Auto Remix Timer", iconPrompt: "")
+            },
+            promptRefinementClient: ToolPromptRefinementClient { _ in refinedPrompt },
+            storeClient: storeClient
+        )
+        let lifecycle = ToolGenerationLifecycle(
+            updateStoreGenerationContext: { context in
+                await storeCapture.record(snapshot: context)
+            },
+            updatePhase: { _, phase, _ in
+                await storeCapture.record(phase: phase)
+            }
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Make a timer with presets",
+            settings: .default,
+            lifecycle: lifecycle,
+            storeAssistedGenerationEnabled: true
+        )
+
+        let source = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        let prompts = await promptCapture.prompts
+        #expect(source.contains(#"Text("new")"#))
+        #expect(!(source.contains(#"Text("old")"#)))
+        #expect(await storeCapture.request?.originalPrompt == "Make a timer with presets")
+        #expect(await storeCapture.request?.refinedPrompt == refinedPrompt)
+        #expect(await storeCapture.request?.retrievedContextBudgetTokens == 6_000)
+        #expect(await storeCapture.plan == plan)
+        #expect(await storeCapture.snapshot?.originalPrompt == "Make a timer with presets")
+        #expect(await storeCapture.snapshot?.refinedPrompt == refinedPrompt)
+        #expect(await storeCapture.phases.contains(.searchingStore))
+        #expect(prompts.first?.contains("[STORE-ASSISTED GENERATION CONTEXT]") == true)
+        #expect(prompts.first?.contains("Selectable presets") == true)
+        #expect(prompts.first?.contains("Edit ContentView.swift by returning a unified diff only.") == true)
+    }
+
+    @MainActor
+    @Test
     func editModeKeepsOriginalPromptAndSkipsMetadataRefinement() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }

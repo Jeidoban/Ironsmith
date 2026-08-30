@@ -113,7 +113,8 @@ extension ToolLibraryTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let detail = Self.publisherAppDetail()
-        let expectedReason = isVersion
+        let expectedReason =
+            isVersion
             ? "The new version deletes a selected folder without confirmation."
             : "The app embeds a service credential in its source."
         var storeClient = IronsmithStoreClient.unconfigured
@@ -835,7 +836,8 @@ extension ToolLibraryTests {
         #expect(await buildCapture.versionNumbers == [2])
         #expect(await versionCapture.lastRemixedFromVersionId == parentVersionId)
         #expect(await versionCapture.lastLicense == .mit)
-        #expect(tool.storeRemixedFromVersionId == publishedDetail.currentVersion.remixedFromVersionId)
+        #expect(
+            tool.storeRemixedFromVersionId == publishedDetail.currentVersion.remixedFromVersionId)
         #expect(publisher.errorMessage == nil)
         #expect(!publisher.isShowingPublishSheet)
     }

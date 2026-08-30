@@ -25,6 +25,7 @@ extension AgentPipelineTests {
         versionBackupClient: ToolVersionBackupClient = .live,
         codexAgentClient: CodexAgentClient = .unconfigured,
         customCodingAgentClient: CustomCodingAgentClient = .unconfigured,
+        storeClient: IronsmithStoreClient = .unconfigured,
         codingAgentModelIdentifier: String = "",
         codexAgentAuthentication: CodexAgentAuthentication? = nil,
         customCodingAgent: CustomCodingAgent? = nil,
@@ -50,7 +51,8 @@ extension AgentPipelineTests {
             promptRefinementClient: promptRefinementClient,
             versionBackupClient: versionBackupClient,
             codexAgentClient: codexAgentClient,
-            customCodingAgentClient: customCodingAgentClient
+            customCodingAgentClient: customCodingAgentClient,
+            storeClient: storeClient
         )
         return SingleFileToolGenerationRuntime(
             context: ToolGenerationRuntimeContext(
@@ -456,6 +458,32 @@ actor InvocationCapture {
 
     func record() {
         count += 1
+    }
+}
+
+actor StoreGenerationCapture {
+    private(set) var request: StoreGenerationContextRequest?
+    private(set) var plan: StoreGenerationContextPlan?
+    private(set) var snapshot: StoreGenerationContextSnapshot?
+    private(set) var phases: [ToolGenerationPhase] = []
+
+    func record(request: StoreGenerationContextRequest) {
+        self.request = request
+    }
+
+    func record(plan: StoreGenerationContextPlan) {
+        self.plan = plan
+    }
+
+    func record(snapshot: StoreGenerationContextSnapshot) {
+        self.snapshot = snapshot
+        plan = snapshot.plan
+    }
+
+    func record(phase: ToolGenerationPhase?) {
+        if let phase {
+            phases.append(phase)
+        }
     }
 }
 

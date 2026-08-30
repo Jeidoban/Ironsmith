@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Testing
+
 @testable import Ironsmith
 
 struct PersistenceTests {
@@ -82,7 +83,7 @@ struct PersistenceTests {
             #expect(tool.generationMode == ToolGenerationMode.create)
             #expect(tool.pendingPrompt == "Build a resumable app")
             #expect(tool.category == .music)
-            #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
+            #expect(container.schema.version == IronsmithSchemaV8.versionIdentifier)
             #expect(container.migrationPlan != nil)
         }
     }
@@ -157,7 +158,7 @@ struct PersistenceTests {
             try context.fetch(FetchDescriptor<ModelConfig>()).first { $0.id == modelID }
         )
 
-        #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV8.versionIdentifier)
         #expect(model.contextWindowTokens == nil)
     }
 
@@ -217,7 +218,7 @@ struct PersistenceTests {
         let tool = try #require(try context.fetch(FetchDescriptor<Tool>()).first)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV8.versionIdentifier)
         #expect(tool.id == toolID)
         #expect(tool.appKind == .menuBar)
         #expect(tool.generationState == .stopped)
@@ -286,7 +287,7 @@ struct PersistenceTests {
         let context = ModelContext(container)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV8.versionIdentifier)
         #expect(!(models.contains { $0.id == legacyModelID }))
         #expect(models.contains { $0.id == foundationModelID })
     }
@@ -349,7 +350,8 @@ struct PersistenceTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let legacyDirectoryURL = root.appendingPathComponent("legacy", isDirectory: true)
-        try FileManager.default.createDirectory(at: legacyDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: legacyDirectoryURL, withIntermediateDirectories: true)
         let legacyStoreURL = legacyDirectoryURL.appendingPathComponent("default.store")
 
         do {
@@ -365,7 +367,8 @@ struct PersistenceTests {
         }
 
         let locations = IronsmithPersistentStoreLocations(
-            databaseDirectoryURL: root
+            databaseDirectoryURL:
+                root
                 .appendingPathComponent(".ironsmith", isDirectory: true)
                 .appendingPathComponent("db", isDirectory: true),
             legacyStoreURL: legacyStoreURL
@@ -379,7 +382,8 @@ struct PersistenceTests {
         let backupDirectoryURL = try #require(
             try Self.startupBackupDirectories(in: locations).first
         )
-        let backupStoreURL = backupDirectoryURL.appendingPathComponent(IronsmithPaths.databaseFileName)
+        let backupStoreURL = backupDirectoryURL.appendingPathComponent(
+            IronsmithPaths.databaseFileName)
         #expect(FileManager.default.fileExists(atPath: backupStoreURL.path))
 
         do {
@@ -463,9 +467,10 @@ struct PersistenceTests {
             includingPropertiesForKeys: nil
         ).filter { $0.lastPathComponent.hasPrefix("rejected-legacy-import-") }
         let quarantine = try #require(quarantines.first)
-        #expect(FileManager.default.fileExists(
-            atPath: quarantine.appendingPathComponent(IronsmithPaths.databaseFileName).path
-        ))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: quarantine.appendingPathComponent(IronsmithPaths.databaseFileName).path
+            ))
         #expect(FileManager.default.fileExists(atPath: legacyStoreURL.path))
 
         let container = try IronsmithModelContainerFactory.make(
@@ -489,7 +494,8 @@ struct PersistenceTests {
         try Data("legacy".utf8).write(to: legacyStoreURL)
 
         let locations = IronsmithPersistentStoreLocations(
-            databaseDirectoryURL: root
+            databaseDirectoryURL:
+                root
                 .appendingPathComponent(".ironsmith", isDirectory: true)
                 .appendingPathComponent("db", isDirectory: true),
             legacyStoreURL: legacyStoreURL
@@ -509,7 +515,8 @@ struct PersistenceTests {
         let backupDirectoryURL = try #require(
             try Self.startupBackupDirectories(in: locations).first
         )
-        let backupStoreURL = backupDirectoryURL.appendingPathComponent(IronsmithPaths.databaseFileName)
+        let backupStoreURL = backupDirectoryURL.appendingPathComponent(
+            IronsmithPaths.databaseFileName)
         #expect(try Data(contentsOf: backupStoreURL) == Data("current".utf8))
     }
 
@@ -519,7 +526,8 @@ struct PersistenceTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let locations = IronsmithPersistentStoreLocations(
-            databaseDirectoryURL: root
+            databaseDirectoryURL:
+                root
                 .appendingPathComponent(".ironsmith", isDirectory: true)
                 .appendingPathComponent("db", isDirectory: true),
             legacyStoreURL: root.appendingPathComponent("legacy/default.store")
@@ -541,11 +549,12 @@ struct PersistenceTests {
             .map(\.lastPathComponent)
             .sorted()
 
-        #expect(backupNames == [
-            "20250615-150642-000",
-            "20250615-150643-000",
-            "20250615-150644-000",
-        ])
+        #expect(
+            backupNames == [
+                "20250615-150642-000",
+                "20250615-150643-000",
+                "20250615-150644-000",
+            ])
     }
 
     @Test
@@ -570,7 +579,9 @@ struct PersistenceTests {
         let bundleIdentifier = ToolBundleIdentifier.make(executableName: "Résumé Helper 東京", id: id)
         let allowedCharacters = Set("abcdefghijklmnopqrstuvwxyz0123456789-.")
 
-        #expect(bundleIdentifier == "com.ironsmith.generated.resume-helper.11111111-2222-3333-4444-555555555555")
+        #expect(
+            bundleIdentifier
+                == "com.ironsmith.generated.resume-helper.11111111-2222-3333-4444-555555555555")
         #expect(bundleIdentifier.allSatisfy { allowedCharacters.contains($0) })
     }
 
@@ -603,7 +614,8 @@ struct PersistenceTests {
 
     private static func makeTemporaryDirectory() throws -> URL {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ironsmith-persistence-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(
+                "ironsmith-persistence-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
@@ -613,7 +625,8 @@ struct PersistenceTests {
         legacyStoreURL: URL
     ) -> IronsmithPersistentStoreLocations {
         IronsmithPersistentStoreLocations(
-            databaseDirectoryURL: root
+            databaseDirectoryURL:
+                root
                 .appendingPathComponent(".ironsmith", isDirectory: true)
                 .appendingPathComponent("db", isDirectory: true),
             legacyStoreURL: legacyStoreURL

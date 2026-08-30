@@ -28,6 +28,7 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
             IronsmithSchemaV5.self,
             IronsmithSchemaV6.self,
             IronsmithSchemaV7.self,
+            IronsmithSchemaV8.self,
         ]
     }
 
@@ -67,10 +68,12 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
                     let tools = try context.fetch(FetchDescriptor<IronsmithSchemaV2.Tool>())
                     for tool in tools {
                         let values = scratchpad.toolValues[tool.id]
-                        tool.appKind = values
+                        tool.appKind =
+                            values
                             .flatMap { ToolAppKind(rawValue: $0.appKindRawValue) }
                             ?? .window
-                        tool.generationState = values
+                        tool.generationState =
+                            values
                             .flatMap { ToolGenerationState(rawValue: $0.generationStateRawValue) }
                             ?? .ready
                         tool.generationPhase = values?.generationPhaseRawValue
@@ -84,7 +87,8 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
                         if model.source == .appleFoundation {
                             model.installState = .builtIn
                         } else {
-                            model.installState = scratchpad.modelInstallStateRawValues[model.id]
+                            model.installState =
+                                scratchpad.modelInstallStateRawValues[model.id]
                                 .flatMap(ModelInstallState.init(rawValue:))
                                 ?? .downloadable
                         }
@@ -148,6 +152,10 @@ enum IronsmithSchemaMigrationPlan: SchemaMigrationPlan {
             .lightweight(
                 fromVersion: IronsmithSchemaV6.self,
                 toVersion: IronsmithSchemaV7.self
+            ),
+            .lightweight(
+                fromVersion: IronsmithSchemaV7.self,
+                toVersion: IronsmithSchemaV8.self
             ),
         ]
     }

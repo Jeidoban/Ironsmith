@@ -55,9 +55,10 @@ final class ToolLibraryStorePublisher {
     ) {
         self.storeClient = storeClient
         self.iconClient = iconClient
-        self.originalIconDataLoader = originalIconDataLoader ?? {
-            try await StoreToolImportClient.downloadImage(from: $0)
-        }
+        self.originalIconDataLoader =
+            originalIconDataLoader ?? {
+                try await StoreToolImportClient.downloadImage(from: $0)
+            }
         self.buildClient = buildClient ?? .live()
         self.saveModelContext = saveModelContext ?? { try $0.save() }
     }
@@ -107,19 +108,20 @@ final class ToolLibraryStorePublisher {
             )
         }
         let changesByToolID = await Task.detached(priority: .utility) {
-            Dictionary(uniqueKeysWithValues: inputs.map { input in
-                let hasChanges: Bool
-                if let storeSourceSha256 = input.storeSourceSha256,
-                    let sourceURL = input.sourceURL,
-                    let source = try? String(contentsOf: sourceURL, encoding: .utf8)
-                {
-                    hasChanges =
-                        IronsmithStoreClient.sha256Hex(for: source) != storeSourceSha256
-                } else {
-                    hasChanges = input.storeSourceSha256 == nil
-                }
-                return (input.toolID, hasChanges)
-            })
+            Dictionary(
+                uniqueKeysWithValues: inputs.map { input in
+                    let hasChanges: Bool
+                    if let storeSourceSha256 = input.storeSourceSha256,
+                        let sourceURL = input.sourceURL,
+                        let source = try? String(contentsOf: sourceURL, encoding: .utf8)
+                    {
+                        hasChanges =
+                            IronsmithStoreClient.sha256Hex(for: source) != storeSourceSha256
+                    } else {
+                        hasChanges = input.storeSourceSha256 == nil
+                    }
+                    return (input.toolID, hasChanges)
+                })
         }.value
         guard !Task.isCancelled else { return }
         storeSourceChangesByToolID = changesByToolID
@@ -329,7 +331,8 @@ final class ToolLibraryStorePublisher {
                         iconThumbnailJPEG: iconThumbnailJPEG,
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         replaceScreenshots: publishScreenshotData != nil,
-                        remixedFromVersionId: tool.storeRemixedFromVersionId
+                        remixedFromVersionId: tool.storeRemixedFromVersionId,
+                        inspiredByVersionIds: tool.storeInspiredByVersionIds
                     )
                 )
             } else {
@@ -350,6 +353,8 @@ final class ToolLibraryStorePublisher {
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         remixedFromVersionId: tool.storeVersionId
                             ?? tool.storeRemixedFromVersionId
+                            ?? tool.storeGenerationBaseVersionId,
+                        inspiredByVersionIds: tool.storeInspiredByVersionIds
                     )
                 )
             }
