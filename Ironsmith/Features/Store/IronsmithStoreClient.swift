@@ -334,13 +334,15 @@ nonisolated struct StoreGenerationContextRequest: Encodable, Equatable, Sendable
     let sandboxPermissions: [String]
     let resourcePermissions: [String]
     let runtimeVersion: String
-    let retrievedContextBudgetTokens: Int
+    let codingAgent: String
+    let permissionMode: String
 
     init(
         originalPrompt: String,
         refinedPrompt: String,
         settings: ToolGenerationSettings,
-        retrievedContextBudgetTokens: Int
+        codingAgent: ToolCodingAgent,
+        automaticallySelectPermissions: Bool
     ) {
         self.originalPrompt = originalPrompt
         self.refinedPrompt = refinedPrompt
@@ -348,7 +350,17 @@ nonisolated struct StoreGenerationContextRequest: Encodable, Equatable, Sendable
         sandboxPermissions = settings.sandboxPermissions.enabledPermissions.map(\.rawValue)
         resourcePermissions = settings.resourcePermissions.enabledPermissions.map(\.rawValue)
         runtimeVersion = IronsmithStoreConstants.runtimeVersion
-        self.retrievedContextBudgetTokens = retrievedContextBudgetTokens
+        self.codingAgent = Self.value(for: codingAgent)
+        permissionMode = automaticallySelectPermissions ? "automatic" : "strict"
+    }
+
+    static func value(for codingAgent: ToolCodingAgent) -> String {
+        switch codingAgent {
+        case .ironsmithSpark: "spark"
+        case .ironsmithFlame: "flame"
+        case .codex: "codex"
+        case .custom: "custom"
+        }
     }
 }
 
@@ -420,7 +432,13 @@ nonisolated struct StoreGenerationContextPlan: Codable, Equatable, Sendable {
     let explanation: String
     let confidenceBand: String
     let resolvedAppKind: ToolAppKind
-    let retrievedContextBudgetTokens: Int
+    let codingAgent: String
+    let permissionMode: String
+    let appliedStoreContextBudgetTokens: Int?
+    let estimatedStoreContextTokens: Int
+    let promptContext: String
+    let resolvedSandboxPermissions: [String]
+    let resolvedResourcePermissions: [String]
     let coveredRequirements: [StoreGenerationRequirement]
     let missingRequirements: [StoreGenerationRequirement]
     let adaptationInstructions: StoreGenerationAdaptationInstructions

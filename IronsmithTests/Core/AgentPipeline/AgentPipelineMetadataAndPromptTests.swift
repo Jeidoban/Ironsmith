@@ -495,6 +495,63 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func storeGenerationRequestUsesCodingAgentAndPermissionPolicy() {
+        let request = StoreGenerationContextRequest(
+            originalPrompt: "Build a timer",
+            refinedPrompt: "Build a focused timer",
+            settings: .default,
+            codingAgent: .ironsmithFlame,
+            automaticallySelectPermissions: false
+        )
+
+        #expect(request.codingAgent == "flame")
+        #expect(request.permissionMode == "strict")
+    }
+
+    @MainActor
+    @Test
+    func storeContextPlanMustMatchTheResumeCodingAgent() {
+        let plan = StoreGenerationContextPlan(
+            id: "plan-1",
+            mode: .scratch,
+            matchScore: 0,
+            explanation: "No Store context selected.",
+            confidenceBand: "low",
+            resolvedAppKind: .window,
+            codingAgent: "flame",
+            permissionMode: "strict",
+            appliedStoreContextBudgetTokens: 32_000,
+            estimatedStoreContextTokens: 0,
+            promptContext: "",
+            resolvedSandboxPermissions: [],
+            resolvedResourcePermissions: [],
+            coveredRequirements: [],
+            missingRequirements: [],
+            adaptationInstructions: StoreGenerationAdaptationInstructions(
+                preserve: [],
+                implement: [],
+                removeUnrelatedBehavior: true
+            ),
+            base: nil,
+            capabilities: [],
+            inspiredByVersionIds: [],
+            planner: StoreGenerationPlannerMetadata(
+                provider: "openrouter",
+                model: "openai/gpt-5.6-luna",
+                promptVersion: 1
+            ),
+            embedding: StoreGenerationEmbeddingMetadata(
+                model: "text-embedding-3-small",
+                dimensions: 1_024
+            )
+        )
+
+        #expect(SingleFileToolGenerationRuntime.canReuseStoreContextPlan(plan, with: "flame"))
+        #expect(!SingleFileToolGenerationRuntime.canReuseStoreContextPlan(plan, with: "spark"))
+    }
+
+    @MainActor
+    @Test
     func storeAssistedCreateMaterializesBaseAndUsesItAsAnEditContext() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
@@ -509,7 +566,17 @@ extension AgentPipelineTests {
             explanation: "The base matches the timer workflow.",
             confidenceBand: "high",
             resolvedAppKind: .window,
-            retrievedContextBudgetTokens: 6_000,
+            codingAgent: "spark",
+            permissionMode: "automatic",
+            appliedStoreContextBudgetTokens: 16_000,
+            estimatedStoreContextTokens: 800,
+            promptContext: """
+                [STORE-ASSISTED GENERATION CONTEXT]
+                Selection mode: base_with_capabilities
+                Reusable capability from “Preset Timer”: Selectable presets
+                """,
+            resolvedSandboxPermissions: ["internet", "userSelectedFiles"],
+            resolvedResourcePermissions: ["camera"],
             coveredRequirements: [
                 StoreGenerationRequirement(
                     id: "timer",
@@ -612,6 +679,12 @@ extension AgentPipelineTests {
         let result = try await runtime.generateTool(
             for: "Make a timer with presets",
             settings: .default,
+            planningPolicy: ToolGenerationPlanningPolicy(
+                appKindPreference: .automatic,
+                automaticallySelectPermissions: true,
+                alwaysIncludedSandboxPermissions: .none,
+                alwaysIncludedResourcePermissions: .none
+            ),
             lifecycle: lifecycle,
             storeAssistedGenerationEnabled: true
         )
@@ -622,7 +695,10 @@ extension AgentPipelineTests {
         #expect(!(source.contains(#"Text("old")"#)))
         #expect(await storeCapture.request?.originalPrompt == "Make a timer with presets")
         #expect(await storeCapture.request?.refinedPrompt == refinedPrompt)
-        #expect(await storeCapture.request?.retrievedContextBudgetTokens == 6_000)
+        #expect(await storeCapture.request?.codingAgent == "spark")
+        #expect(await storeCapture.request?.permissionMode == "automatic")
+        #expect(result.settings.sandboxPermissions.contains(.outgoingConnections))
+        #expect(result.settings.resourcePermissions.contains(.camera))
         #expect(await storeCapture.plan == plan)
         #expect(await storeCapture.snapshot?.originalPrompt == "Make a timer with presets")
         #expect(await storeCapture.snapshot?.refinedPrompt == refinedPrompt)

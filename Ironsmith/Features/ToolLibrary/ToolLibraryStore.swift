@@ -940,7 +940,8 @@ final class ToolLibraryStore {
                     ),
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
-                    lifecycle: lifecycle
+                    lifecycle: lifecycle,
+                    storeAssistedGenerationEnabled: tool.storeGenerationContextSnapshot != nil
                 )
             )
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
@@ -1074,6 +1075,24 @@ final class ToolLibraryStore {
                     tool.storeGenerationBaseAppName = plan.base?.appName
                     tool.storeInspiredByVersionIds = plan.inspiredByVersionIds
                     tool.storeCapabilityTitles = plan.capabilities.map(\.title)
+                    let currentSettings = tool.generationSettings(defaults: .default)
+                    tool.applyGenerationSettings(
+                        ToolGenerationSettings(
+                            appKind: currentSettings.appKind,
+                            menuBarSystemImage: currentSettings.menuBarSystemImage,
+                            sandboxEnabled: currentSettings.sandboxEnabled,
+                            sandboxPermissions: GeneratedAppSandboxPermissions(
+                                rawValueList: plan.resolvedSandboxPermissions.joined(
+                                    separator: ","
+                                )
+                            ),
+                            resourcePermissions: GeneratedAppResourcePermissions(
+                                rawValueList: plan.resolvedResourcePermissions.joined(
+                                    separator: ","
+                                )
+                            )
+                        )
+                    )
                     tool.updatedAt = .now
                     try modelContext.save()
                 }
