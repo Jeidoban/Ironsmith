@@ -100,9 +100,11 @@ nonisolated enum GeneratedAppResourcePermission: String, CaseIterable, Identifia
         case .calendar:
             return "Generated apps will be able to read, create, edit and delete calendar events."
         case .photoLibrary:
-            return "Generated apps will be able to read, create, edit and delete photos, videos and photo metadata."
+            return
+                "Generated apps will be able to read, create, edit and delete photos, videos and photo metadata."
         case .appleEvents:
-            return "Generated apps may control approved apps and read, change, or delete data those apps expose to automation."
+            return
+                "Generated apps may control approved apps and read, change, or delete data those apps expose to automation."
         case .microphone, .camera, .location:
             return nil
         }
@@ -129,12 +131,14 @@ nonisolated struct GeneratedAppResourcePermissions: Equatable, Sendable {
     }
 
     static func inferred(fromAppBundleAt appBundleURL: URL) -> GeneratedAppResourcePermissions {
-        let plistURL = appBundleURL
+        let plistURL =
+            appBundleURL
             .appendingPathComponent("Contents", isDirectory: true)
             .appendingPathComponent("Info.plist")
         guard let data = try? Data(contentsOf: plistURL),
-              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
-              let dictionary = plist as? [String: Any]
+            let plist = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil),
+            let dictionary = plist as? [String: Any]
         else {
             return .none
         }
@@ -224,8 +228,9 @@ nonisolated struct GeneratedAppSandboxPermissions: Equatable, Sendable {
 
         let entitlementsURL = ToolPackageLayout.sandboxEntitlementsURL(for: packageRootURL)
         guard let data = try? Data(contentsOf: entitlementsURL),
-              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
-              let dictionary = plist as? [String: Any]
+            let plist = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil),
+            let dictionary = plist as? [String: Any]
         else {
             return .default
         }

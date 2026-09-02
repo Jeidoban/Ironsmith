@@ -941,7 +941,7 @@ final class ToolLibraryStore {
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
                     lifecycle: lifecycle,
-                    storeAssistedGenerationEnabled: tool.storeGenerationContextSnapshot != nil
+                    storeAssistedGenerationEnabled: hasPendingStoreRemixContext(for: tool)
                 )
             )
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
@@ -1064,17 +1064,39 @@ final class ToolLibraryStore {
                 try await MainActor.run {
                     guard let tool = activeTool.value else { return }
                     let plan = snapshot.plan
-                    tool.storeGenerationContextSnapshot = snapshot
-                    tool.storeGenerationContextPlanId = plan.id
-                    tool.storeGenerationContextMode = plan.mode.rawValue
-                    tool.storeGenerationMatchScore = plan.matchScore
-                    tool.storeGenerationBaseStoreId = plan.base?.storeId
-                    tool.storeGenerationBaseAppId = plan.base?.appId
-                    tool.storeGenerationBaseVersionId = plan.base?.versionId
-                    tool.storeGenerationBaseVersionNumber = plan.base?.versionNumber
-                    tool.storeGenerationBaseAppName = plan.base?.appName
-                    tool.storeInspiredByVersionIds = plan.inspiredByVersionIds
-                    tool.storeCapabilityTitles = plan.capabilities.map(\.title)
+                    let remixSource = plan.base.map {
+                        StoreVersionReference(
+                            versionId: $0.versionId,
+                            storeId: $0.storeId,
+                            appId: $0.appId,
+                            appName: $0.appName,
+                            versionNumber: $0.versionNumber,
+                            sourceSha256: $0.sourceSha256
+                        )
+                    }
+                    let inspiredVersionIDs = Set(plan.inspiredByVersionIds)
+                    var inspirations: [StoreVersionReference] = plan.capabilities.compactMap {
+                        capability in
+                        guard inspiredVersionIDs.contains(capability.versionId) else {
+                            return nil
+                        }
+                        return StoreVersionReference(
+                            versionId: capability.versionId,
+                            storeId: capability.storeId,
+                            appId: capability.appId,
+                            appName: capability.appName
+                        )
+                    }
+                    let resolvedVersionIDs = Set(inspirations.map(\.versionId))
+                    inspirations.append(
+                        contentsOf: plan.inspiredByVersionIds
+                            .filter { !resolvedVersionIDs.contains($0) }
+                            .map { StoreVersionReference(versionId: $0) }
+                    )
+                    tool.replaceStoreProvenance(
+                        remixSource: remixSource,
+                        inspirations: inspirations
+                    )
                     let currentSettings = tool.generationSettings(defaults: .default)
                     tool.applyGenerationSettings(
                         ToolGenerationSettings(
@@ -1093,6 +1115,17 @@ final class ToolLibraryStore {
                             )
                         )
                     )
+                    tool.updatedAt = .now
+                    try modelContext.save()
+                }
+            },
+            clearStoreGenerationContextForScratchFallback: {
+                refinedPrompt,
+                _ in
+                try await MainActor.run {
+                    guard let tool = activeTool.value else { return }
+                    tool.storeProvenance = nil
+                    tool.pendingPrompt = refinedPrompt
                     tool.updatedAt = .now
                     try modelContext.save()
                 }
@@ -1201,10 +1234,11 @@ final class ToolLibraryStore {
     }
 
     func isFirstEditOfDownloadedApp(_ tool: Tool) -> Bool {
-        guard tool.storeAppId != nil,
-            tool.storeVersionId != nil,
+        guard tool.storePublication == nil,
+            let remixSource = tool.storeRemixSource,
+            remixSource.appId != nil,
             tool.isGenerationReady,
-            let storeSourceSha256 = tool.storeSourceSha256?.lowercased(),
+            let storeSourceSha256 = remixSource.sourceSha256?.lowercased(),
             let source = try? String(
                 contentsOf: Self.contentViewURL(for: tool),
                 encoding: .utf8
@@ -1230,6 +1264,13 @@ final class ToolLibraryStore {
     }
 
     private func clearPendingGeneration(on tool: Tool) {
+        do {
+            try dependencies.storeRemixStateClient.complete(tool.packageRootURL)
+        } catch {
+            AgentDiagnosticsLog.append(
+                "Store remix state cleanup failed: \(error.localizedDescription)"
+            )
+        }
         tool.generationState = .ready
         tool.generationPhase = .completed
         tool.generationMode = nil
@@ -1248,6 +1289,10 @@ final class ToolLibraryStore {
                 "Current-run attachment cleanup failed: \(error.localizedDescription)"
             )
         }
+    }
+
+    private func hasPendingStoreRemixContext(for tool: Tool) -> Bool {
+        (try? dependencies.storeRemixStateClient.pendingContext(tool.packageRootURL)) != nil
     }
 
     private func requirePreparedTool(_ tool: Tool?) throws -> Tool {
@@ -1367,6 +1412,7 @@ struct ToolLibraryDependencies {
     var exportClient: ToolExportClient = .live()
     var finderClient: ToolFinderClient = .live
     var versionBackupClient: ToolVersionBackupClient = .live
+    var storeRemixStateClient: ToolStoreRemixStateClient = .live
     var buildClient: ToolBuildClient = .live()
     var packageMaterializer: ToolPackageMaterializer = .live
     var attachmentStorage: ToolPromptAttachmentStorage = .live
@@ -1378,6 +1424,7 @@ struct ToolLibraryDependencies {
         exportClient: .live(),
         finderClient: .live,
         versionBackupClient: .live,
+        storeRemixStateClient: .live,
         buildClient: .live(),
         packageMaterializer: .live,
         attachmentStorage: .live,

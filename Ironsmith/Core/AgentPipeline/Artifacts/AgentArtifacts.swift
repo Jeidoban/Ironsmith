@@ -395,6 +395,7 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let previousBuildSettingsVersionFilename = "previous-build-settings.json"
     nonisolated static let pendingGenerationSettingsFilename =
         "pending-generation-settings.json"
+    nonisolated static let storeRemixStateFilename = "pending-store-generation-context.json"
 
     let packageRootURL: URL
     let executableName: String
@@ -447,6 +448,10 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var pendingGenerationSettingsURL: URL {
         Self.pendingGenerationSettingsURL(for: packageRootURL)
+    }
+
+    nonisolated var storeRemixStateURL: URL {
+        Self.storeRemixStateURL(for: packageRootURL)
     }
 
     nonisolated var sourceDirectoryURL: URL {
@@ -583,6 +588,11 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static func pendingGenerationSettingsURL(for packageRootURL: URL) -> URL {
         packageMetadataDirectoryURL(for: packageRootURL)
             .appendingPathComponent(pendingGenerationSettingsFilename)
+    }
+
+    nonisolated static func storeRemixStateURL(for packageRootURL: URL) -> URL {
+        packageMetadataDirectoryURL(for: packageRootURL)
+            .appendingPathComponent(storeRemixStateFilename)
     }
 
     nonisolated static func sandboxEntitlementsURL(for packageRootURL: URL) -> URL {

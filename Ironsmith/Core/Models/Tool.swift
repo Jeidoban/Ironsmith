@@ -45,29 +45,28 @@ enum ToolGenerationMode: String, Codable, CaseIterable, Equatable, Sendable {
     case edit
 }
 
-typealias Tool = IronsmithSchemaV8.Tool
+typealias Tool = IronsmithSchemaV9.Tool
+typealias ToolStoreMetadata = IronsmithSchemaV9.StoreMetadata
+typealias StorePublication = IronsmithSchemaV9.StorePublication
+typealias StoreProvenance = IronsmithSchemaV9.StoreProvenance
+typealias StoreVersionReference = IronsmithSchemaV9.StoreVersionReference
 
 extension Tool {
-    var storeGenerationContextSnapshot: StoreGenerationContextSnapshot? {
+    var storeMetadata: ToolStoreMetadata? {
         get {
-            guard let storeGenerationContextPayloadJSON,
-                let data = storeGenerationContextPayloadJSON.data(using: .utf8)
-            else { return nil }
-            return try? JSONDecoder().decode(StoreGenerationContextSnapshot.self, from: data)
+            guard let storeMetadataData else { return nil }
+            return try? JSONDecoder().decode(
+                ToolStoreMetadata.self,
+                from: storeMetadataData
+            )
         }
         set {
-            guard let newValue,
-                let data = try? JSONEncoder().encode(newValue)
-            else {
-                storeGenerationContextPayloadJSON = nil
-                return
-            }
-            storeGenerationContextPayloadJSON = String(decoding: data, as: UTF8.self)
+            storeMetadataData = newValue.flatMap { try? JSONEncoder().encode($0) }
         }
     }
 
     var appVersionNumber: Int {
-        max(1, storeVersionNumber ?? 1)
+        max(1, storeMetadata?.publication?.versionNumber ?? 1)
     }
 
     var validatedMenuBarSystemImage: String {
@@ -131,24 +130,55 @@ extension Tool {
         generationState == .ready
     }
 
-    var storeInspiredByVersionIds: [String] {
-        get { Self.stringList(from: storeInspiredByVersionIdsRawValue) }
+    var storePublication: StorePublication? {
+        get { storeMetadata?.publication }
         set {
-            storeInspiredByVersionIdsRawValue =
-                newValue.isEmpty ? nil : newValue.joined(separator: ",")
+            var metadata = storeMetadata ?? ToolStoreMetadata()
+            metadata.publication = newValue
+            storeMetadata = metadata.isEmpty ? nil : metadata
         }
     }
 
-    var storeCapabilityTitles: [String] {
-        get { Self.stringList(from: storeCapabilityTitlesRawValue) }
+    var storeProvenance: StoreProvenance? {
+        get { storeMetadata?.provenance }
         set {
-            storeCapabilityTitlesRawValue =
-                newValue.isEmpty ? nil : newValue.joined(separator: "\n")
+            var metadata = storeMetadata ?? ToolStoreMetadata()
+            metadata.provenance = newValue?.normalized
+            storeMetadata = metadata.isEmpty ? nil : metadata
         }
     }
 
-    private static func stringList(from value: String?) -> [String] {
-        value?.split(whereSeparator: { $0 == "," || $0 == "\n" }).map(String.init) ?? []
+    var storeRemixSource: StoreVersionReference? {
+        storeMetadata?.provenance?.remixSource
+    }
+
+    var storeInspirations: [StoreVersionReference] {
+        storeMetadata?.provenance?.inspirations ?? []
+    }
+
+    var storeInspirationLinks: [StoreVersionReference] {
+        var seenAppKeys = Set<String>()
+        return storeInspirations.filter {
+            seenAppKeys.insert($0.appId ?? $0.versionId).inserted
+        }
+    }
+
+    var storeAttributionVersionIds: [String] {
+        storeInspirations.map(\.versionId)
+    }
+
+    var storeBaselineSourceSha256: String? {
+        storePublication?.sourceSha256 ?? storeRemixSource?.sourceSha256
+    }
+
+    func replaceStoreProvenance(
+        remixSource: StoreVersionReference?,
+        inspirations: [StoreVersionReference]
+    ) {
+        storeProvenance = StoreProvenance(
+            remixSource: remixSource,
+            inspirations: inspirations
+        )
     }
 
     var packageRootURL: URL {
@@ -174,6 +204,32 @@ extension Tool {
     var appBundleURL: URL {
         packageRootURL.appendingPathComponent(
             "\(ToolNameSanitizer.appBundleName(from: name)).app", isDirectory: true)
+    }
+}
+
+extension ToolStoreMetadata {
+    var isEmpty: Bool {
+        publication == nil && provenance == nil
+    }
+}
+
+extension StoreProvenance {
+    var normalized: Self? {
+        var seenVersionIDs = Set<String>()
+        if let remixSource {
+            seenVersionIDs.insert(remixSource.versionId)
+        }
+        let uniqueInspirations = inspirations.filter {
+            seenVersionIDs.insert($0.versionId).inserted
+        }
+        guard remixSource != nil || !uniqueInspirations.isEmpty else { return nil }
+        return Self(remixSource: remixSource, inspirations: uniqueInspirations)
+    }
+}
+
+extension StoreVersionReference {
+    var isRoutable: Bool {
+        storeId != nil && appId != nil
     }
 }
 

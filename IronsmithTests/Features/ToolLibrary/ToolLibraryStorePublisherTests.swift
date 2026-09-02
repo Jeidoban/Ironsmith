@@ -1,109 +1,13 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import Auth
 import SwiftData
 import Testing
 
 @testable import Ironsmith
 
 extension ToolLibraryTests {
-    @MainActor
-    @Test
-    func storePublisherConfirmsRemixesOnlyForAppsNotOwnedByCurrentUser() async {
-        let ownedApp = Self.publisherAppDetail()
-        var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, _, _, _, _, _, _ in
-            StoreAppPage(apps: [StoreAppSummary(detail: ownedApp)], hasMore: false)
-        }
-        let publisher = ToolLibraryStorePublisher(
-            storeClient: client,
-            iconClient: .noOp
-        )
-        let ownedTool = Tool(
-            name: "Owned",
-            packageRootPath: "/tmp/owned",
-            storeId: ownedApp.storeId,
-            storeAppId: ownedApp.id,
-            storeVersionId: ownedApp.currentVersion.id
-        )
-        let downloadedTool = Tool(
-            name: "Downloaded",
-            packageRootPath: "/tmp/downloaded",
-            storeId: ownedApp.storeId,
-            storeAppId: "00000000-0000-4000-8000-000000000999",
-            storeVersionId: "00000000-0000-4000-8000-000000000998"
-        )
-
-        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(ownedTool))
-        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(downloadedTool))
-
-        await publisher.refreshPublishedStoreApps(
-            isSignedIn: true,
-            tools: [ownedTool, downloadedTool]
-        )
-
-        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(ownedTool))
-        #expect(publisher.isConfirmedDownloadedFromAnotherUser(downloadedTool))
-
-        await publisher.refreshPublishedStoreApps(
-            isSignedIn: false,
-            tools: [ownedTool, downloadedTool]
-        )
-        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(downloadedTool))
-    }
-
-    @MainActor
-    @Test
-    func storePublisherIgnoresStaleOwnershipRefreshesAcrossAccountChanges() async {
-        let ownedApp = Self.publisherAppDetail()
-        let refreshPages = PublisherOwnershipRefreshPages()
-        var client = IronsmithStoreClient.unconfigured
-        client.listApps = { _, _, _, _, _, _, _ in
-            await refreshPages.nextPage()
-        }
-        let publisher = ToolLibraryStorePublisher(
-            storeClient: client,
-            iconClient: .noOp
-        )
-        let tool = Tool(
-            name: "Downloaded",
-            packageRootPath: "/tmp/downloaded",
-            storeId: ownedApp.storeId,
-            storeAppId: ownedApp.id,
-            storeVersionId: ownedApp.currentVersion.id
-        )
-
-        await publisher.refreshPublishedStoreApps(isSignedIn: true, tools: [tool])
-        #expect(publisher.isConfirmedDownloadedFromAnotherUser(tool))
-
-        let staleRefresh = Task {
-            await publisher.refreshPublishedStoreApps(isSignedIn: true, tools: [tool])
-        }
-        await refreshPages.waitForRequestCount(2)
-        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(tool))
-
-        let currentRefresh = Task {
-            await publisher.refreshPublishedStoreApps(isSignedIn: true, tools: [tool])
-        }
-        await refreshPages.waitForRequestCount(3)
-        await refreshPages.resolve(
-            request: 2,
-            with: StoreAppPage(
-                apps: [StoreAppSummary(detail: ownedApp)],
-                hasMore: false
-            )
-        )
-        await currentRefresh.value
-        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(tool))
-
-        await refreshPages.resolve(
-            request: 1,
-            with: StoreAppPage(apps: [], hasMore: false)
-        )
-        await staleRefresh.value
-        #expect(!publisher.isConfirmedDownloadedFromAnotherUser(tool))
-    }
-
     @MainActor
     @Test(arguments: [false, true])
     func storePublisherShowsReviewReasonsForInitialAndVersionPublishing(
@@ -140,14 +44,10 @@ extension ToolLibraryTests {
             name: "Clipboard Cleaner",
             executableName: "ClipboardCleaner",
             packageRootPath: root.appendingPathComponent("ClipboardCleaner").path,
-            storeId: isVersion ? detail.storeId : nil,
-            storeAppId: isVersion ? detail.id : nil,
-            storeVersionId: isVersion ? detail.currentVersion.id : nil,
-            storeVersionNumber: isVersion ? detail.currentVersion.versionNumber : nil
+            storeMetadata: isVersion
+                ? Self.publicationMetadata(for: detail)
+                : nil
         )
-        if isVersion {
-            publisher.publishedStoreAppsByID[detail.id] = StoreAppSummary(detail: detail)
-        }
         try Self.writeSource(Self.publisherSource, to: tool)
         try FileManager.default.createDirectory(
             at: tool.packageLayout.packageMetadataDirectoryURL,
@@ -160,10 +60,12 @@ extension ToolLibraryTests {
         let context = container.mainContext
         context.insert(tool)
 
+        let inferenceStore = InferenceStore(dependencies: Self.inferenceDependencies())
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
         await publisher.publish(
             tool,
             modelContext: context,
-            inferenceStore: InferenceStore(dependencies: Self.inferenceDependencies()),
+            inferenceStore: inferenceStore,
             defaultSettings: .default,
             routeStore: IronsmithRouteStore(openSettingsWindow: {})
         )
@@ -189,8 +91,7 @@ extension ToolLibraryTests {
 
         await publisher.beginPublishing(
             tool,
-            inferenceStore: inferenceStore,
-            tools: [tool]
+            inferenceStore: inferenceStore
         )
 
         #expect(publisher.pendingSignInToolID == tool.id)
@@ -218,8 +119,7 @@ extension ToolLibraryTests {
 
         await publisher.beginPublishing(
             tool,
-            inferenceStore: inferenceStore,
-            tools: [tool]
+            inferenceStore: inferenceStore
         )
 
         #expect(publisher.publishShortDescription.isEmpty)
@@ -271,10 +171,7 @@ extension ToolLibraryTests {
             name: "Clipboard Cleaner",
             executableName: "ClipboardCleaner",
             packageRootPath: root.path,
-            storeId: original.storeId,
-            storeAppId: original.id,
-            storeVersionId: original.currentVersion.id,
-            storeRemixedFromVersionId: original.currentVersion.id
+            storeMetadata: Self.provenanceMetadata(for: original)
         )
         try Self.writeSource(
             Self.publisherSource.replacingOccurrences(of: "Published", with: "Remixed"),
@@ -292,7 +189,7 @@ extension ToolLibraryTests {
         )
         inferenceStore.ironsmithSession = Self.ironsmithSession()
 
-        await publisher.beginPublishing(tool, inferenceStore: inferenceStore, tools: [tool])
+        await publisher.beginPublishing(tool, inferenceStore: inferenceStore)
 
         #expect(publisher.originalRemixApp?.id == original.id)
         #expect(
@@ -338,6 +235,7 @@ extension ToolLibraryTests {
         let context = container.mainContext
         context.insert(tool)
         let inferenceStore = InferenceStore(dependencies: Self.inferenceDependencies())
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
 
         await publisher.publish(
             tool,
@@ -381,8 +279,7 @@ extension ToolLibraryTests {
             executableName: "ClipboardCleaner",
             packageRootPath: root.path
         )
-        tool.storeId = detail.storeId
-        tool.storeAppId = detail.id
+        tool.storeMetadata = Self.publicationMetadata(for: detail)
         try Self.writeSource(
             Self.publisherSource.replacingOccurrences(of: "Published", with: "Changed"),
             to: tool
@@ -390,8 +287,7 @@ extension ToolLibraryTests {
 
         await publisher.beginPublishing(
             tool,
-            inferenceStore: inferenceStore,
-            tools: [tool]
+            inferenceStore: inferenceStore
         )
 
         #expect(publisher.publishShortDescription == detail.shortDescription)
@@ -428,19 +324,16 @@ extension ToolLibraryTests {
             executableName: "ClipboardCleaner",
             packageRootPath: root.path
         )
-        tool.storeId = detail.storeId
-        tool.storeAppId = detail.id
-        tool.storeVersionNumber = 1
+        tool.storeMetadata = Self.publicationMetadata(for: detail)
         try Self.writeSource(Self.publisherSource, to: tool)
 
         await publisher.beginPublishing(
             tool,
-            inferenceStore: inferenceStore,
-            tools: [tool]
+            inferenceStore: inferenceStore
         )
 
         #expect(publisher.errorMessage?.contains("currently published version") == true)
-        #expect(tool.storeVersionNumber == 1)
+        #expect(tool.storePublication?.versionNumber == 1)
         #expect(!publisher.isShowingPublishSheet)
     }
 
@@ -472,19 +365,28 @@ extension ToolLibraryTests {
             name: "Clipboard Cleaner",
             executableName: "ClipboardCleaner",
             packageRootPath: root.path,
-            storeId: "00000000-0000-4000-8000-000000000011",
-            storeAppId: "00000000-0000-4000-8000-000000000101"
+            storeMetadata: ToolStoreMetadata(
+                provenance: StoreProvenance(
+                    remixSource: StoreVersionReference(
+                        versionId: "00000000-0000-4000-8000-000000000201",
+                        storeId: "00000000-0000-4000-8000-000000000011",
+                        appId: "00000000-0000-4000-8000-000000000101",
+                        sourceSha256: IronsmithStoreClient.sha256Hex(
+                            for: Self.publisherSource
+                        )
+                    ),
+                    inspirations: []
+                )
+            )
         )
         try Self.writeSource(Self.publisherSource, to: tool)
-        tool.storeSourceSha256 = IronsmithStoreClient.sha256Hex(for: Self.publisherSource)
 
         await publisher.refreshStoreSourceChanges(for: [tool])
         #expect(!publisher.hasStoreSourceChanges(for: tool))
 
         await publisher.beginPublishing(
             tool,
-            inferenceStore: inferenceStore,
-            tools: [tool]
+            inferenceStore: inferenceStore
         )
 
         #expect(publisher.errorMessage?.contains("currently published version") == true)
@@ -556,7 +458,10 @@ extension ToolLibraryTests {
             executableName: "ClipboardCleaner",
             packageRootPath: root.appendingPathComponent("ClipboardCleaner").path
         )
-        tool.storeRemixedFromVersionId = parentVersionId
+        tool.storeProvenance = StoreProvenance(
+            remixSource: StoreVersionReference(versionId: parentVersionId),
+            inspirations: []
+        )
         try Self.writeSource(Self.publisherSource, to: tool)
         try FileManager.default.createDirectory(
             at: tool.packageLayout.packageMetadataDirectoryURL,
@@ -569,13 +474,11 @@ extension ToolLibraryTests {
         context.insert(tool)
         try context.save()
 
-        await publisher.beginPublishing(tool, inferenceStore: inferenceStore, tools: [tool])
+        await publisher.beginPublishing(tool, inferenceStore: inferenceStore)
         #expect(publisher.isShowingCreatorProfileSheet)
         publisher.creatorDisplayName = "  Jade Westover  "
         publisher.creatorHandle = "jade_w"
         await publisher.saveCreatorProfile(inferenceStore: inferenceStore, tools: [tool])
-        publisher.publishShortDescription = "Clean copied text"
-        publisher.publishDescription = "Cleans and reformats text."
 
         await publisher.publish(
             tool,
@@ -595,8 +498,8 @@ extension ToolLibraryTests {
         #expect(publishedName == tool.name)
         #expect(remixedFromVersionId == parentVersionId)
         #expect(license == .mit)
-        #expect(tool.storeRemixedFromVersionId == parentVersionId)
-        #expect(tool.storeVersionNumber == 1)
+        #expect(tool.storeRemixSource?.versionId == parentVersionId)
+        #expect(tool.storePublication?.versionNumber == 1)
         #expect(await buildCapture.versionNumbers == [1])
         #expect(!publisher.isUpdatingPublishedListing)
         #expect(publisher.errorMessage == nil)
@@ -698,8 +601,10 @@ extension ToolLibraryTests {
         let publishedDetail = Self.publisherAppDetail(
             remixedFromVersionId: copiedVersionID
         )
+        let originalDetail = Self.publisherAppDetail()
         let publicationCapture = PublisherPublicationCapture()
         var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.fetchApp = { _, _ in originalDetail }
         storeClient.publishApp = { request in
             await publicationCapture.record(request)
             return publishedDetail
@@ -715,11 +620,21 @@ extension ToolLibraryTests {
             name: "Clipboard Cleaner Copy",
             executableName: "ClipboardCleanerCopy",
             packageRootPath: root.appendingPathComponent("ClipboardCleanerCopy").path,
-            storeId: IronsmithStoreConstants.communityStoreId,
-            storeAppId: "00000000-0000-4000-8000-000000000199",
-            storeVersionId: copiedVersionID,
-            storeVersionNumber: 1,
-            storeRemixedFromVersionId: copiedAppsParentID
+            storeMetadata: ToolStoreMetadata(
+                publication: StorePublication(
+                    storeId: IronsmithStoreConstants.communityStoreId,
+                    appId: "00000000-0000-4000-8000-000000000199",
+                    versionId: copiedVersionID,
+                    versionNumber: 1,
+                    sourceSha256: IronsmithStoreClient.sha256Hex(for: Self.publisherSource),
+                    ownerUserId: "00000000-0000-4000-8000-000000000999",
+                    publishedAt: .now
+                ),
+                provenance: StoreProvenance(
+                    remixSource: StoreVersionReference(versionId: copiedAppsParentID),
+                    inspirations: []
+                )
+            )
         )
         try Self.writeSource(Self.publisherSource, to: tool)
         try FileManager.default.createDirectory(
@@ -732,18 +647,37 @@ extension ToolLibraryTests {
         let context = container.mainContext
         context.insert(tool)
         try context.save()
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(
+                accountClient: Self.ironsmithAccountClient(balanceCredits: 100)
+            )
+        )
+        inferenceStore.ironsmithSession = Self.ironsmithSession()
+
+        await publisher.refreshStoreSourceChanges(for: [tool])
+        #expect(
+            publisher.hasStoreSourceChanges(
+                for: tool,
+                userID: Self.ironsmithSession().user.id.uuidString
+            )
+        )
+        await publisher.beginPublishing(tool, inferenceStore: inferenceStore)
+        #expect(publisher.isShowingPublishSheet)
+        #expect(!publisher.isUpdatingPublishedListing)
+        publisher.publishShortDescription = "Clean copied text"
+        publisher.publishDescription = "Cleans and reformats text."
 
         await publisher.publish(
             tool,
             modelContext: context,
-            inferenceStore: InferenceStore(),
+            inferenceStore: inferenceStore,
             defaultSettings: .default,
             routeStore: IronsmithRouteStore(openSettingsWindow: {})
         )
 
         #expect(await publicationCapture.lastRemixedFromVersionId == copiedVersionID)
-        #expect(tool.storeVersionId == publishedDetail.currentVersion.id)
-        #expect(tool.storeRemixedFromVersionId == copiedVersionID)
+        #expect(tool.storePublication?.versionId == publishedDetail.currentVersion.id)
+        #expect(tool.storeRemixSource?.versionId == copiedVersionID)
         #expect(publisher.errorMessage == nil)
     }
 
@@ -786,9 +720,6 @@ extension ToolLibraryTests {
                 )
             }
         )
-        publisher.publishedStoreAppsByID[previousDetail.id] = StoreAppSummary(
-            detail: previousDetail
-        )
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
         publisher.publishLicense = .mit
@@ -797,12 +728,14 @@ extension ToolLibraryTests {
             executableName: "ClipboardCleaner",
             category: .utilities,
             packageRootPath: root.appendingPathComponent("ClipboardCleaner").path,
-            storeId: previousDetail.storeId,
-            storeAppId: previousDetail.id,
-            storeVersionId: previousDetail.currentVersion.id,
-            storeVersionNumber: 1
+            storeMetadata: Self.publicationMetadata(
+                for: previousDetail,
+                provenance: StoreProvenance(
+                    remixSource: StoreVersionReference(versionId: parentVersionId),
+                    inspirations: []
+                )
+            )
         )
-        tool.storeRemixedFromVersionId = parentVersionId
         try Self.writeSource(changedSource, to: tool)
         try FileManager.default.createDirectory(
             at: tool.packageLayout.packageMetadataDirectoryURL,
@@ -830,14 +763,14 @@ extension ToolLibraryTests {
         )
 
         #expect(tool.category == .finance)
-        #expect(tool.storeVersionId == publishedDetail.currentVersion.id)
-        #expect(tool.storeVersionNumber == 2)
+        #expect(tool.storePublication?.versionId == publishedDetail.currentVersion.id)
+        #expect(tool.storePublication?.versionNumber == 2)
         #expect(await buildCapture.categories == [.finance])
         #expect(await buildCapture.versionNumbers == [2])
         #expect(await versionCapture.lastRemixedFromVersionId == parentVersionId)
         #expect(await versionCapture.lastLicense == .mit)
         #expect(
-            tool.storeRemixedFromVersionId == publishedDetail.currentVersion.remixedFromVersionId)
+            tool.storeRemixSource?.versionId == parentVersionId)
         #expect(publisher.errorMessage == nil)
         #expect(!publisher.isShowingPublishSheet)
     }
@@ -898,11 +831,15 @@ extension ToolLibraryTests {
             routeStore: IronsmithRouteStore(openSettingsWindow: {})
         )
 
-        #expect(tool.storeAppId == publishedDetail.id)
-        #expect(tool.storeVersionId == publishedDetail.currentVersion.id)
+        #expect(tool.storePublication?.appId == publishedDetail.id)
+        #expect(tool.storePublication?.versionId == publishedDetail.currentVersion.id)
         #expect(tool.category == .productivity)
-        #expect(publisher.publishedStoreAppsByID[publishedDetail.id]?.id == publishedDetail.id)
-        #expect(publisher.canUpdateStoreVersion(for: tool))
+        #expect(
+            publisher.canUpdateStoreVersion(
+                for: tool,
+                userID: Self.ironsmithSession().user.id.uuidString
+            )
+        )
         #expect(await buildCapture.versionNumbers == [1])
         #expect(publisher.errorMessage?.contains("published successfully") == true)
         #expect(publisher.errorMessage?.contains("save the Store linkage") == true)
@@ -933,9 +870,6 @@ extension ToolLibraryTests {
                 throw PublisherBuildError.failed
             }
         )
-        publisher.publishedStoreAppsByID[previousDetail.id] = StoreAppSummary(
-            detail: previousDetail
-        )
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
         publisher.isShowingPublishSheet = true
@@ -943,10 +877,7 @@ extension ToolLibraryTests {
             name: "Clipboard Cleaner",
             executableName: "ClipboardCleaner",
             packageRootPath: root.appendingPathComponent("ClipboardCleaner").path,
-            storeId: previousDetail.storeId,
-            storeAppId: previousDetail.id,
-            storeVersionId: previousDetail.currentVersion.id,
-            storeVersionNumber: 1
+            storeMetadata: Self.publicationMetadata(for: previousDetail)
         )
         try Self.writeSource(changedSource, to: tool)
         try FileManager.default.createDirectory(
@@ -975,8 +906,8 @@ extension ToolLibraryTests {
         )
 
         #expect(tool.category == .music)
-        #expect(tool.storeVersionId == publishedDetail.currentVersion.id)
-        #expect(tool.storeVersionNumber == 2)
+        #expect(tool.storePublication?.versionId == publishedDetail.currentVersion.id)
+        #expect(tool.storePublication?.versionNumber == 2)
         #expect(publisher.errorMessage?.contains("published successfully") == true)
         #expect(!publisher.isShowingPublishSheet)
     }
@@ -1079,6 +1010,41 @@ extension ToolLibraryTests {
             remix: nil
         )
     }
+
+    private static func publicationMetadata(
+        for detail: StoreAppDetail,
+        ownerUserId: String = "00000000-0000-4000-8000-000000000001",
+        provenance: StoreProvenance? = nil
+    ) -> ToolStoreMetadata {
+        ToolStoreMetadata(
+            publication: StorePublication(
+                storeId: detail.storeId,
+                appId: detail.id,
+                versionId: detail.currentVersion.id,
+                versionNumber: detail.currentVersion.versionNumber,
+                sourceSha256: detail.currentVersion.sourceSha256,
+                ownerUserId: ownerUserId,
+                publishedAt: .now
+            ),
+            provenance: provenance
+        )
+    }
+
+    private static func provenanceMetadata(for detail: StoreAppDetail) -> ToolStoreMetadata {
+        ToolStoreMetadata(
+            provenance: StoreProvenance(
+                remixSource: StoreVersionReference(
+                    versionId: detail.currentVersion.id,
+                    storeId: detail.storeId,
+                    appId: detail.id,
+                    appName: detail.name,
+                    versionNumber: detail.currentVersion.versionNumber,
+                    sourceSha256: detail.currentVersion.sourceSha256
+                ),
+                inspirations: []
+            )
+        )
+    }
 }
 
 private actor PublisherProfileCapture {
@@ -1157,38 +1123,6 @@ private actor PublisherBuildCapture {
     func record(category: StoreAppCategory, versionNumber: Int) {
         categories.append(category)
         versionNumbers.append(versionNumber)
-    }
-}
-
-private actor PublisherOwnershipRefreshPages {
-    private var requestCount = 0
-    private var pageContinuations: [Int: CheckedContinuation<StoreAppPage, Never>] = [:]
-    private var requestWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
-
-    func nextPage() async -> StoreAppPage {
-        let request = requestCount
-        requestCount += 1
-        let readyWaiters = requestWaiters.filter { requestCount >= $0.count }
-        requestWaiters.removeAll { requestCount >= $0.count }
-        readyWaiters.forEach { $0.continuation.resume() }
-
-        guard request > 0 else {
-            return StoreAppPage(apps: [], hasMore: false)
-        }
-        return await withCheckedContinuation { continuation in
-            pageContinuations[request] = continuation
-        }
-    }
-
-    func waitForRequestCount(_ expectedCount: Int) async {
-        guard requestCount < expectedCount else { return }
-        await withCheckedContinuation { continuation in
-            requestWaiters.append((expectedCount, continuation))
-        }
-    }
-
-    func resolve(request: Int, with page: StoreAppPage) {
-        pageContinuations.removeValue(forKey: request)?.resume(returning: page)
     }
 }
 

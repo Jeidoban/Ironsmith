@@ -36,6 +36,11 @@ struct ToolGenerationLifecycle {
     nonisolated(unsafe) let updatePendingPrompt: (_ prompt: String) async throws -> Void
     nonisolated(unsafe) let updateStoreGenerationContext:
         (_ context: StoreGenerationContextSnapshot) async throws -> Void
+    nonisolated(unsafe) let clearStoreGenerationContextForScratchFallback:
+        (
+            _ refinedPrompt: String,
+            _ discardedBaseVersionId: String?
+        ) async throws -> Void
     nonisolated(unsafe) let updateRepairErrorCount: (_ count: Int?) async throws -> Void
     nonisolated(unsafe) let updatePhase:
         (
@@ -55,6 +60,11 @@ struct ToolGenerationLifecycle {
         updatePendingPrompt: @escaping (_ prompt: String) async throws -> Void = { _ in },
         updateStoreGenerationContext:
             @escaping (_ context: StoreGenerationContextSnapshot) async throws -> Void = { _ in },
+        clearStoreGenerationContextForScratchFallback:
+            @escaping (
+                _ refinedPrompt: String,
+                _ discardedBaseVersionId: String?
+            ) async throws -> Void = { _, _ in },
         updateRepairErrorCount: @escaping (_ count: Int?) async throws -> Void = { _ in },
         updatePhase:
             @escaping (
@@ -68,6 +78,8 @@ struct ToolGenerationLifecycle {
         self.didPersistAttachments = didPersistAttachments
         self.updatePendingPrompt = updatePendingPrompt
         self.updateStoreGenerationContext = updateStoreGenerationContext
+        self.clearStoreGenerationContextForScratchFallback =
+            clearStoreGenerationContextForScratchFallback
         self.updateRepairErrorCount = updateRepairErrorCount
         self.updatePhase = updatePhase
     }

@@ -860,7 +860,9 @@ private struct StorePublishedListView: View {
                             VStack(spacing: 0) {
                                 StorePublishedRowView(
                                     app: app,
-                                    linkedTool: tools.first { $0.storeAppId == app.id },
+                                    linkedTool: tools.first {
+                                        $0.storePublication?.appId == app.id
+                                    },
                                     isWorking: store.workingAppID == app.id,
                                     onSelect: { onOpen(app) },
                                     onUpdateVersion: onUpdateVersion,

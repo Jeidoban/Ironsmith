@@ -487,6 +487,16 @@ actor StoreGenerationCapture {
     }
 }
 
+actor StoreGenerationClearCapture {
+    private(set) var refinedPrompt: String?
+    private(set) var discardedBaseVersionId: String?
+
+    func record(refinedPrompt: String, discardedBaseVersionId: String?) {
+        self.refinedPrompt = refinedPrompt
+        self.discardedBaseVersionId = discardedBaseVersionId
+    }
+}
+
 actor StructuredMetadataResponse {
     private let creationPlan: GeneratedToolCreationPlan?
     private let editPlan: GeneratedToolEditPlan?

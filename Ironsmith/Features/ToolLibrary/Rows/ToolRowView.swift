@@ -27,7 +27,7 @@ struct ToolRowView: View {
 
                         if let generationStatusText {
                             if tool.generationState == .generating,
-                                let baseAppName = tool.storeGenerationBaseAppName
+                                let baseAppName = tool.storeRemixSource?.appName
                             {
                                 Button("Remixing \(baseAppName) · \(generationStatusText)") {
                                     actions.onOpenStoreSource()
@@ -35,10 +35,10 @@ struct ToolRowView: View {
                                 .buttonStyle(.plain)
                                 .help("View \(baseAppName) in the Store")
                             } else if tool.generationState == .generating,
-                                !tool.storeInspiredByVersionIds.isEmpty
+                                !tool.storeInspirationLinks.isEmpty
                             {
                                 Text(
-                                    "Using ideas from \(tool.storeInspiredByVersionIds.count) apps · \(generationStatusText)"
+                                    "Using ideas from \(tool.storeInspirationLinks.count) apps · \(generationStatusText)"
                                 )
                             } else {
                                 Text(generationStatusText)
@@ -222,6 +222,7 @@ struct ToolRowView: View {
             onEditDetails: {},
             onRebuild: {},
             onPublishToStore: {},
+            onOpenStoreApp: {},
             onOpenStoreSource: {},
             onOpenStoreInspiration: { _ in },
             onRevert: {},

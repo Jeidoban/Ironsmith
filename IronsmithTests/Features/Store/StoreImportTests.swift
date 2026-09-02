@@ -468,15 +468,14 @@ struct StoreImportTests {
         #expect(sourceOnDisk == source)
         #expect(tool.generationState == .ready)
         #expect(tool.generationPhase == .completed)
-        #expect(tool.storeId == app.storeId)
-        #expect(tool.storeAppId == app.id)
-        #expect(tool.storeVersionId == version.id)
-        #expect(tool.storeVersionNumber == version.versionNumber)
+        #expect(tool.storePublication == nil)
+        #expect(tool.storeRemixSource?.storeId == app.storeId)
+        #expect(tool.storeRemixSource?.appId == app.id)
+        #expect(tool.storeRemixSource?.versionId == version.id)
+        #expect(tool.storeRemixSource?.versionNumber == version.versionNumber)
         #expect(tool.appVersionNumber == version.versionNumber)
         #expect(tool.category == app.category)
-        #expect(tool.storeSourceSha256 == version.sourceSha256)
-        #expect(tool.storeImportedAt != nil)
-        #expect(tool.storeRemixedFromVersionId == nil)
+        #expect(tool.storeRemixSource?.sourceSha256 == version.sourceSha256)
     }
 
     @MainActor
@@ -588,13 +587,12 @@ struct StoreImportTests {
             .importTool(StoreToolImportRequest(app: app, version: version), context)
 
         #expect(result.tool.name == app.name)
-        #expect(result.tool.storeId == app.storeId)
-        #expect(result.tool.storeAppId == app.id)
-        #expect(result.tool.storeVersionId == version.id)
-        #expect(result.tool.storeVersionNumber == version.versionNumber)
-        #expect(result.tool.storeSourceSha256 == version.sourceSha256)
-        #expect(result.tool.storeImportedAt != nil)
-        #expect(result.tool.storeRemixedFromVersionId == parentVersionID)
+        #expect(result.tool.storePublication == nil)
+        #expect(result.tool.storeRemixSource?.storeId == app.storeId)
+        #expect(result.tool.storeRemixSource?.appId == app.id)
+        #expect(result.tool.storeRemixSource?.versionId == version.id)
+        #expect(result.tool.storeRemixSource?.versionNumber == version.versionNumber)
+        #expect(result.tool.storeRemixSource?.sourceSha256 == version.sourceSha256)
     }
 
     @MainActor
@@ -623,12 +621,12 @@ struct StoreImportTests {
                 context
             )
 
-        #expect(result.tool.storeId == app.storeId)
-        #expect(result.tool.storeAppId == app.id)
-        #expect(result.tool.storeVersionId == version.id)
-        #expect(result.tool.storeVersionNumber == version.versionNumber)
-        #expect(result.tool.storeSourceSha256 == version.sourceSha256)
-        #expect(result.tool.storeRemixedFromVersionId == parentVersionID)
+        #expect(result.tool.storePublication == nil)
+        #expect(result.tool.storeRemixSource?.storeId == app.storeId)
+        #expect(result.tool.storeRemixSource?.appId == app.id)
+        #expect(result.tool.storeRemixSource?.versionId == version.id)
+        #expect(result.tool.storeRemixSource?.versionNumber == version.versionNumber)
+        #expect(result.tool.storeRemixSource?.sourceSha256 == version.sourceSha256)
     }
 
     @MainActor
@@ -656,10 +654,10 @@ struct StoreImportTests {
         #expect(tools.count == 2)
         #expect(first.tool.id != second.tool.id)
         #expect(first.tool.packageRootPath != second.tool.packageRootPath)
-        #expect(first.tool.storeRemixedFromVersionId == nil)
-        #expect(second.tool.storeRemixedFromVersionId == nil)
-        #expect(first.tool.storeAppId == app.id)
-        #expect(second.tool.storeAppId == app.id)
+        #expect(first.tool.storeRemixSource?.versionId == version.id)
+        #expect(second.tool.storeRemixSource?.versionId == version.id)
+        #expect(first.tool.storeRemixSource?.appId == app.id)
+        #expect(second.tool.storeRemixSource?.appId == app.id)
     }
 
     @MainActor
@@ -846,13 +844,23 @@ struct StoreImportTests {
         let linkedTool = Tool(
             name: "Published Copy",
             packageRootPath: "/tmp/published-copy",
-            storeId: app.storeId,
-            storeAppId: app.id,
-            storeVersionId: app.currentVersion.id,
-            storeVersionNumber: app.currentVersion.versionNumber,
-            storeSourceSha256: app.currentVersion.sourceSha256,
-            storeImportedAt: .now,
-            storeRemixedFromVersionId: "00000000-0000-4000-8000-000000000299"
+            storeMetadata: ToolStoreMetadata(
+                publication: StorePublication(
+                    storeId: app.storeId,
+                    appId: app.id,
+                    versionId: app.currentVersion.id,
+                    versionNumber: app.currentVersion.versionNumber,
+                    sourceSha256: app.currentVersion.sourceSha256,
+                    ownerUserId: "user-1",
+                    publishedAt: .now
+                ),
+                provenance: StoreProvenance(
+                    remixSource: StoreVersionReference(
+                        versionId: "00000000-0000-4000-8000-000000000299"
+                    ),
+                    inspirations: []
+                )
+            )
         )
         context.insert(linkedTool)
         try context.save()
@@ -887,14 +895,9 @@ struct StoreImportTests {
         #expect(store.publishedApps.isEmpty)
         #expect(store.selectedAppID == nil)
         #expect(store.contentRevision == 1)
-        #expect(linkedTool.storeId == nil)
-        #expect(linkedTool.storeAppId == nil)
-        #expect(linkedTool.storeVersionId == nil)
-        #expect(linkedTool.storeVersionNumber == nil)
-        #expect(linkedTool.storeSourceSha256 == nil)
-        #expect(linkedTool.storeImportedAt == nil)
+        #expect(linkedTool.storePublication == nil)
         #expect(
-            linkedTool.storeRemixedFromVersionId
+            linkedTool.storeRemixSource?.versionId
                 == "00000000-0000-4000-8000-000000000299"
         )
         #expect(store.errorMessage == nil)
@@ -909,12 +912,17 @@ struct StoreImportTests {
         let linkedTool = Tool(
             name: "Published Copy",
             packageRootPath: "/tmp/published-copy",
-            storeId: app.storeId,
-            storeAppId: app.id,
-            storeVersionId: app.currentVersion.id,
-            storeVersionNumber: app.currentVersion.versionNumber,
-            storeSourceSha256: app.currentVersion.sourceSha256,
-            storeImportedAt: .now
+            storeMetadata: ToolStoreMetadata(
+                publication: StorePublication(
+                    storeId: app.storeId,
+                    appId: app.id,
+                    versionId: app.currentVersion.id,
+                    versionNumber: app.currentVersion.versionNumber,
+                    sourceSha256: app.currentVersion.sourceSha256,
+                    ownerUserId: "user-1",
+                    publishedAt: .now
+                )
+            )
         )
         context.insert(linkedTool)
         try context.save()
@@ -939,8 +947,8 @@ struct StoreImportTests {
         #expect(store.publishedApps == [summary])
         #expect(store.selectedAppID == app.id)
         #expect(store.contentRevision == 0)
-        #expect(linkedTool.storeId == app.storeId)
-        #expect(linkedTool.storeAppId == app.id)
+        #expect(linkedTool.storePublication?.storeId == app.storeId)
+        #expect(linkedTool.storePublication?.appId == app.id)
         #expect(store.errorMessage?.contains("could not unlink") == true)
     }
 
@@ -1328,13 +1336,12 @@ struct StoreImportTests {
         )
         #expect(tools.count == 2)
         #expect(existingSource == currentSource)
-        #expect(existing.storeVersionId == currentMetadata.id)
+        #expect(existing.storeRemixSource?.versionId == currentMetadata.id)
         #expect(installed.name == "\(app.name) v1")
         #expect(installed.generationState == .ready)
-        #expect(installed.storeVersionId == historicalMetadata.id)
-        #expect(installed.storeVersionNumber == 1)
-        #expect(installed.storeSourceSha256 == historicalMetadata.sourceSha256)
-        #expect(installed.storeRemixedFromVersionId == historicalMetadata.remixedFromVersionId)
+        #expect(installed.storeRemixSource?.versionId == historicalMetadata.id)
+        #expect(installed.storeRemixSource?.versionNumber == 1)
+        #expect(installed.storeRemixSource?.sourceSha256 == historicalMetadata.sourceSha256)
         #expect(store.workingVersionID == nil)
 
         guard
@@ -1439,8 +1446,7 @@ struct StoreImportTests {
 
         let failedTool = try #require(context.fetch(FetchDescriptor<Tool>()).first)
         #expect(failedTool.generationState == .failed)
-        #expect(failedTool.storeVersionId == metadata.id)
-        #expect(failedTool.storeRemixedFromVersionId == metadata.remixedFromVersionId)
+        #expect(failedTool.storeRemixSource?.versionId == metadata.id)
         #expect(store.errorMessage != nil)
     }
 

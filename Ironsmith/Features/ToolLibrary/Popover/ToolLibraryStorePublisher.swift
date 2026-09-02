@@ -1,13 +1,11 @@
 import Foundation
 import Observation
+import Auth
 import SwiftData
 
 @MainActor
 @Observable
 final class ToolLibraryStorePublisher {
-    var publishedStoreAppsByID: [String: StoreAppSummary] = [:]
-    private(set) var hasResolvedPublishedStoreApps = false
-    private var publishedStoreAppsRefreshGeneration: UInt = 0
     var publishingToolID: UUID?
     var publishShortDescription = ""
     var publishDescription = ""
@@ -63,20 +61,18 @@ final class ToolLibraryStorePublisher {
         self.saveModelContext = saveModelContext ?? { try $0.save() }
     }
 
-    func canUpdateStoreVersion(for tool: Tool) -> Bool {
-        guard let storeAppId = tool.storeAppId else { return false }
-        return publishedStoreAppsByID[storeAppId] != nil
+    func canUpdateStoreVersion(for tool: Tool, userID: String?) -> Bool {
+        guard let userID else { return false }
+        return tool.storePublication?.ownerUserId == userID
     }
 
-    func isConfirmedDownloadedFromAnotherUser(_ tool: Tool) -> Bool {
-        guard let storeAppId = tool.storeAppId,
-            hasResolvedPublishedStoreApps
-        else { return false }
-        return publishedStoreAppsByID[storeAppId] == nil
-    }
-
-    func hasStoreSourceChanges(for tool: Tool) -> Bool {
-        storeSourceChangesByToolID[tool.id] ?? (tool.storeSourceSha256 == nil)
+    func hasStoreSourceChanges(for tool: Tool, userID: String? = nil) -> Bool {
+        if let publication = tool.storePublication,
+            publication.ownerUserId != userID
+        {
+            return true
+        }
+        return storeSourceChangesByToolID[tool.id] ?? (tool.storeBaselineSourceSha256 == nil)
     }
 
     func publishNameMatchesOriginal(for tool: Tool) -> Bool {
@@ -104,7 +100,7 @@ final class ToolLibraryStorePublisher {
                 sourceURL: try? tool.packageLayout.packageFileURL(
                     for: tool.contentViewSourcePath
                 ),
-                storeSourceSha256: tool.storeSourceSha256?.lowercased()
+                storeSourceSha256: tool.storeBaselineSourceSha256?.lowercased()
             )
         }
         let changesByToolID = await Task.detached(priority: .utility) {
@@ -128,7 +124,7 @@ final class ToolLibraryStorePublisher {
     }
 
     private func sourceHasStoreChanges(for tool: Tool) -> Bool {
-        guard let storeSourceSha256 = tool.storeSourceSha256?.lowercased() else {
+        guard let storeSourceSha256 = tool.storeBaselineSourceSha256?.lowercased() else {
             return true
         }
         guard let source = try? sourceCode(for: tool) else {
@@ -137,64 +133,13 @@ final class ToolLibraryStorePublisher {
         return IronsmithStoreClient.sha256Hex(for: source) != storeSourceSha256
     }
 
-    func refreshPublishedStoreApps(
-        isSignedIn: Bool,
-        tools: [Tool]
-    ) async {
-        publishedStoreAppsRefreshGeneration &+= 1
-        let refreshGeneration = publishedStoreAppsRefreshGeneration
-        publishedStoreAppsByID = [:]
-        hasResolvedPublishedStoreApps = false
-
-        guard isSignedIn else {
-            return
+    private func hasPublishableSource(for tool: Tool, userID: String) -> Bool {
+        if let publication = tool.storePublication,
+            publication.ownerUserId != userID
+        {
+            return true
         }
-        let storeIDs = Set(
-            tools.compactMap { tool -> String? in
-                guard tool.storeAppId != nil else { return nil }
-                return tool.storeId
-            }
-        )
-        guard !storeIDs.isEmpty else {
-            hasResolvedPublishedStoreApps = true
-            return
-        }
-
-        do {
-            let linkedAppIDs = Set(tools.compactMap(\.storeAppId))
-            var ownedAppsByID: [String: StoreAppSummary] = [:]
-            for storeID in storeIDs {
-                var offset = 0
-                var hasMore: Bool
-                repeat {
-                    let page = try await storeClient.listApps(
-                        storeID,
-                        .mine,
-                        nil,
-                        offset,
-                        .recent,
-                        nil,
-                        nil
-                    )
-                    guard refreshGeneration == publishedStoreAppsRefreshGeneration else {
-                        return
-                    }
-                    for app in page.apps {
-                        guard linkedAppIDs.contains(app.id) else { continue }
-                        ownedAppsByID[app.id] = app
-                    }
-                    offset += page.apps.count
-                    hasMore = page.hasMore
-                } while hasMore
-            }
-            guard refreshGeneration == publishedStoreAppsRefreshGeneration else { return }
-            publishedStoreAppsByID = ownedAppsByID
-            hasResolvedPublishedStoreApps = true
-        } catch {
-            guard refreshGeneration == publishedStoreAppsRefreshGeneration else { return }
-            publishedStoreAppsByID = [:]
-            hasResolvedPublishedStoreApps = false
-        }
+        return sourceHasStoreChanges(for: tool)
     }
 
     func hasCompleteCreatorProfile(inferenceStore: InferenceStore) -> Bool {
@@ -207,12 +152,11 @@ final class ToolLibraryStorePublisher {
 
     func beginPublishing(
         _ tool: Tool,
-        inferenceStore: InferenceStore,
-        tools: [Tool]
+        inferenceStore: InferenceStore
     ) async {
         errorMessage = nil
         await inferenceStore.refreshIronsmithAccountSummary()
-        guard inferenceStore.ironsmithSession != nil else {
+        guard let userID = inferenceStore.ironsmithSession?.user.id.uuidString else {
             pendingSignInToolID = tool.id
             return
         }
@@ -225,19 +169,19 @@ final class ToolLibraryStorePublisher {
             return
         }
         pendingCreatorProfileToolID = nil
-        guard sourceHasStoreChanges(for: tool) else {
+        guard hasPublishableSource(for: tool, userID: userID) else {
             present(IronsmithStoreClientError.unchangedStoreVersion)
             return
         }
-        await refreshPublishedStoreApps(
-            isSignedIn: true,
-            tools: tools
-        )
-        let linkedApp = linkedPublishedApp(for: tool)
-        if let linkedApp {
+        let publication = canUpdateStoreVersion(for: tool, userID: userID)
+            ? tool.storePublication
+            : nil
+        if let publication {
             do {
-                // May consider adding the latest source hash to the StoreAppSummary so we don't have to fetch the detail here, but this is fine for now.
-                let detail = try await storeClient.fetchApp(linkedApp.storeId, linkedApp.id)
+                let detail = try await storeClient.fetchApp(
+                    publication.storeId,
+                    publication.appId
+                )
                 let source = try sourceCode(for: tool)
                 if IronsmithStoreClient.sha256Hex(for: source)
                     == detail.currentVersion.sourceSha256.lowercased()
@@ -265,12 +209,16 @@ final class ToolLibraryStorePublisher {
             currentPublishedSourceSha256 = nil
         }
         do {
-            try await preparePublishIdentity(for: tool, linkedApp: linkedApp)
+            try await preparePublishIdentity(
+                for: tool,
+                isUpdating: publication != nil,
+                remixSource: effectiveRemixSource(for: tool, userID: userID)
+            )
         } catch {
             present(error)
             return
         }
-        isUpdatingPublishedListing = linkedApp != nil
+        isUpdatingPublishedListing = publication != nil
         publishingToolID = tool.id
         publishScreenshotData = nil
         publishScreenshotName = nil
@@ -289,6 +237,9 @@ final class ToolLibraryStorePublisher {
         defer { isPublishing = false }
 
         do {
+            guard let userID = inferenceStore.ironsmithSession?.user.id.uuidString else {
+                throw IronsmithStoreClientError.missingSession
+            }
             let publicationName = tool.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !publicationName.isEmpty else {
                 throw ToolLibraryStorePublishingError.invalidAppName
@@ -297,7 +248,13 @@ final class ToolLibraryStorePublisher {
                 throw ToolLibraryStorePublishingError.remixNameMatchesOriginal
             }
             let source = try sourceCode(for: tool)
-            if linkedPublishedApp(for: tool) != nil,
+            let publication = canUpdateStoreVersion(for: tool, userID: userID)
+                ? tool.storePublication
+                : nil
+            let newPublicationRemixSource = publication == nil
+                ? effectiveRemixSource(for: tool, userID: userID)
+                : nil
+            if publication != nil,
                 let currentPublishedSourceSha256,
                 IronsmithStoreClient.sha256Hex(for: source) == currentPublishedSourceSha256
             {
@@ -314,12 +271,11 @@ final class ToolLibraryStorePublisher {
                 contentsOf: tool.packageLayout.cachedAppIconThumbnailJPEGURL
             )
             let app: StoreAppDetail
-            let linkedApp = linkedPublishedApp(for: tool)
-            if let linkedApp {
+            if let publication {
                 app = try await storeClient.publishVersion(
                     StoreVersionPublicationRequest(
-                        storeId: linkedApp.storeId,
-                        appId: linkedApp.id,
+                        storeId: publication.storeId,
+                        appId: publication.appId,
                         license: publishLicense,
                         shortDescription: publishShortDescription.trimmingCharacters(
                             in: .whitespacesAndNewlines),
@@ -331,14 +287,15 @@ final class ToolLibraryStorePublisher {
                         iconThumbnailJPEG: iconThumbnailJPEG,
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
                         replaceScreenshots: publishScreenshotData != nil,
-                        remixedFromVersionId: tool.storeRemixedFromVersionId,
-                        inspiredByVersionIds: tool.storeInspiredByVersionIds
+                        remixedFromVersionId: tool.storeRemixSource?.versionId,
+                        inspiredByVersionIds: tool.storeAttributionVersionIds
                     )
                 )
             } else {
                 app = try await storeClient.publishApp(
                     StorePublicationRequest(
-                        storeId: tool.storeId ?? IronsmithStoreConstants.communityStoreId,
+                        storeId: newPublicationRemixSource?.storeId
+                            ?? IronsmithStoreConstants.communityStoreId,
                         name: publicationName,
                         shortDescription: publishShortDescription.trimmingCharacters(
                             in: .whitespacesAndNewlines),
@@ -351,10 +308,8 @@ final class ToolLibraryStorePublisher {
                         iconMasterJPEG: iconMasterJPEG,
                         iconThumbnailJPEG: iconThumbnailJPEG,
                         screenshotJPEGs: publishScreenshotData.map { [$0] } ?? [],
-                        remixedFromVersionId: tool.storeVersionId
-                            ?? tool.storeRemixedFromVersionId
-                            ?? tool.storeGenerationBaseVersionId,
-                        inspiredByVersionIds: tool.storeInspiredByVersionIds
+                        remixedFromVersionId: newPublicationRemixSource?.versionId,
+                        inspiredByVersionIds: tool.storeAttributionVersionIds
                     )
                 )
             }
@@ -362,7 +317,8 @@ final class ToolLibraryStorePublisher {
             await finishSuccessfulPublication(
                 app,
                 for: tool,
-                localRemixedFromVersionId: app.currentVersion.remixedFromVersionId,
+                ownerUserID: userID,
+                adoptedRemixSource: newPublicationRemixSource,
                 modelContext: modelContext,
                 routeStore: routeStore
             )
@@ -398,7 +354,7 @@ final class ToolLibraryStorePublisher {
                 let tool = tools.first(where: { $0.id == toolID })
             else { return }
             pendingCreatorProfileToolID = nil
-            await beginPublishing(tool, inferenceStore: inferenceStore, tools: tools)
+            await beginPublishing(tool, inferenceStore: inferenceStore)
         } catch {
             present(error)
         }
@@ -422,23 +378,18 @@ final class ToolLibraryStorePublisher {
         }
     }
 
-    private func linkedPublishedApp(for tool: Tool) -> StoreAppSummary? {
-        guard let storeAppId = tool.storeAppId else { return nil }
-        return publishedStoreAppsByID[storeAppId]
-    }
-
     private func preparePublishIdentity(
         for tool: Tool,
-        linkedApp: StoreAppSummary?
+        isUpdating: Bool,
+        remixSource: StoreVersionReference?
     ) async throws {
         refreshPublishIdentity(for: tool)
         originalRemixApp = nil
         originalRemixIconData = nil
 
-        guard linkedApp == nil,
-            tool.storeVersionId != nil,
-            let storeId = tool.storeId,
-            let appId = tool.storeAppId
+        guard !isUpdating,
+            let storeId = remixSource?.storeId,
+            let appId = remixSource?.appId
         else { return }
 
         let originalApp = try await storeClient.fetchApp(storeId, appId)
@@ -452,6 +403,24 @@ final class ToolLibraryStorePublisher {
                 )
             }
         }
+    }
+
+    private func effectiveRemixSource(
+        for tool: Tool,
+        userID: String?
+    ) -> StoreVersionReference? {
+        if let publication = tool.storePublication,
+            publication.ownerUserId != userID
+        {
+            return StoreVersionReference(
+                versionId: publication.versionId,
+                storeId: publication.storeId,
+                appId: publication.appId,
+                versionNumber: publication.versionNumber,
+                sourceSha256: publication.sourceSha256
+            )
+        }
+        return tool.storeRemixSource
     }
 
     private func comparableOriginalIconData(
@@ -480,30 +449,42 @@ final class ToolLibraryStorePublisher {
     private func applyPublishedStoreLinkage(
         _ app: StoreAppDetail,
         to tool: Tool,
-        localRemixedFromVersionId: String?
+        ownerUserID: String?
     ) {
-        tool.storeId = app.storeId
-        tool.storeAppId = app.id
+        guard let ownerUserID else { return }
         tool.category = app.category
-        tool.storeVersionId = app.currentVersion.id
-        tool.storeVersionNumber = app.currentVersion.versionNumber
-        tool.storeSourceSha256 = app.currentVersion.sourceSha256
-        tool.storeImportedAt = Date()
-        tool.storeRemixedFromVersionId = localRemixedFromVersionId
+        tool.storePublication = StorePublication(
+            storeId: app.storeId,
+            appId: app.id,
+            versionId: app.currentVersion.id,
+            versionNumber: app.currentVersion.versionNumber,
+            sourceSha256: app.currentVersion.sourceSha256,
+            ownerUserId: ownerUserID,
+            publishedAt: Date()
+        )
         tool.updatedAt = Date()
     }
 
     private func finishSuccessfulPublication(
         _ app: StoreAppDetail,
         for tool: Tool,
-        localRemixedFromVersionId: String?,
+        ownerUserID: String?,
+        adoptedRemixSource: StoreVersionReference?,
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore
     ) async {
+        if let adoptedRemixSource,
+            tool.storeRemixSource?.versionId != adoptedRemixSource.versionId
+        {
+            tool.replaceStoreProvenance(
+                remixSource: adoptedRemixSource,
+                inspirations: tool.storeInspirations
+            )
+        }
         applyPublishedStoreLinkage(
             app,
             to: tool,
-            localRemixedFromVersionId: localRemixedFromVersionId
+            ownerUserID: ownerUserID
         )
 
         let persistenceError: Error?
@@ -539,7 +520,6 @@ final class ToolLibraryStorePublisher {
             rebuildError = error
         }
 
-        publishedStoreAppsByID[app.id] = StoreAppSummary(detail: app)
         isShowingPublishSheet = false
         routeStore.open(.store(.publishedApp(app.id)))
 

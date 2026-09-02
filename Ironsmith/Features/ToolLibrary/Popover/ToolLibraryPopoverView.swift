@@ -115,19 +115,6 @@ struct ToolLibraryPopoverView: View {
                 guard isStoreFeatureEnabled else { return }
                 await storePublisher.refreshStoreSourceChanges(for: tools)
             }
-            .task(id: publishedStoreLinkRefreshID) {
-                guard isStoreFeatureEnabled else {
-                    await storePublisher.refreshPublishedStoreApps(
-                        isSignedIn: false,
-                        tools: tools
-                    )
-                    return
-                }
-                await storePublisher.refreshPublishedStoreApps(
-                    isSignedIn: inferenceStore.ironsmithSession != nil,
-                    tools: tools
-                )
-            }
             .onAppear {
                 handlePopoverAppear()
             }
@@ -518,9 +505,13 @@ struct ToolLibraryPopoverView: View {
             canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
             showsStoreActions: isStoreFeatureEnabled,
             canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
-            hasStoreSourceChanges: storePublisher.hasStoreSourceChanges(for: tool),
+            hasStoreSourceChanges: storePublisher.hasStoreSourceChanges(
+                for: tool,
+                userID: inferenceStore.ironsmithSession?.user.id.uuidString
+            ),
             activeCodingAgent: toolLibraryStore.activeCodingAgent(for: tool),
-            canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool)
+            canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool),
+            storeInspirations: tool.storeInspirationLinks
         )
     }
 
@@ -556,9 +547,17 @@ struct ToolLibraryPopoverView: View {
             onPublishToStore: {
                 routeStore.open(.toolLibrary(.publishTool(tool.id)))
             },
+            onOpenStoreApp: {
+                if let publication = tool.storePublication
+                {
+                    routeStore.open(
+                        .store(.app(storeId: publication.storeId, appId: publication.appId))
+                    )
+                }
+            },
             onOpenStoreSource: {
-                if let storeID = tool.storeGenerationBaseStoreId,
-                    let appID = tool.storeGenerationBaseAppId
+                if let storeID = tool.storeRemixSource?.storeId,
+                    let appID = tool.storeRemixSource?.appId
                 {
                     routeStore.open(.store(.app(storeId: storeID, appId: appID)))
                 } else {
@@ -566,9 +565,9 @@ struct ToolLibraryPopoverView: View {
                 }
             },
             onOpenStoreInspiration: { capability in
-                routeStore.open(
-                    .store(.app(storeId: capability.storeId, appId: capability.appId))
-                )
+                if let storeID = capability.storeId, let appID = capability.appId {
+                    routeStore.open(.store(.app(storeId: storeID, appId: appID)))
+                }
             },
             onRevert: {
                 Task {
@@ -662,7 +661,7 @@ struct ToolLibraryPopoverView: View {
                             in: modelContext,
                             rename: { renameTool(tool, to: $0) }
                         )
-                        if didSave, tool.storeRemixedFromVersionId != nil {
+                        if didSave, tool.storeRemixSource != nil {
                             remixIdentityHandledToolIDs.insert(tool.id)
                         }
                         if !didSave, shouldReturnToPublishing {
@@ -789,28 +788,15 @@ struct ToolLibraryPopoverView: View {
     private var storeSourceChangesRefreshID: [String] {
         [isStoreFeatureEnabled ? "store-on" : "store-off"]
             + tools.map {
-                "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)-\($0.storeSourceSha256 ?? "")"
+                "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)-\($0.storeBaselineSourceSha256 ?? "")"
             }
-    }
-
-    private var publishedStoreLinkRefreshID: String {
-        let session = inferenceStore.ironsmithSession?.user.id.uuidString ?? "signed-out"
-        let storeFeature = isStoreFeatureEnabled ? "store-on" : "store-off"
-        let links =
-            tools
-            .compactMap { tool -> String? in
-                guard let storeId = tool.storeId,
-                    let storeAppId = tool.storeAppId
-                else { return nil }
-                return "\(storeId):\(storeAppId)"
-            }
-            .sorted()
-            .joined(separator: "|")
-        return "\(storeFeature)|\(session)|\(links)"
     }
 
     private func canUpdateStoreVersion(for tool: Tool) -> Bool {
-        storePublisher.canUpdateStoreVersion(for: tool)
+        storePublisher.canUpdateStoreVersion(
+            for: tool,
+            userID: inferenceStore.ironsmithSession?.user.id.uuidString
+        )
     }
 
     private var canSubmitPrompt: Bool {
@@ -1011,8 +997,7 @@ struct ToolLibraryPopoverView: View {
             else { return }
             await storePublisher.beginPublishing(
                 tool,
-                inferenceStore: inferenceStore,
-                tools: tools
+                inferenceStore: inferenceStore
             )
         }
     }
@@ -1050,8 +1035,7 @@ struct ToolLibraryPopoverView: View {
             generatesIdentity: generatesIdentityForNewRemixes,
             hasPresentedNotice: hasPresentedRemixIdentityNotice,
             isConfirmedDownloadedFromAnotherUser:
-                storePublisher
-                .isConfirmedDownloadedFromAnotherUser(tool)
+                tool.storePublication == nil && tool.storeRemixSource?.isRoutable == true
         ) {
         case .submit:
             submitCurrentPrompt()
@@ -1197,8 +1181,7 @@ struct ToolLibraryPopoverView: View {
             Task {
                 await storePublisher.beginPublishing(
                     tool,
-                    inferenceStore: inferenceStore,
-                    tools: tools
+                    inferenceStore: inferenceStore
                 )
             }
         }

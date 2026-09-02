@@ -285,37 +285,47 @@ struct SingleFileToolGenerationRuntime {
 
             let contentPrompt: String
             var storeContextPlan: StoreGenerationContextPlan?
+            var resumedWithStoreBase = false
+            let savedStoreContext = existingTool.flatMap {
+                try? context.storeRemixStateClient.pendingContext($0.packageRootURL)
+            }
+            if savedStoreContext == nil,
+                existingTool?.generationMode == .create,
+                existingTool?.storeProvenance != nil
+            {
+                try await lifecycle.clearStoreGenerationContextForScratchFallback(
+                    prompt,
+                    nil
+                )
+            }
             let currentStoreCodingAgent = StoreGenerationContextRequest.value(
                 for: context.pipelineConfiguration.codingAgent
             )
-            if let snapshot = existingTool?.storeGenerationContextSnapshot,
-                Self.canReuseStoreContextPlan(
-                    snapshot.plan,
-                    with: currentStoreCodingAgent
-                )
+            if let snapshot = savedStoreContext,
+                Self.canReuseStoreContextPlan(snapshot, with: currentStoreCodingAgent)
             {
-                storeContextPlan = snapshot.plan
                 effectiveSettings = Self.settings(
                     effectiveSettings,
-                    applying: snapshot.plan
+                    applying: snapshot
                 )
                 contentPrompt = Self.storeAssistedPrompt(
                     refinedPrompt: snapshot.refinedPrompt,
-                    plan: snapshot.plan
+                    promptContext: snapshot.promptContext
                 )
-                if let base = snapshot.plan.base,
+                resumedWithStoreBase = snapshot.baseSourceCode != nil
+                if let baseSourceCode = snapshot.baseSourceCode,
                     startingPhase == .initializing || startingPhase == .planning
                         || startingPhase == .refiningPrompt
                         || startingPhase == .searchingStore
                         || startingPhase == .generatingSource
                 {
                     try context.write(
-                        base.sourceCode,
+                        baseSourceCode,
                         to: setup.contentViewPath,
                         packageRootURL: setup.layout.packageRootURL
                     )
                 }
-            } else if let snapshot = existingTool?.storeGenerationContextSnapshot {
+            } else if let snapshot = savedStoreContext {
                 storeContextPlan = await storeGenerationContext(
                     originalPrompt: snapshot.originalPrompt,
                     refinedPrompt: snapshot.refinedPrompt,
@@ -336,12 +346,15 @@ struct SingleFileToolGenerationRuntime {
                         effectiveSettings,
                         applying: storeContextPlan
                     )
-                    try await lifecycle.updateStoreGenerationContext(
-                        StoreGenerationContextSnapshot(
-                            originalPrompt: snapshot.originalPrompt,
-                            refinedPrompt: snapshot.refinedPrompt,
-                            plan: storeContextPlan
-                        )
+                    let updatedSnapshot = StoreGenerationContextSnapshot(
+                        originalPrompt: snapshot.originalPrompt,
+                        refinedPrompt: snapshot.refinedPrompt,
+                        plan: storeContextPlan
+                    )
+                    try await lifecycle.updateStoreGenerationContext(updatedSnapshot)
+                    try context.storeRemixStateClient.stage(
+                        updatedSnapshot,
+                        setup.layout.packageRootURL
                     )
                     if let base = storeContextPlan.base {
                         try context.write(
@@ -351,6 +364,12 @@ struct SingleFileToolGenerationRuntime {
                         )
                     }
                     try await lifecycle.updatePendingPrompt(contentPrompt)
+                } else {
+                    try await lifecycle.clearStoreGenerationContextForScratchFallback(
+                        snapshot.refinedPrompt,
+                        nil
+                    )
+                    try context.storeRemixStateClient.clear(setup.layout.packageRootURL)
                 }
             } else if startingPhase == .generatingSource
                 || startingPhase == .generatingRepairDiff
@@ -385,12 +404,15 @@ struct SingleFileToolGenerationRuntime {
                         effectiveSettings,
                         applying: storeContextPlan
                     )
-                    try await lifecycle.updateStoreGenerationContext(
-                        StoreGenerationContextSnapshot(
-                            originalPrompt: prompt,
-                            refinedPrompt: refinedPrompt,
-                            plan: storeContextPlan
-                        )
+                    let snapshot = StoreGenerationContextSnapshot(
+                        originalPrompt: prompt,
+                        refinedPrompt: refinedPrompt,
+                        plan: storeContextPlan
+                    )
+                    try await lifecycle.updateStoreGenerationContext(snapshot)
+                    try context.storeRemixStateClient.stage(
+                        snapshot,
+                        setup.layout.packageRootURL
                     )
                     if let base = storeContextPlan.base {
                         try context.write(
@@ -450,7 +472,7 @@ struct SingleFileToolGenerationRuntime {
                 packageRootURL: setup.layout.packageRootURL
             )
             let usesStoreBase =
-                storeContextPlan?.base != nil
+                resumedWithStoreBase || storeContextPlan?.base != nil
                 || (contentPrompt.contains(Self.storeContextMarker)
                     && !existingBaseSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             let generator =
@@ -597,8 +619,15 @@ struct SingleFileToolGenerationRuntime {
         refinedPrompt: String,
         plan: StoreGenerationContextPlan
     ) -> String {
-        guard !plan.promptContext.isEmpty else { return refinedPrompt }
-        return [refinedPrompt, plan.promptContext].joined(separator: "\n\n")
+        storeAssistedPrompt(refinedPrompt: refinedPrompt, promptContext: plan.promptContext)
+    }
+
+    private static func storeAssistedPrompt(
+        refinedPrompt: String,
+        promptContext: String
+    ) -> String {
+        guard !promptContext.isEmpty else { return refinedPrompt }
+        return [refinedPrompt, promptContext].joined(separator: "\n\n")
     }
 
     private static func settings(
@@ -618,11 +647,35 @@ struct SingleFileToolGenerationRuntime {
         )
     }
 
+    private static func settings(
+        _ settings: ToolGenerationSettings,
+        applying context: PendingStoreGenerationContext
+    ) -> ToolGenerationSettings {
+        ToolGenerationSettings(
+            appKind: settings.appKind,
+            menuBarSystemImage: settings.menuBarSystemImage,
+            sandboxEnabled: settings.sandboxEnabled,
+            sandboxPermissions: GeneratedAppSandboxPermissions(
+                rawValueList: context.resolvedSandboxPermissions.joined(separator: ",")
+            ),
+            resourcePermissions: GeneratedAppResourcePermissions(
+                rawValueList: context.resolvedResourcePermissions.joined(separator: ",")
+            )
+        )
+    }
+
     static func canReuseStoreContextPlan(
         _ plan: StoreGenerationContextPlan,
         with codingAgent: String
     ) -> Bool {
         plan.codingAgent == codingAgent
+    }
+
+    static func canReuseStoreContextPlan(
+        _ context: PendingStoreGenerationContext,
+        with codingAgent: String
+    ) -> Bool {
+        context.codingAgent == codingAgent
     }
 
     private func persistSubmittedAttachments(

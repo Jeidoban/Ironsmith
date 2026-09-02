@@ -92,17 +92,24 @@ extension StoreToolImportClient {
                 packageRootPath: packageRootURL.path,
                 generationState: request.initialGenerationState,
                 generationPhase: generationPhase,
-                storeId: request.app.storeId,
-                storeAppId: request.app.id,
-                storeVersionId: request.version.id,
-                storeVersionNumber: request.version.versionNumber,
-                storeSourceSha256: request.version.sourceSha256,
-                storeImportedAt: now,
-                storeRemixedFromVersionId: request.version.remixedFromVersionId,
+                storeMetadata: ToolStoreMetadata(
+                    provenance: StoreProvenance(
+                        remixSource: StoreVersionReference(
+                            versionId: request.version.id,
+                            storeId: request.app.storeId,
+                            appId: request.app.id,
+                            appName: request.app.name,
+                            versionNumber: request.version.versionNumber,
+                            sourceSha256: request.version.sourceSha256
+                        ),
+                        inspirations: (request.version.inspiredByVersionIds ?? []).map {
+                            StoreVersionReference(versionId: $0)
+                        }
+                    )
+                ),
                 createdAt: now,
                 updatedAt: now
             )
-            tool.storeInspiredByVersionIds = request.version.inspiredByVersionIds ?? []
             modelContext.insert(tool)
             do {
                 try modelContext.save()

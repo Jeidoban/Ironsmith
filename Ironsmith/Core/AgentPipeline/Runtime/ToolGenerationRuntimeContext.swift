@@ -156,6 +156,7 @@ struct ToolGenerationRuntimeDependencies {
     let planningClient: ToolGenerationPlanningClient
     let promptRefinementClient: ToolPromptRefinementClient
     let versionBackupClient: ToolVersionBackupClient
+    let storeRemixStateClient: ToolStoreRemixStateClient
     let packageMaterializer: ToolPackageMaterializer
     let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
@@ -172,6 +173,7 @@ struct ToolGenerationRuntimeDependencies {
         planningClient: ToolGenerationPlanningClient = .fallback(),
         promptRefinementClient: ToolPromptRefinementClient = .disabled(),
         versionBackupClient: ToolVersionBackupClient,
+        storeRemixStateClient: ToolStoreRemixStateClient = .live,
         packageMaterializer: ToolPackageMaterializer? = nil,
         attachmentStorage: ToolPromptAttachmentStorage = .live,
         codexAgentClient: CodexAgentClient = .unconfigured,
@@ -187,6 +189,7 @@ struct ToolGenerationRuntimeDependencies {
         self.planningClient = planningClient
         self.promptRefinementClient = promptRefinementClient
         self.versionBackupClient = versionBackupClient
+        self.storeRemixStateClient = storeRemixStateClient
         self.packageMaterializer =
             packageMaterializer ?? ToolPackageMaterializer(fileClient: fileClient)
         self.attachmentStorage = attachmentStorage
@@ -206,6 +209,7 @@ struct ToolGenerationRuntimeDependencies {
         planningClient: ToolGenerationPlanningClient? = nil,
         promptRefinementClient: ToolPromptRefinementClient? = nil,
         versionBackupClient: ToolVersionBackupClient = .live,
+        storeRemixStateClient: ToolStoreRemixStateClient = .live,
         packageMaterializer: ToolPackageMaterializer? = nil,
         attachmentStorage: ToolPromptAttachmentStorage = .live,
         codexAgentClient: CodexAgentClient = .live(),
@@ -222,6 +226,7 @@ struct ToolGenerationRuntimeDependencies {
             planningClient: planningClient ?? .live(),
             promptRefinementClient: promptRefinementClient ?? .live(),
             versionBackupClient: versionBackupClient,
+            storeRemixStateClient: storeRemixStateClient,
             packageMaterializer: packageMaterializer,
             attachmentStorage: attachmentStorage,
             codexAgentClient: codexAgentClient,
@@ -245,6 +250,7 @@ struct ToolGenerationRuntimeContext {
     let promptRefinementClient: ToolPromptRefinementClient
     let promptRefinementEnabled: Bool
     let versionBackupClient: ToolVersionBackupClient
+    let storeRemixStateClient: ToolStoreRemixStateClient
     let packageMaterializer: ToolPackageMaterializer
     let attachmentStorage: ToolPromptAttachmentStorage
     let codexAgentClient: CodexAgentClient
@@ -295,6 +301,7 @@ struct ToolGenerationRuntimeContext {
         self.promptRefinementClient = dependencies.promptRefinementClient
         self.promptRefinementEnabled = languageModelContext.promptRefinementEnabled
         self.versionBackupClient = dependencies.versionBackupClient
+        self.storeRemixStateClient = dependencies.storeRemixStateClient
         self.packageMaterializer = dependencies.packageMaterializer
         self.attachmentStorage = dependencies.attachmentStorage
         self.codexAgentClient = dependencies.codexAgentClient

@@ -15,6 +15,7 @@ struct ToolItemPresentationState {
     let hasStoreSourceChanges: Bool
     let activeCodingAgent: ToolCodingAgent?
     let canShowAgentOutput: Bool
+    var storeInspirations: [StoreVersionReference] = []
 
     var isBusy: Bool {
         isLaunching || isExporting || isRebuilding || isRestoring || isEditingDetails
@@ -30,8 +31,9 @@ struct ToolItemActions {
     let onEditDetails: () -> Void
     let onRebuild: () -> Void
     let onPublishToStore: () -> Void
+    let onOpenStoreApp: () -> Void
     let onOpenStoreSource: () -> Void
-    let onOpenStoreInspiration: (StoreGenerationCapabilityContext) -> Void
+    let onOpenStoreInspiration: (StoreVersionReference) -> Void
     let onRevert: () -> Void
     let onExport: () -> Void
     let onShowInFinder: () -> Void
@@ -50,6 +52,7 @@ struct ToolItemActions {
         onEditDetails: {},
         onRebuild: {},
         onPublishToStore: {},
+        onOpenStoreApp: {},
         onOpenStoreSource: {},
         onOpenStoreInspiration: { _ in },
         onRevert: {},
@@ -102,16 +105,21 @@ struct ToolItemActionsMenu: View {
         Button("Rebuild App", action: actions.onRebuild)
             .disabled(!tool.isGenerationReady || state.isBusy)
         if state.showsStoreActions {
-            if tool.storeGenerationBaseAppId != nil {
-                Button("View Remix Source in Store", action: actions.onOpenStoreSource)
-            }
-            if let capabilities = tool.storeGenerationContextSnapshot?.plan.capabilities,
-                !capabilities.isEmpty
-            {
-                Menu("Inspired by") {
-                    ForEach(capabilities, id: \.id) { capability in
-                        Button(capability.appName) {
-                            actions.onOpenStoreInspiration(capability)
+            if hasStoreLinks {
+                Menu("Store Links") {
+                    if hasThisAppStoreLink {
+                        Button("View in Store", action: actions.onOpenStoreApp)
+                    }
+                    if hasRemixSourceStoreLink {
+                        Button("View Remix Source in Store", action: actions.onOpenStoreSource)
+                    }
+                    if state.storeInspirations.contains(where: \.isRoutable) {
+                        Menu("Inspirations") {
+                            ForEach(state.storeInspirations.filter(\.isRoutable)) { inspiration in
+                                Button(inspiration.appName ?? "Store App") {
+                                    actions.onOpenStoreInspiration(inspiration)
+                                }
+                            }
                         }
                     }
                 }
@@ -150,6 +158,19 @@ struct ToolItemActionsMenu: View {
 
     private var storePublishActionTitle: String {
         state.canUpdateStoreVersion ? "Update Store Version..." : "Publish to Ironsmith Store..."
+    }
+
+    private var hasStoreLinks: Bool {
+        hasThisAppStoreLink || hasRemixSourceStoreLink
+            || state.storeInspirations.contains(where: \.isRoutable)
+    }
+
+    private var hasThisAppStoreLink: Bool {
+        tool.storePublication != nil
+    }
+
+    private var hasRemixSourceStoreLink: Bool {
+        tool.storeRemixSource?.isRoutable == true
     }
 
     private var canContinue: Bool {
