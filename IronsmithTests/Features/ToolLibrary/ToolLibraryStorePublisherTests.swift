@@ -1007,7 +1007,8 @@ extension ToolLibraryTests {
             screenshots: [],
             currentVersion: version,
             versions: [version],
-            remix: nil
+            remix: nil,
+            inspirations: []
         )
     }
 

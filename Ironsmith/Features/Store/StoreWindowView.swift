@@ -78,7 +78,7 @@ struct StoreWindowView: View {
                             routeStore: routeStore,
                             inferenceStore: inferenceStore,
                             onOpenCreator: openCreator,
-                            onOpenRemix: openRemix
+                            onOpenStoreLink: openStoreLink
                         )
                     case .section(let section):
                         StoreSectionAppsView(
@@ -237,10 +237,10 @@ struct StoreWindowView: View {
         )
     }
 
-    private func openRemix(_ remix: StoreRemixMetadata) {
-        store.select(storeID: remix.storeId, appID: remix.appId)
+    private func openStoreLink(_ link: StoreVersionLinkMetadata) {
+        store.select(storeID: link.storeId, appID: link.appId)
         path.append(
-            .app(StoreAppRoute(appID: remix.appId, storeID: remix.storeId))
+            .app(StoreAppRoute(appID: link.appId, storeID: link.storeId))
         )
     }
 
@@ -971,7 +971,7 @@ private struct StoreAppDetailDestinationView: View {
     let routeStore: IronsmithRouteStore
     let inferenceStore: InferenceStore
     let onOpenCreator: (String, String) -> Void
-    let onOpenRemix: (StoreRemixMetadata) -> Void
+    let onOpenStoreLink: (StoreVersionLinkMetadata) -> Void
 
     var body: some View {
         StoreAppDetailView(
@@ -996,7 +996,7 @@ private struct StoreAppDetailDestinationView: View {
                     )
                 }
             },
-            onOpenRemix: onOpenRemix,
+            onOpenStoreLink: onOpenStoreLink,
             onOpenCreator: onOpenCreator,
             loadSource: { app, version in
                 try await store.fetchSource(for: version, of: app)

@@ -102,9 +102,7 @@ extension StoreToolImportClient {
                             versionNumber: request.version.versionNumber,
                             sourceSha256: request.version.sourceSha256
                         ),
-                        inspirations: (request.version.inspiredByVersionIds ?? []).map {
-                            StoreVersionReference(versionId: $0)
-                        }
+                        inspirations: []
                     )
                 ),
                 createdAt: now,

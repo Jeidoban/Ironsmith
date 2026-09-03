@@ -902,9 +902,7 @@ final class StoreWindowStore {
                 versionNumber: version.versionNumber,
                 sourceSha256: version.sourceSha256
             ),
-            inspirations: (version.inspiredByVersionIds ?? []).map {
-                StoreVersionReference(versionId: $0)
-            }
+            inspirations: []
         )
         tool.updatedAt = Date()
     }

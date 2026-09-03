@@ -142,13 +142,15 @@ nonisolated struct StoreVersionDownload: Decodable, Equatable, Sendable {
     let sourceCode: String
 }
 
-nonisolated struct StoreRemixMetadata: Decodable, Equatable, Sendable {
+nonisolated struct StoreVersionLinkMetadata: Decodable, Equatable, Identifiable, Sendable {
     let storeId: String
     let appId: String
     let appName: String
     let versionId: String
     let versionNumber: Int
     let isDeleted: Bool
+
+    var id: String { versionId }
 
     init(
         storeId: String,
@@ -261,7 +263,8 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
     let screenshots: [StoreAsset]
     let currentVersion: StoreVersionMetadata
     let versions: [StoreVersionMetadata]
-    let remix: StoreRemixMetadata?
+    let remix: StoreVersionLinkMetadata?
+    let inspirations: [StoreVersionLinkMetadata]
 
     var iconAsset: StoreAsset? {
         icon

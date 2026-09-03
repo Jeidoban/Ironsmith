@@ -106,15 +106,15 @@ struct ToolItemActionsMenu: View {
             .disabled(!tool.isGenerationReady || state.isBusy)
         if state.showsStoreActions {
             if hasStoreLinks {
-                Menu("Store Links") {
+                Menu("Open in Store") {
                     if hasThisAppStoreLink {
-                        Button("View in Store", action: actions.onOpenStoreApp)
+                        Button("This App", action: actions.onOpenStoreApp)
                     }
                     if hasRemixSourceStoreLink {
-                        Button("View Remix Source in Store", action: actions.onOpenStoreSource)
+                        Button("Remix Source", action: actions.onOpenStoreSource)
                     }
                     if state.storeInspirations.contains(where: \.isRoutable) {
-                        Menu("Inspirations") {
+                        Section("Using Ideas From") {
                             ForEach(state.storeInspirations.filter(\.isRoutable)) { inspiration in
                                 Button(inspiration.appName ?? "Store App") {
                                     actions.onOpenStoreInspiration(inspiration)

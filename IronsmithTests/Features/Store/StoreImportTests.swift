@@ -56,16 +56,16 @@ struct StoreImportTests {
     }
 
     @Test
-    func storeRemixMetadataDecodesDeletedMarkerWithLegacyFallback() throws {
+    func storeVersionLinkMetadataDecodesDeletedMarkerWithLegacyFallback() throws {
         let deleted = try JSONDecoder().decode(
-            StoreRemixMetadata.self,
+            StoreVersionLinkMetadata.self,
             from: Data(
                 #"{"storeId":"store","appId":"app","appName":"[Deleted]","versionId":"version","versionNumber":2,"isDeleted":true}"#
                     .utf8
             )
         )
         let legacy = try JSONDecoder().decode(
-            StoreRemixMetadata.self,
+            StoreVersionLinkMetadata.self,
             from: Data(
                 #"{"storeId":"store","appId":"app","appName":"Original","versionId":"version","versionNumber":1}"#
                     .utf8
@@ -74,6 +74,37 @@ struct StoreImportTests {
 
         #expect(deleted.isDeleted)
         #expect(!legacy.isDeleted)
+    }
+
+    @Test
+    func storeVersionMetadataDecodesLegacyResponseWithoutInspirationIDs() throws {
+        let version = try JSONDecoder().decode(
+            StoreVersionMetadata.self,
+            from: Data(
+                """
+                {
+                  "id": "00000000-0000-4000-8000-000000000201",
+                  "appId": "00000000-0000-4000-8000-000000000101",
+                  "versionNumber": 1,
+                  "sourceSha256": "legacy-sha",
+                  "generationSettings": {
+                    "appKind": "window",
+                    "menuBarSystemImage": "hammer",
+                    "sandboxEnabled": true,
+                    "sandboxPermissions": "internet",
+                    "resourcePermissions": ""
+                  },
+                  "runtimeVersion": "ironsmith-macos-v1",
+                  "license": "MIT",
+                  "legalAttributions": [],
+                  "remixedFromVersionId": null,
+                  "publishedAt": "2026-06-27T00:00:00.000Z"
+                }
+                """.utf8
+            )
+        )
+
+        #expect(version.inspiredByVersionIds == nil)
     }
 
     @MainActor
@@ -452,7 +483,8 @@ struct StoreImportTests {
         let version = Self.versionDownload(
             appId: app.id,
             sourceCode: source,
-            sourceSha256: IronsmithStoreClient.sha256Hex(for: source)
+            sourceSha256: IronsmithStoreClient.sha256Hex(for: source),
+            inspiredByVersionIds: ["capability-idea-version"]
         )
 
         let result = try await StoreToolImportClient.live(toolsDirectoryURL: root)
@@ -476,6 +508,7 @@ struct StoreImportTests {
         #expect(tool.appVersionNumber == version.versionNumber)
         #expect(tool.category == app.category)
         #expect(tool.storeRemixSource?.sourceSha256 == version.sourceSha256)
+        #expect(tool.storeInspirations.isEmpty)
     }
 
     @MainActor
@@ -1697,7 +1730,8 @@ struct StoreImportTests {
             screenshots: [],
             currentVersion: currentVersion,
             versions: versions,
-            remix: nil
+            remix: nil,
+            inspirations: []
         )
     }
 
@@ -1772,7 +1806,8 @@ struct StoreImportTests {
         sourceCode: String,
         sourceSha256: String,
         license: StoreLicenseIdentifier = .mit,
-        remixedFromVersionId: String? = nil
+        remixedFromVersionId: String? = nil,
+        inspiredByVersionIds: [String] = []
     ) -> StoreVersionDownload {
         StoreVersionDownload(
             id: id,
@@ -1795,6 +1830,7 @@ struct StoreImportTests {
                 )
             ],
             remixedFromVersionId: remixedFromVersionId,
+            inspiredByVersionIds: inspiredByVersionIds,
             publishedAt: "2026-06-27T00:00:00.000Z",
             sourceCode: sourceCode
         )
