@@ -268,16 +268,6 @@ struct PromptComposerView: View {
                 }
             }
 
-            if showsAutoRemixControl {
-                Toggle("Auto-remix from Store", isOn: $autoRemixEnabled)
-                    .disabled(!isAutoRemixAvailable)
-                    .help(
-                        isAutoRemixAvailable
-                            ? "Find a compatible Store app and reusable capabilities before generating."
-                            : "Sign in with Ironsmith to use Store-assisted generation."
-                    )
-            }
-
             Menu("Coding Agent") {
                 checkedSelectionButton(
                     .automatic,
@@ -342,10 +332,23 @@ struct PromptComposerView: View {
                 }
             }
 
-            if showsSandboxControl {
+            if showsSandboxControl || showsAutoRemixControl {
                 Divider()
+            }
+
+            if showsSandboxControl {
                 Toggle("Sandbox Enabled", isOn: $sandboxEnabled)
                     .help(sandboxHelpText)
+            }
+
+            if showsAutoRemixControl {
+                Toggle("Auto Remix", isOn: $autoRemixEnabled)
+                    .disabled(!isAutoRemixAvailable)
+                    .help(
+                        isAutoRemixAvailable
+                            ? "Find a compatible Store app and reusable capabilities before generating."
+                            : "Sign in with Ironsmith to use Store-assisted generation."
+                    )
             }
 
             if showsPermissionControls {

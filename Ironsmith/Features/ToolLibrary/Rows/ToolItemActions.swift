@@ -108,7 +108,7 @@ struct ToolItemActionsMenu: View {
             if hasStoreLinks {
                 Menu("Open in Store") {
                     if hasThisAppStoreLink {
-                        Button("This App", action: actions.onOpenStoreApp)
+                        Button("This App", action: thisAppStoreAction)
                     }
                     if hasRemixSourceStoreLink {
                         Button("Remix Source", action: actions.onOpenStoreSource)
@@ -166,11 +166,21 @@ struct ToolItemActionsMenu: View {
     }
 
     private var hasThisAppStoreLink: Bool {
-        tool.storePublication != nil
+        tool.storePublication != nil || usesDownloadedStoreLinkAsThisApp
     }
 
     private var hasRemixSourceStoreLink: Bool {
-        tool.storeRemixSource?.isRoutable == true
+        tool.storeRemixSource?.isRoutable == true && !usesDownloadedStoreLinkAsThisApp
+    }
+
+    private var usesDownloadedStoreLinkAsThisApp: Bool {
+        tool.storePublication == nil
+            && tool.storeRemixSource?.isRoutable == true
+            && !state.hasStoreSourceChanges
+    }
+
+    private var thisAppStoreAction: () -> Void {
+        usesDownloadedStoreLinkAsThisApp ? actions.onOpenStoreSource : actions.onOpenStoreApp
     }
 
     private var canContinue: Bool {

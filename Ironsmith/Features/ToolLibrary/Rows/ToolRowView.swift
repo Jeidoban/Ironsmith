@@ -29,25 +29,46 @@ struct ToolRowView: View {
                             if tool.generationState == .generating,
                                 let baseAppName = tool.storeRemixSource?.appName
                             {
-                                Button("Remixing \(baseAppName) · \(generationStatusText)") {
-                                    actions.onOpenStoreSource()
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Button {
+                                        actions.onOpenStoreSource()
+                                    } label: {
+                                        Text(
+                                            "\(Text("Remixing ").foregroundColor(.secondary))\(Text(baseAppName).foregroundColor(.accentColor))"
+                                        )
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("View \(baseAppName) in the Store")
+
+                                    Text(generationStatusText)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
-                                .buttonStyle(.plain)
-                                .help("View \(baseAppName) in the Store")
                             } else if tool.generationState == .generating,
                                 !tool.storeInspirationLinks.isEmpty
                             {
-                                Text(
-                                    "Using ideas from \(tool.storeInspirationLinks.count) apps · \(generationStatusText)"
-                                )
+                                let inspirationCount = tool.storeInspirationLinks.count
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(
+                                        "Using ideas from \(inspirationCount) \(inspirationCount == 1 ? "app" : "apps")"
+                                    )
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                    Text(generationStatusText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             } else {
                                 Text(generationStatusText)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
                     .font(.caption)
                     .foregroundStyle(statusStyle)
-                    .lineLimit(1)
 
                     Spacer()
                 }

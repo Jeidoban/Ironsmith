@@ -89,16 +89,7 @@ enum StoreRemixTestFixture {
                 ),
                 base: base,
                 capabilities: capabilities,
-                inspiredByVersionIds: inspiredByVersionIds ?? capabilities.map(\.versionId),
-                planner: StoreGenerationPlannerMetadata(
-                    provider: "openrouter",
-                    model: "openai/gpt-5.6-luna",
-                    promptVersion: 1
-                ),
-                embedding: StoreGenerationEmbeddingMetadata(
-                    model: "text-embedding-3-small",
-                    dimensions: 1_024
-                )
+                inspiredByVersionIds: inspiredByVersionIds ?? capabilities.map(\.versionId)
             )
         )
     }

@@ -534,16 +534,7 @@ extension AgentPipelineTests {
             ),
             base: nil,
             capabilities: [],
-            inspiredByVersionIds: [],
-            planner: StoreGenerationPlannerMetadata(
-                provider: "openrouter",
-                model: "openai/gpt-5.6-luna",
-                promptVersion: 1
-            ),
-            embedding: StoreGenerationEmbeddingMetadata(
-                model: "text-embedding-3-small",
-                dimensions: 1_024
-            )
+            inspiredByVersionIds: []
         )
 
         #expect(SingleFileToolGenerationRuntime.canReuseStoreContextPlan(plan, with: "flame"))
@@ -634,16 +625,7 @@ extension AgentPipelineTests {
                     validationSteps: ["Select a preset and start the timer"]
                 )
             ],
-            inspiredByVersionIds: ["version-capability"],
-            planner: StoreGenerationPlannerMetadata(
-                provider: "openrouter",
-                model: "openai/gpt-5.6-luna",
-                promptVersion: 1
-            ),
-            embedding: StoreGenerationEmbeddingMetadata(
-                model: "text-embedding-3-small",
-                dimensions: 1_024
-            )
+            inspiredByVersionIds: ["version-capability"]
         )
         var storeClient = IronsmithStoreClient.unconfigured
         storeClient.prepareGenerationContext = { request in

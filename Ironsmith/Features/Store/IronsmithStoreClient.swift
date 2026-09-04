@@ -417,17 +417,6 @@ nonisolated struct StoreGenerationAdaptationInstructions: Codable, Equatable, Se
     let removeUnrelatedBehavior: Bool
 }
 
-nonisolated struct StoreGenerationPlannerMetadata: Codable, Equatable, Sendable {
-    let provider: String
-    let model: String
-    let promptVersion: Int
-}
-
-nonisolated struct StoreGenerationEmbeddingMetadata: Codable, Equatable, Sendable {
-    let model: String
-    let dimensions: Int
-}
-
 nonisolated struct StoreGenerationContextPlan: Codable, Equatable, Sendable {
     let id: String
     let mode: StoreGenerationContextMode
@@ -448,8 +437,6 @@ nonisolated struct StoreGenerationContextPlan: Codable, Equatable, Sendable {
     let base: StoreGenerationBaseContext?
     let capabilities: [StoreGenerationCapabilityContext]
     let inspiredByVersionIds: [String]
-    let planner: StoreGenerationPlannerMetadata
-    let embedding: StoreGenerationEmbeddingMetadata
 }
 
 nonisolated struct StoreGenerationContextSnapshot: Codable, Equatable, Sendable {
