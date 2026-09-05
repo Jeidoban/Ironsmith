@@ -26,7 +26,8 @@ struct ToolRowView: View {
                             .lineLimit(1)
 
                         if let generationStatusText {
-                            if tool.generationState == .generating,
+                            if state.showsStoreActions,
+                                tool.generationState == .generating,
                                 let baseAppName = tool.storeRemixSource?.appName
                             {
                                 VStack(alignment: .leading, spacing: 1) {
@@ -46,7 +47,8 @@ struct ToolRowView: View {
                                         .foregroundStyle(.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
-                            } else if tool.generationState == .generating,
+                            } else if state.showsStoreActions,
+                                tool.generationState == .generating,
                                 !tool.storeInspirationLinks.isEmpty
                             {
                                 let inspirationCount = tool.storeInspirationLinks.count

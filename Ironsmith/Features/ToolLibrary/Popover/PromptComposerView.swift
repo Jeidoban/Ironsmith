@@ -387,7 +387,10 @@ struct PromptComposerView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) {
             notification in
             guard let menu = notification.object as? NSMenu else { return }
-            CodingAgentMenuHelp.apply(to: menu)
+            GenerationSettingsMenuHelp.apply(
+                to: menu,
+                isAutoRemixAvailable: isAutoRemixAvailable
+            )
         }
     }
 
@@ -563,7 +566,7 @@ private enum PromptAttachmentOpenPanel {
     }
 }
 
-private enum CodingAgentMenuHelp {
+private enum GenerationSettingsMenuHelp {
     private static let tooltips: [String: String] = [
         ToolCodingAgentPreference.ironsmithSpark.displayName:
             "Best for simple apps using on-device AI.",
@@ -573,13 +576,18 @@ private enum CodingAgentMenuHelp {
             "Best for complex, feature-rich apps. Typically uses 1.5-2x more tokens than Flame.",
     ]
 
-    static func apply(to menu: NSMenu) {
+    static func apply(to menu: NSMenu, isAutoRemixAvailable: Bool) {
         for item in menu.items {
             if let tooltip = tooltips[item.title] {
                 item.toolTip = tooltip
+            } else if item.title == "Auto Remix" {
+                item.toolTip =
+                    isAutoRemixAvailable
+                    ? "Remix an existing store app and reuse its capabilities in your generated app."
+                    : "Sign in with Ironsmith to use store-assisted generation."
             }
             if let submenu = item.submenu {
-                apply(to: submenu)
+                apply(to: submenu, isAutoRemixAvailable: isAutoRemixAvailable)
             }
         }
     }

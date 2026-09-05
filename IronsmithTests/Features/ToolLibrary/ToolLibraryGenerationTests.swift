@@ -8,6 +8,12 @@ import Testing
 extension ToolLibraryTests {
     @MainActor
     @Test
+    func autoRemixDefaultsOff() {
+        #expect(!ToolLibraryStore().autoRemixEnabled)
+    }
+
+    @MainActor
+    @Test
     func downloadedAppFirstEditUsesExistingStoreAttributionAndSourceHash() throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -302,6 +308,7 @@ extension ToolLibraryTests {
         let store = ToolLibraryStore(
             dependencies: ToolLibraryDependencies(
                 generationClient: ToolGenerationClient { request in
+                    #expect(request.storeAssistedGenerationEnabled)
                     try await request.lifecycle.prepareCreatedTool(
                         ToolGenerationPreparedTool(
                             name: "Auto Remix",
@@ -326,9 +333,14 @@ extension ToolLibraryTests {
                 runnerClient: ToolRunnerClient { _ in }
             )
         )
+        store.autoRemixEnabled = true
         store.prompt = snapshot.originalPrompt
 
-        await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
+        await store.submitPrompt(
+            modelContext: context,
+            inferenceStore: inferenceStore,
+            storeAssistedGenerationAvailable: true
+        )
 
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
         #expect(tool.generationState == .ready)
