@@ -347,7 +347,7 @@ struct ToolLibraryPopoverView: View {
                 resourcePermissions: resourcePermissionsBinding,
                 codingAgentPreference: codingAgentPreferenceBinding,
                 reasoningEffort: reasoningEffortBinding,
-                autoRemixEnabled: $toolLibraryStore.autoRemixEnabled,
+                autoRemixEnabled: autoRemixEnabledBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
                 showsSandboxControl: showSandboxOverride,
                 showsPermissionControls: !inferenceStore.generationPreferences
@@ -958,6 +958,13 @@ struct ToolLibraryPopoverView: View {
             set: { newValue in
                 inferenceStore.generationPreferences.codingAgentPreference = newValue
             }
+        )
+    }
+
+    private var autoRemixEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { inferenceStore.generationPreferences.autoRemixEnabled },
+            set: { inferenceStore.generationPreferences.autoRemixEnabled = $0 }
         )
     }
 

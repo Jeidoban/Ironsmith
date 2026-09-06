@@ -70,7 +70,6 @@ final class ToolLibraryStore {
     var menuBarSystemImage = ToolMenuBarSymbol.fallback
     var sandboxPermissions = GeneratedAppSandboxPermissions.default
     var resourcePermissions = GeneratedAppResourcePermissions.none
-    var autoRemixEnabled = false
     private(set) var attachments: [ToolPromptAttachment] = []
     private(set) var launchingToolID: UUID?
     private(set) var runningToolIDs = Set<UUID>()
@@ -585,7 +584,7 @@ final class ToolLibraryStore {
                     attachments: submittedAttachments,
                     lifecycle: lifecycle,
                     storeAssistedGenerationEnabled: selectedTool == nil
-                        && autoRemixEnabled
+                        && inferenceStore.generationPreferences.autoRemixEnabled
                         && storeAssistedGenerationAvailable
                 )
             )

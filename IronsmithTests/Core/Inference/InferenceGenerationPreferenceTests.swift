@@ -399,6 +399,20 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func autoRemixDefaultsOffAndPersists() {
+        let suiteName = "IronsmithTests.AutoRemixPreference.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(!preferences.autoRemixEnabled)
+
+        preferences.autoRemixEnabled = true
+        #expect(GenerationPreferencesStore(userDefaults: userDefaults).autoRemixEnabled)
+    }
+
+    @MainActor
+    @Test
     func generatedAppResourcePermissionPreferencesDefaultOffAndPersist() {
         let suiteName = "IronsmithTests.GeneratedAppResourcePermissions.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!

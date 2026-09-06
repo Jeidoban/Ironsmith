@@ -8,12 +8,6 @@ import Testing
 extension ToolLibraryTests {
     @MainActor
     @Test
-    func autoRemixDefaultsOff() {
-        #expect(!ToolLibraryStore().autoRemixEnabled)
-    }
-
-    @MainActor
-    @Test
     func downloadedAppFirstEditUsesExistingStoreAttributionAndSourceHash() throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -408,7 +402,7 @@ extension ToolLibraryTests {
                 runnerClient: ToolRunnerClient { _ in }
             )
         )
-        store.autoRemixEnabled = true
+        inferenceStore.generationPreferences.autoRemixEnabled = true
         store.prompt = snapshot.originalPrompt
 
         await store.submitPrompt(
