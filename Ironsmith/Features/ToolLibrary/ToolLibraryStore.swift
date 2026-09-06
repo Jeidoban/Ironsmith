@@ -78,6 +78,7 @@ final class ToolLibraryStore {
     var rebuildingToolID: UUID?
     var restoringToolID: UUID?
     private(set) var activeCodingAgentByToolID: [UUID: ToolCodingAgent] = [:]
+    private(set) var activeStoreRemixGenerationToolID: UUID?
     private(set) var selectedToolID: UUID?
     private(set) var selectedToolName: String?
     private var restorableToolIDs = Set<UUID>()
@@ -155,8 +156,21 @@ final class ToolLibraryStore {
 
     func handleDeletedTool(_ tool: Tool) {
         restorableToolIDs.remove(tool.id)
+        setStoreRemixGenerationActive(false, for: tool)
         if selectedToolID == tool.id {
             clearSelection()
+        }
+    }
+
+    func isActivelyRemixingFromStore(_ tool: Tool) -> Bool {
+        activeStoreRemixGenerationToolID == tool.id
+    }
+
+    private func setStoreRemixGenerationActive(_ isActive: Bool, for tool: Tool) {
+        if isActive {
+            activeStoreRemixGenerationToolID = tool.id
+        } else if activeStoreRemixGenerationToolID == tool.id {
+            activeStoreRemixGenerationToolID = nil
         }
     }
 
@@ -531,6 +545,10 @@ final class ToolLibraryStore {
                 throw ToolLibraryAttachmentError.unsupportedSelection
             }
             if let selectedTool {
+                setStoreRemixGenerationActive(
+                    isFirstEditOfDownloadedApp(selectedTool),
+                    for: selectedTool
+                )
                 setActiveCodingAgent(activeCodingAgent, for: selectedTool)
                 markToolGenerating(
                     selectedTool,
@@ -897,6 +915,9 @@ final class ToolLibraryStore {
         isGenerating = true
         generationStopWasRequested = false
         clearPresentedErrorState()
+        if hasPendingStoreRemixContext(for: tool) {
+            setStoreRemixGenerationActive(true, for: tool)
+        }
         let activeToolBox = BindingBox<Tool?>(tool)
         let lifecycle = generationLifecycle(
             modelContext: modelContext,
@@ -1086,6 +1107,10 @@ final class ToolLibraryStore {
                         remixSource: remixSource,
                         inspirations: inspirations
                     )
+                    self.setStoreRemixGenerationActive(
+                        remixSource != nil || !inspirations.isEmpty,
+                        for: tool
+                    )
                     let currentSettings = tool.generationSettings(defaults: .default)
                     tool.applyGenerationSettings(
                         ToolGenerationSettings(
@@ -1114,6 +1139,7 @@ final class ToolLibraryStore {
                 try await MainActor.run {
                     guard let tool = activeTool.value else { return }
                     tool.storeProvenance = nil
+                    self.setStoreRemixGenerationActive(false, for: tool)
                     tool.pendingPrompt = refinedPrompt
                     tool.updatedAt = .now
                     try modelContext.save()
@@ -1266,6 +1292,7 @@ final class ToolLibraryStore {
         tool.pendingPrompt = nil
         tool.generationErrorSummary = nil
         tool.generationRepairErrorCount = nil
+        setStoreRemixGenerationActive(false, for: tool)
         removePendingDraft(for: tool)
         tool.updatedAt = .now
     }

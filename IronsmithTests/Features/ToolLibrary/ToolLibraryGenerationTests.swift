@@ -112,6 +112,81 @@ extension ToolLibraryTests {
 
     @MainActor
     @Test
+    func remixStatusOnlyTracksDownloadedAppsFirstEdit() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
+        let context = ModelContext(container)
+        let inferenceStore = InferenceStore(
+            dependencies: Self.inferenceDependencies(),
+            appleFoundationModelPreferenceStore: try Self.appleFoundationModelPreferenceStore()
+        )
+        await inferenceStore.loadIfNeeded(modelContext: context)
+
+        let source =
+            "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"Original\") } }\n"
+        let tool = Tool(
+            name: "Tiny Notes",
+            executableName: "TinyNotes",
+            packageRootPath: root.path,
+            storeMetadata: ToolStoreMetadata(
+                provenance: StoreProvenance(
+                    remixSource: StoreVersionReference(
+                        versionId: "00000000-0000-4000-8000-000000000202",
+                        storeId: IronsmithStoreConstants.communityStoreId,
+                        appId: "00000000-0000-4000-8000-000000000102",
+                        appName: "Original Notes",
+                        sourceSha256: IronsmithStoreClient.sha256Hex(for: source)
+                    ),
+                    inspirations: []
+                )
+            )
+        )
+        let sourceURL = try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath)
+        try FileManager.default.createDirectory(
+            at: sourceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try source.write(to: sourceURL, atomically: true, encoding: .utf8)
+        context.insert(tool)
+        try context.save()
+
+        let store = ToolLibraryStore(
+            dependencies: ToolLibraryDependencies(
+                generationClient: ToolGenerationClient { _ in
+                    throw ToolGenerationError.stoppedToSaveTokens("Paused for test")
+                },
+                runnerClient: ToolRunnerClient { _ in }
+            )
+        )
+        store.selectForEditing(tool)
+        store.prompt = "Change the app"
+
+        await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
+
+        #expect(tool.generationState == .stopped)
+        #expect(store.isActivelyRemixingFromStore(tool))
+
+        store.discardGeneration(tool, in: context)
+        #expect(!store.isActivelyRemixingFromStore(tool))
+
+        try (source + "// changed\n").write(
+            to: sourceURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        store.selectForEditing(tool)
+        store.prompt = "Change it again"
+
+        await store.submitPrompt(modelContext: context, inferenceStore: inferenceStore)
+
+        #expect(tool.generationState == .stopped)
+        #expect(!store.isActivelyRemixingFromStore(tool))
+    }
+
+    @MainActor
+    @Test
     func toolLibraryStoreSuppressesGenerationCancellationErrors() async throws {
         let container = try IronsmithModelContainerFactory.make(isRunningTests: true)
         let context = ModelContext(container)
@@ -344,6 +419,7 @@ extension ToolLibraryTests {
 
         let tool = try #require(try context.fetch(FetchDescriptor<StoredTool>()).first)
         #expect(tool.generationState == .ready)
+        #expect(!store.isActivelyRemixingFromStore(tool))
         #expect(tool.storeRemixSource?.storeId == snapshot.plan.base?.storeId)
         #expect(tool.storeRemixSource?.appId == snapshot.plan.base?.appId)
         #expect(tool.storeRemixSource?.versionId == snapshot.plan.base?.versionId)

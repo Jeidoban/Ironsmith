@@ -511,7 +511,8 @@ struct ToolLibraryPopoverView: View {
             ),
             activeCodingAgent: toolLibraryStore.activeCodingAgent(for: tool),
             canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool),
-            storeInspirations: tool.storeInspirationLinks
+            storeInspirations: tool.storeInspirationLinks,
+            isActivelyRemixingFromStore: toolLibraryStore.isActivelyRemixingFromStore(tool)
         )
     }
 

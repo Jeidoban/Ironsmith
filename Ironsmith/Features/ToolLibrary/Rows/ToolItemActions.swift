@@ -16,6 +16,7 @@ struct ToolItemPresentationState {
     let activeCodingAgent: ToolCodingAgent?
     let canShowAgentOutput: Bool
     var storeInspirations: [StoreVersionReference] = []
+    var isActivelyRemixingFromStore = false
 
     var isBusy: Bool {
         isLaunching || isExporting || isRebuilding || isRestoring || isEditingDetails
