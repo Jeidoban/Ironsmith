@@ -336,7 +336,6 @@ nonisolated struct StoreGenerationContextRequest: Encodable, Equatable, Sendable
     let resolvedAppKind: ToolAppKind
     let sandboxPermissions: [String]
     let resourcePermissions: [String]
-    let runtimeVersion: String
     let codingAgent: String
     let permissionMode: String
 
@@ -352,7 +351,6 @@ nonisolated struct StoreGenerationContextRequest: Encodable, Equatable, Sendable
         resolvedAppKind = settings.appKind
         sandboxPermissions = settings.sandboxPermissions.enabledPermissions.map(\.rawValue)
         resourcePermissions = settings.resourcePermissions.enabledPermissions.map(\.rawValue)
-        runtimeVersion = IronsmithStoreConstants.runtimeVersion
         self.codingAgent = Self.value(for: codingAgent)
         permissionMode = automaticallySelectPermissions ? "automatic" : "strict"
     }
@@ -373,70 +371,25 @@ nonisolated struct StoreGenerationBaseContext: Codable, Equatable, Sendable {
     let appId: String
     let appName: String
     let versionNumber: Int
-    let runtimeVersion: String
-    let appKind: ToolAppKind
-    let summary: String
-    let coreWorkflow: String
-    let useCases: [String]
-    let frameworks: [String]
-    let sandboxPermissions: String
-    let resourcePermissions: String
-    let sourceTokenEstimate: Int
-    let score: Double
-    let sourceCode: String
     let sourceSha256: String
-    let generationSettings: StoreGenerationSettingsDTO
-    let license: StoreLicenseIdentifier
-    let legalAttributions: [StoreLegalAttribution]
+    let sourceCode: String
 }
 
-nonisolated struct StoreGenerationCapabilityContext: Codable, Equatable, Sendable {
-    let id: String
+nonisolated struct StoreGenerationContextPlan: Codable, Equatable, Sendable {
+    let mode: StoreGenerationContextMode
+    let codingAgent: String
+    let promptContext: String
+    let resolvedSandboxPermissions: [String]
+    let resolvedResourcePermissions: [String]
+    let base: StoreGenerationBaseContext?
+    let inspirations: [StoreGenerationInspirationReference]
+}
+
+nonisolated struct StoreGenerationInspirationReference: Codable, Equatable, Sendable {
     let versionId: String
     let storeId: String
     let appId: String
     let appName: String
-    let title: String
-    let summary: String
-    let blueprint: String
-    let frameworks: [String]
-    let requirements: [String]
-    let constraints: [String]
-    let validationSteps: [String]
-}
-
-nonisolated struct StoreGenerationRequirement: Codable, Equatable, Sendable {
-    let id: String
-    let description: String
-    let priority: String
-}
-
-nonisolated struct StoreGenerationAdaptationInstructions: Codable, Equatable, Sendable {
-    let preserve: [String]
-    let implement: [String]
-    let removeUnrelatedBehavior: Bool
-}
-
-nonisolated struct StoreGenerationContextPlan: Codable, Equatable, Sendable {
-    let id: String
-    let mode: StoreGenerationContextMode
-    let matchScore: Double
-    let explanation: String
-    let confidenceBand: String
-    let resolvedAppKind: ToolAppKind
-    let codingAgent: String
-    let permissionMode: String
-    let appliedStoreContextBudgetTokens: Int?
-    let estimatedStoreContextTokens: Int
-    let promptContext: String
-    let resolvedSandboxPermissions: [String]
-    let resolvedResourcePermissions: [String]
-    let coveredRequirements: [StoreGenerationRequirement]
-    let missingRequirements: [StoreGenerationRequirement]
-    let adaptationInstructions: StoreGenerationAdaptationInstructions
-    let base: StoreGenerationBaseContext?
-    let capabilities: [StoreGenerationCapabilityContext]
-    let inspiredByVersionIds: [String]
 }
 
 nonisolated struct StoreGenerationContextSnapshot: Codable, Equatable, Sendable {

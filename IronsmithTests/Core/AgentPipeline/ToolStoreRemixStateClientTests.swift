@@ -35,7 +35,7 @@ struct ToolStoreRemixStateClientTests {
     func completedScratchStateRemovesEmptySidecar() throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let snapshot = StoreRemixTestFixture.snapshot(base: nil, capabilities: [])
+        let snapshot = StoreRemixTestFixture.snapshot(base: nil, inspirations: [])
         let client = ToolStoreRemixStateClient.live
 
         try client.stage(snapshot, root)
@@ -59,37 +59,20 @@ struct ToolStoreRemixStateClientTests {
 enum StoreRemixTestFixture {
     static func snapshot(
         base: StoreGenerationBaseContext? = base,
-        capabilities: [StoreGenerationCapabilityContext] = capabilities,
-        inspiredByVersionIds: [String]? = nil,
+        inspirations: [StoreGenerationInspirationReference] = inspirations,
         codingAgent: String = "spark"
     ) -> StoreGenerationContextSnapshot {
         StoreGenerationContextSnapshot(
             originalPrompt: "Build a focused timer with presets",
             refinedPrompt: "Build a focused timer with selectable presets and sounds.",
             plan: StoreGenerationContextPlan(
-                id: "plan-1",
-                mode: base == nil ? (capabilities.isEmpty ? .scratch : .capabilitiesOnly) : .baseWithCapabilities,
-                matchScore: 0.82,
-                explanation: "The base matches the timer workflow.",
-                confidenceBand: "high",
-                resolvedAppKind: .window,
+                mode: base == nil ? (inspirations.isEmpty ? .scratch : .capabilitiesOnly) : .baseWithCapabilities,
                 codingAgent: codingAgent,
-                permissionMode: "automatic",
-                appliedStoreContextBudgetTokens: 16_000,
-                estimatedStoreContextTokens: 800,
                 promptContext: "[STORE-ASSISTED GENERATION CONTEXT]",
                 resolvedSandboxPermissions: ["internet"],
                 resolvedResourcePermissions: [],
-                coveredRequirements: [],
-                missingRequirements: [],
-                adaptationInstructions: StoreGenerationAdaptationInstructions(
-                    preserve: ["Run a focused timer"],
-                    implement: ["Offer selectable presets"],
-                    removeUnrelatedBehavior: true
-                ),
                 base: base,
-                capabilities: capabilities,
-                inspiredByVersionIds: inspiredByVersionIds ?? capabilities.map(\.versionId)
+                inspirations: inspirations
             )
         )
     }
@@ -100,63 +83,38 @@ enum StoreRemixTestFixture {
         appId: "app-1",
         appName: "Simple Timer",
         versionNumber: 3,
-        runtimeVersion: IronsmithStoreConstants.runtimeVersion,
-        appKind: .window,
-        summary: "A small timer app.",
-        coreWorkflow: "Start and stop a timer.",
-        useCases: ["Focus"],
-        frameworks: ["SwiftUI"],
-        sandboxPermissions: "",
-        resourcePermissions: "",
-        sourceTokenEstimate: 100,
-        score: 1,
-        sourceCode: "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"Timer\") } }",
         sourceSha256: "sha256",
-        generationSettings: StoreGenerationSettingsDTO(settings: .default),
-        license: .mit,
-        legalAttributions: []
+        sourceCode: "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"Timer\") } }"
     )
 
-    static let capabilities = [
-        capability(
-            id: "capability-1",
+    static let inspirations = [
+        inspiration(
             versionId: "version-capability-1",
             appId: "app-2",
             appName: "Preset Timer"
         ),
-        capability(
-            id: "capability-2",
+        inspiration(
             versionId: "version-capability-2",
             appId: "app-2",
             appName: "Preset Timer"
         ),
-        capability(
-            id: "capability-3",
+        inspiration(
             versionId: "version-capability-3",
             appId: "app-3",
             appName: "Sound Timer"
         ),
     ]
 
-    private static func capability(
-        id: String,
+    private static func inspiration(
         versionId: String,
         appId: String,
         appName: String
-    ) -> StoreGenerationCapabilityContext {
-        StoreGenerationCapabilityContext(
-            id: id,
+    ) -> StoreGenerationInspirationReference {
+        StoreGenerationInspirationReference(
             versionId: versionId,
             storeId: "store-1",
             appId: appId,
-            appName: appName,
-            title: "Reusable timer behavior",
-            summary: "Adds reusable timer behavior.",
-            blueprint: "Represent the behavior with SwiftUI state.",
-            frameworks: ["SwiftUI"],
-            requirements: [],
-            constraints: [],
-            validationSteps: []
+            appName: appName
         )
     }
 }

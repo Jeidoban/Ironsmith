@@ -302,14 +302,12 @@ private enum IronsmithV8StoreMigration {
                 sourceSha256: $0.sourceSha256
             )
         }
-        let inspiredVersionIDs = Set(plan.inspiredByVersionIds)
-        let inspirations: [StoreVersionReference] = plan.capabilities.compactMap { capability in
-            guard inspiredVersionIDs.contains(capability.versionId) else { return nil }
+        let inspirations: [StoreVersionReference] = plan.inspirations.map { inspiration in
             return StoreVersionReference(
-                versionId: capability.versionId,
-                storeId: capability.storeId,
-                appId: capability.appId,
-                appName: capability.appName,
+                versionId: inspiration.versionId,
+                storeId: inspiration.storeId,
+                appId: inspiration.appId,
+                appName: inspiration.appName,
                 versionNumber: nil,
                 sourceSha256: nil
             )
@@ -334,8 +332,8 @@ private enum IronsmithV8StoreMigration {
         var inspirations = snapshotProvenance?.inspirations ?? []
         var representedVersionIDs = Set(inspirations.map(\.versionId))
         let unresolvedReferences =
-            (snapshot?.plan.inspiredByVersionIds.map {
-                StoreVersionReference(versionId: $0)
+            (snapshot?.plan.inspirations.map {
+                StoreVersionReference(versionId: $0.versionId)
             } ?? []) + rawInspirations
         inspirations.append(
             contentsOf: unresolvedReferences.filter {

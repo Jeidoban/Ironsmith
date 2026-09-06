@@ -495,7 +495,7 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
-    func storeGenerationRequestUsesCodingAgentAndPermissionPolicy() {
+    func storeGenerationRequestUsesCodingAgentAndPermissionPolicy() throws {
         let request = StoreGenerationContextRequest(
             originalPrompt: "Build a timer",
             refinedPrompt: "Build a focused timer",
@@ -506,35 +506,67 @@ extension AgentPipelineTests {
 
         #expect(request.codingAgent == "flame")
         #expect(request.permissionMode == "strict")
+        let encoded = try String(
+            decoding: JSONEncoder().encode(request),
+            as: UTF8.self
+        )
+        #expect(!encoded.contains("runtimeVersion"))
+    }
+
+    @MainActor
+    @Test
+    func compactStoreGenerationContextPlanDecodesGenerationAndProvenanceData() throws {
+        let data = Data(
+            #"""
+            {
+              "mode": "base_with_capabilities",
+              "codingAgent": "flame",
+              "promptContext": "[STORE-ASSISTED GENERATION CONTEXT]",
+              "resolvedSandboxPermissions": ["internet"],
+              "resolvedResourcePermissions": ["camera"],
+              "base": {
+                "versionId": "base-version",
+                "storeId": "store-1",
+                "appId": "app-1",
+                "appName": "Simple Timer",
+                "versionNumber": 3,
+                "sourceSha256": "base-sha",
+                "sourceCode": "import SwiftUI"
+              },
+              "inspirations": [{
+                "versionId": "inspiration-version",
+                "storeId": "store-2",
+                "appId": "app-2",
+                "appName": "Preset Timer"
+              }]
+            }
+            """#.utf8
+        )
+
+        let plan = try JSONDecoder().decode(StoreGenerationContextPlan.self, from: data)
+
+        #expect(plan.mode == .baseWithCapabilities)
+        #expect(plan.codingAgent == "flame")
+        #expect(plan.promptContext == "[STORE-ASSISTED GENERATION CONTEXT]")
+        #expect(plan.resolvedSandboxPermissions == ["internet"])
+        #expect(plan.resolvedResourcePermissions == ["camera"])
+        #expect(plan.base?.sourceCode == "import SwiftUI")
+        #expect(plan.base?.versionId == "base-version")
+        #expect(plan.inspirations.first?.appName == "Preset Timer")
+        #expect(plan.inspirations.map(\.versionId) == ["inspiration-version"])
     }
 
     @MainActor
     @Test
     func storeContextPlanMustMatchTheResumeCodingAgent() {
         let plan = StoreGenerationContextPlan(
-            id: "plan-1",
             mode: .scratch,
-            matchScore: 0,
-            explanation: "No Store context selected.",
-            confidenceBand: "low",
-            resolvedAppKind: .window,
             codingAgent: "flame",
-            permissionMode: "strict",
-            appliedStoreContextBudgetTokens: 32_000,
-            estimatedStoreContextTokens: 0,
             promptContext: "",
             resolvedSandboxPermissions: [],
             resolvedResourcePermissions: [],
-            coveredRequirements: [],
-            missingRequirements: [],
-            adaptationInstructions: StoreGenerationAdaptationInstructions(
-                preserve: [],
-                implement: [],
-                removeUnrelatedBehavior: true
-            ),
             base: nil,
-            capabilities: [],
-            inspiredByVersionIds: []
+            inspirations: []
         )
 
         #expect(SingleFileToolGenerationRuntime.canReuseStoreContextPlan(plan, with: "flame"))
@@ -551,81 +583,32 @@ extension AgentPipelineTests {
         let promptCapture = PromptCapture()
         let storeCapture = StoreGenerationCapture()
         let plan = StoreGenerationContextPlan(
-            id: "plan-1",
             mode: .baseWithCapabilities,
-            matchScore: 0.82,
-            explanation: "The base matches the timer workflow.",
-            confidenceBand: "high",
-            resolvedAppKind: .window,
             codingAgent: "spark",
-            permissionMode: "automatic",
-            appliedStoreContextBudgetTokens: 16_000,
-            estimatedStoreContextTokens: 800,
             promptContext: """
                 [STORE-ASSISTED GENERATION CONTEXT]
                 Selection mode: base_with_capabilities
                 Reusable capability from “Preset Timer”: Selectable presets
-                """,
+            """,
             resolvedSandboxPermissions: ["internet", "userSelectedFiles"],
             resolvedResourcePermissions: ["camera"],
-            coveredRequirements: [
-                StoreGenerationRequirement(
-                    id: "timer",
-                    description: "Run a focused timer",
-                    priority: "core"
-                )
-            ],
-            missingRequirements: [
-                StoreGenerationRequirement(
-                    id: "presets",
-                    description: "Offer selectable presets",
-                    priority: "optional"
-                )
-            ],
-            adaptationInstructions: StoreGenerationAdaptationInstructions(
-                preserve: ["Run a focused timer"],
-                implement: ["Offer selectable presets"],
-                removeUnrelatedBehavior: true
-            ),
             base: StoreGenerationBaseContext(
                 versionId: "version-base",
                 storeId: "store-1",
                 appId: "app-1",
                 appName: "Simple Timer",
                 versionNumber: 3,
-                runtimeVersion: IronsmithStoreConstants.runtimeVersion,
-                appKind: .window,
-                summary: "A small timer app.",
-                coreWorkflow: "Start and stop a timer.",
-                useCases: ["Focus"],
-                frameworks: ["SwiftUI"],
-                sandboxPermissions: "",
-                resourcePermissions: "",
-                sourceTokenEstimate: 100,
-                score: 1,
-                sourceCode: Self.originalEditableSource,
                 sourceSha256: "sha256",
-                generationSettings: StoreGenerationSettingsDTO(settings: .default),
-                license: .mit,
-                legalAttributions: []
+                sourceCode: Self.originalEditableSource
             ),
-            capabilities: [
-                StoreGenerationCapabilityContext(
-                    id: "capability-1",
+            inspirations: [
+                StoreGenerationInspirationReference(
                     versionId: "version-capability",
                     storeId: "store-1",
                     appId: "app-2",
-                    appName: "Preset Timer",
-                    title: "Selectable presets",
-                    summary: "Lets the user choose a duration before starting.",
-                    blueprint: "Represent presets as values and bind the selected value in view state.",
-                    frameworks: ["SwiftUI"],
-                    requirements: ["Keep preset selection visible"],
-                    constraints: ["Do not add permissions"],
-                    validationSteps: ["Select a preset and start the timer"]
+                    appName: "Preset Timer"
                 )
-            ],
-            inspiredByVersionIds: ["version-capability"]
+            ]
         )
         var storeClient = IronsmithStoreClient.unconfigured
         storeClient.prepareGenerationContext = { request in
@@ -723,8 +706,13 @@ extension AgentPipelineTests {
                     sourceSha256: $0.sourceSha256
                 )
             },
-            inspirations: savedSnapshot.plan.inspiredByVersionIds.map {
-                StoreVersionReference(versionId: $0)
+            inspirations: savedSnapshot.plan.inspirations.map {
+                StoreVersionReference(
+                    versionId: $0.versionId,
+                    storeId: $0.storeId,
+                    appId: $0.appId,
+                    appName: $0.appName
+                )
             }
         )
 

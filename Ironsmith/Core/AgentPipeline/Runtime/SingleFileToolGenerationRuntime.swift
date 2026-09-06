@@ -600,7 +600,7 @@ struct SingleFileToolGenerationRuntime {
             try Task.checkCancellation()
             let baseVersionID = plan.base?.versionId ?? "none"
             AgentDiagnosticsLog.append(
-                "Store generation context selected. mode: \(plan.mode.rawValue), base: \(baseVersionID), capabilities: \(plan.capabilities.count)"
+                "Store generation context selected. mode: \(plan.mode.rawValue), base: \(baseVersionID), inspirations: \(plan.inspirations.count)"
             )
             return plan
         } catch is CancellationError {

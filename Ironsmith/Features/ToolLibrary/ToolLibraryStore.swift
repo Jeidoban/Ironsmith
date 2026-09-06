@@ -1074,25 +1074,14 @@ final class ToolLibraryStore {
                             sourceSha256: $0.sourceSha256
                         )
                     }
-                    let inspiredVersionIDs = Set(plan.inspiredByVersionIds)
-                    var inspirations: [StoreVersionReference] = plan.capabilities.compactMap {
-                        capability in
-                        guard inspiredVersionIDs.contains(capability.versionId) else {
-                            return nil
-                        }
+                    let inspirations = plan.inspirations.map { inspiration in
                         return StoreVersionReference(
-                            versionId: capability.versionId,
-                            storeId: capability.storeId,
-                            appId: capability.appId,
-                            appName: capability.appName
+                            versionId: inspiration.versionId,
+                            storeId: inspiration.storeId,
+                            appId: inspiration.appId,
+                            appName: inspiration.appName
                         )
                     }
-                    let resolvedVersionIDs = Set(inspirations.map(\.versionId))
-                    inspirations.append(
-                        contentsOf: plan.inspiredByVersionIds
-                            .filter { !resolvedVersionIDs.contains($0) }
-                            .map { StoreVersionReference(versionId: $0) }
-                    )
                     tool.replaceStoreProvenance(
                         remixSource: remixSource,
                         inspirations: inspirations

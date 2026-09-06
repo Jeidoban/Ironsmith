@@ -203,12 +203,8 @@ struct PersistenceTests {
         )
         let packageRoot = root.appendingPathComponent("Timer", isDirectory: true)
         let toolID = UUID()
-        let planOnlyInspirationID = "version-plan-only"
         let legacyOnlyInspirationID = "version-legacy-only"
-        let snapshot = StoreRemixTestFixture.snapshot(
-            inspiredByVersionIds: StoreRemixTestFixture.capabilities.map(\.versionId)
-                + [planOnlyInspirationID]
-        )
+        let snapshot = StoreRemixTestFixture.snapshot()
         let snapshotData = try JSONEncoder().encode(snapshot)
 
         do {
@@ -226,7 +222,7 @@ struct PersistenceTests {
                     generationPhase: .generatingSource,
                     generationMode: .create,
                     pendingPrompt: snapshot.originalPrompt,
-                    storeGenerationContextPlanId: snapshot.plan.id,
+                    storeGenerationContextPlanId: "plan-1",
                     storeGenerationContextMode: snapshot.plan.mode.rawValue,
                     storeGenerationContextPayloadJSON: String(
                         decoding: snapshotData,
@@ -236,7 +232,7 @@ struct PersistenceTests {
                     storeGenerationBaseAppId: snapshot.plan.base?.appId,
                     storeGenerationBaseVersionId: snapshot.plan.base?.versionId,
                     storeInspiredByVersionIdsRawValue:
-                        (snapshot.plan.inspiredByVersionIds + [legacyOnlyInspirationID])
+                        (snapshot.plan.inspirations.map(\.versionId) + [legacyOnlyInspirationID])
                         .joined(separator: ",")
                 )
             )
@@ -255,7 +251,7 @@ struct PersistenceTests {
         #expect(tool.storeRemixSource?.versionId == snapshot.plan.base?.versionId)
         #expect(
             tool.storeAttributionVersionIds
-                == snapshot.plan.inspiredByVersionIds + [legacyOnlyInspirationID]
+                == snapshot.plan.inspirations.map(\.versionId) + [legacyOnlyInspirationID]
         )
         #expect(
             tool.storeInspirationLinks.compactMap(\.appName)

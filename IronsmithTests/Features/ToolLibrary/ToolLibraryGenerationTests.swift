@@ -347,7 +347,7 @@ extension ToolLibraryTests {
         #expect(tool.storeRemixSource?.storeId == snapshot.plan.base?.storeId)
         #expect(tool.storeRemixSource?.appId == snapshot.plan.base?.appId)
         #expect(tool.storeRemixSource?.versionId == snapshot.plan.base?.versionId)
-        #expect(tool.storeAttributionVersionIds == snapshot.plan.inspiredByVersionIds)
+        #expect(tool.storeAttributionVersionIds == snapshot.plan.inspirations.map(\.versionId))
         #expect(try ToolStoreRemixStateClient.live.pendingContext(packageRoot) == nil)
         #expect(tool.storeRemixSource?.appName == "Simple Timer")
         #expect(
