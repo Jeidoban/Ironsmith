@@ -121,6 +121,7 @@ nonisolated struct StoreVersionMetadata: Decodable, Identifiable, Equatable, Sen
     let license: StoreLicenseIdentifier
     let legalAttributions: [StoreLegalAttribution]
     let remixedFromVersionId: String?
+    var inspiredByVersionIds: [String]? = nil
     let publishedAt: String
 }
 
@@ -136,17 +137,20 @@ nonisolated struct StoreVersionDownload: Decodable, Equatable, Sendable {
     let license: StoreLicenseIdentifier
     let legalAttributions: [StoreLegalAttribution]
     let remixedFromVersionId: String?
+    var inspiredByVersionIds: [String]? = nil
     let publishedAt: String
     let sourceCode: String
 }
 
-nonisolated struct StoreRemixMetadata: Decodable, Equatable, Sendable {
+nonisolated struct StoreVersionLinkMetadata: Decodable, Equatable, Identifiable, Sendable {
     let storeId: String
     let appId: String
     let appName: String
     let versionId: String
     let versionNumber: Int
     let isDeleted: Bool
+
+    var id: String { versionId }
 
     init(
         storeId: String,
@@ -259,7 +263,8 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
     let screenshots: [StoreAsset]
     let currentVersion: StoreVersionMetadata
     let versions: [StoreVersionMetadata]
-    let remix: StoreRemixMetadata?
+    let remix: StoreVersionLinkMetadata?
+    let inspirations: [StoreVersionLinkMetadata]
 
     var iconAsset: StoreAsset? {
         icon
@@ -299,6 +304,7 @@ nonisolated struct StorePublicationRequest: Sendable {
     let iconThumbnailJPEG: Data
     let screenshotJPEGs: [Data]
     let remixedFromVersionId: String?
+    var inspiredByVersionIds: [String] = []
 }
 
 nonisolated struct StoreVersionPublicationRequest: Sendable {
@@ -314,6 +320,82 @@ nonisolated struct StoreVersionPublicationRequest: Sendable {
     let screenshotJPEGs: [Data]
     let replaceScreenshots: Bool
     let remixedFromVersionId: String?
+    var inspiredByVersionIds: [String] = []
+}
+
+nonisolated enum StoreGenerationContextMode: String, Codable, Equatable, Sendable {
+    case base
+    case baseWithCapabilities = "base_with_capabilities"
+    case capabilitiesOnly = "capabilities_only"
+    case scratch
+}
+
+nonisolated struct StoreGenerationContextRequest: Encodable, Equatable, Sendable {
+    let originalPrompt: String
+    let refinedPrompt: String
+    let resolvedAppKind: ToolAppKind
+    let sandboxPermissions: [String]
+    let resourcePermissions: [String]
+    let codingAgent: String
+    let permissionMode: String
+
+    init(
+        originalPrompt: String,
+        refinedPrompt: String,
+        settings: ToolGenerationSettings,
+        codingAgent: ToolCodingAgent,
+        automaticallySelectPermissions: Bool
+    ) {
+        self.originalPrompt = originalPrompt
+        self.refinedPrompt = refinedPrompt
+        resolvedAppKind = settings.appKind
+        sandboxPermissions = settings.sandboxPermissions.enabledPermissions.map(\.rawValue)
+        resourcePermissions = settings.resourcePermissions.enabledPermissions.map(\.rawValue)
+        self.codingAgent = Self.value(for: codingAgent)
+        permissionMode = automaticallySelectPermissions ? "automatic" : "strict"
+    }
+
+    static func value(for codingAgent: ToolCodingAgent) -> String {
+        switch codingAgent {
+        case .ironsmithSpark: "spark"
+        case .ironsmithFlame: "flame"
+        case .codex: "codex"
+        case .custom: "custom"
+        }
+    }
+}
+
+nonisolated struct StoreGenerationBaseContext: Codable, Equatable, Sendable {
+    let versionId: String
+    let storeId: String
+    let appId: String
+    let appName: String
+    let versionNumber: Int
+    let sourceSha256: String
+    let sourceCode: String
+}
+
+nonisolated struct StoreGenerationContextPlan: Codable, Equatable, Sendable {
+    let mode: StoreGenerationContextMode
+    let codingAgent: String
+    let promptContext: String
+    let resolvedSandboxPermissions: [String]
+    let resolvedResourcePermissions: [String]
+    let base: StoreGenerationBaseContext?
+    let inspirations: [StoreGenerationInspirationReference]
+}
+
+nonisolated struct StoreGenerationInspirationReference: Codable, Equatable, Sendable {
+    let versionId: String
+    let storeId: String
+    let appId: String
+    let appName: String
+}
+
+nonisolated struct StoreGenerationContextSnapshot: Codable, Equatable, Sendable {
+    let originalPrompt: String
+    let refinedPrompt: String
+    let plan: StoreGenerationContextPlan
 }
 
 nonisolated struct StoreListingUpdateRequest: Encodable, Sendable {
@@ -350,9 +432,11 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
         case .sourceHashMismatch:
             return "The downloaded source did not match the scanned source hash."
         case .unsupportedLicense(let identifier):
-            return "Update Ironsmith to download or remix apps containing the \(identifier) license."
+            return
+                "Update Ironsmith to download or remix apps containing the \(identifier) license."
         case .unchangedStoreVersion:
-            return "The source matches the currently published version. Make a source change before publishing a new version."
+            return
+                "The source matches the currently published version. Make a source change before publishing a new version."
         }
     }
 }
@@ -386,6 +470,9 @@ nonisolated struct IronsmithStoreClient {
             async throws
             -> StoreAppDetail
     var deleteApp: @Sendable (_ storeId: String, _ appId: String) async throws -> Void
+    var prepareGenerationContext:
+        @Sendable (_ request: StoreGenerationContextRequest) async throws
+            -> StoreGenerationContextPlan
 }
 
 extension IronsmithStoreClient {
@@ -477,7 +564,8 @@ extension IronsmithStoreClient {
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
                     generationSettings: StoreGenerationSettingsDTO(
                         settings: request.generationSettings),
-                    remixedFromVersionId: request.remixedFromVersionId
+                    remixedFromVersionId: request.remixedFromVersionId,
+                    inspiredByVersionIds: request.inspiredByVersionIds
                 )
                 let body = try StoreMultipartBody()
                     .addingJSONField(name: "metadata", value: metadata)
@@ -522,6 +610,7 @@ extension IronsmithStoreClient {
                     generationSettings: StoreGenerationSettingsDTO(
                         settings: request.generationSettings),
                     remixedFromVersionId: request.remixedFromVersionId,
+                    inspiredByVersionIds: request.inspiredByVersionIds,
                     replaceScreenshots: request.replaceScreenshots,
                     shortDescription: request.shortDescription,
                     description: request.description
@@ -576,6 +665,16 @@ extension IronsmithStoreClient {
                     method: "DELETE",
                     authentication: .required
                 )
+            },
+            prepareGenerationContext: { request in
+                let response: StoreDataEnvelope<StoreGenerationContextPlan> = try await api.request(
+                    "api/v1/stores/generation-context",
+                    method: "POST",
+                    body: try StoreJSON.encoder.encode(request),
+                    contentType: "application/json",
+                    authentication: .required
+                )
+                return response.data
             }
         )
     }
@@ -591,7 +690,8 @@ extension IronsmithStoreClient {
             publishApp: { _ in throw IronsmithStoreClientError.notConfigured },
             publishVersion: { _ in throw IronsmithStoreClientError.notConfigured },
             patchListing: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
-            deleteApp: { _, _ in throw IronsmithStoreClientError.notConfigured }
+            deleteApp: { _, _ in throw IronsmithStoreClientError.notConfigured },
+            prepareGenerationContext: { _ in throw IronsmithStoreClientError.notConfigured }
         )
     }
 
@@ -624,7 +724,8 @@ extension IronsmithStoreClient {
         }
         if backendError?.code == "store_review_rejected" {
             var seenReasons: Set<String> = []
-            let reasons = backendError?.findings?
+            let reasons =
+                backendError?.findings?
                 .map { finding in
                     let detail = finding.detail?
                         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -780,6 +881,7 @@ nonisolated private struct StorePublicationMetadataPayload: Encodable {
     let runtimeVersion: String
     let generationSettings: StoreGenerationSettingsDTO
     let remixedFromVersionId: String?
+    let inspiredByVersionIds: [String]
 }
 
 nonisolated private struct StoreVersionMetadataPayload: Encodable {
@@ -787,6 +889,7 @@ nonisolated private struct StoreVersionMetadataPayload: Encodable {
     let runtimeVersion: String
     let generationSettings: StoreGenerationSettingsDTO
     let remixedFromVersionId: String?
+    let inspiredByVersionIds: [String]
     let replaceScreenshots: Bool
     let shortDescription: String
     let description: String

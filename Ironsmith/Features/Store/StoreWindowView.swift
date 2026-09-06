@@ -78,7 +78,7 @@ struct StoreWindowView: View {
                             routeStore: routeStore,
                             inferenceStore: inferenceStore,
                             onOpenCreator: openCreator,
-                            onOpenRemix: openRemix
+                            onOpenStoreLink: openStoreLink
                         )
                     case .section(let section):
                         StoreSectionAppsView(
@@ -237,10 +237,10 @@ struct StoreWindowView: View {
         )
     }
 
-    private func openRemix(_ remix: StoreRemixMetadata) {
-        store.select(storeID: remix.storeId, appID: remix.appId)
+    private func openStoreLink(_ link: StoreVersionLinkMetadata) {
+        store.select(storeID: link.storeId, appID: link.appId)
         path.append(
-            .app(StoreAppRoute(appID: remix.appId, storeID: remix.storeId))
+            .app(StoreAppRoute(appID: link.appId, storeID: link.storeId))
         )
     }
 
@@ -325,6 +325,11 @@ struct StoreWindowView: View {
                     path = [.app(StoreAppRoute(app: app))]
                 }
             }
+        case .app(let storeID, let appID):
+            sidebarSelection = .discover
+            path = []
+            store.select(storeID: storeID, appID: appID, forceReload: true)
+            path = [.app(StoreAppRoute(storeID: storeID, appID: appID))]
         }
     }
 }
@@ -341,6 +346,11 @@ private struct StoreAppRoute: Hashable {
     init(app: StoreAppSummary) {
         appID = app.id
         storeID = app.storeId
+    }
+
+    init(storeID: String, appID: String) {
+        self.appID = appID
+        self.storeID = storeID
     }
 
     init(appID: String, storeID: String) {
@@ -850,7 +860,9 @@ private struct StorePublishedListView: View {
                             VStack(spacing: 0) {
                                 StorePublishedRowView(
                                     app: app,
-                                    linkedTool: tools.first { $0.storeAppId == app.id },
+                                    linkedTool: tools.first {
+                                        $0.storePublication?.appId == app.id
+                                    },
                                     isWorking: store.workingAppID == app.id,
                                     onSelect: { onOpen(app) },
                                     onUpdateVersion: onUpdateVersion,
@@ -959,7 +971,7 @@ private struct StoreAppDetailDestinationView: View {
     let routeStore: IronsmithRouteStore
     let inferenceStore: InferenceStore
     let onOpenCreator: (String, String) -> Void
-    let onOpenRemix: (StoreRemixMetadata) -> Void
+    let onOpenStoreLink: (StoreVersionLinkMetadata) -> Void
 
     var body: some View {
         StoreAppDetailView(
@@ -984,7 +996,7 @@ private struct StoreAppDetailDestinationView: View {
                     )
                 }
             },
-            onOpenRemix: onOpenRemix,
+            onOpenStoreLink: onOpenStoreLink,
             onOpenCreator: onOpenCreator,
             loadSource: { app, version in
                 try await store.fetchSource(for: version, of: app)

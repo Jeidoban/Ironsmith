@@ -24,7 +24,8 @@ struct SingleFileToolGenerationRuntime {
         planningPolicy: ToolGenerationPlanningPolicy? = nil,
         imageGenerationProvider: ToolImageGenerationProvider = .disabled,
         attachments: [ToolPromptAttachment] = [],
-        lifecycle: ToolGenerationLifecycle = .noop
+        lifecycle: ToolGenerationLifecycle = .noop,
+        storeAssistedGenerationEnabled: Bool = false
     ) async throws -> ToolGenerationResult {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else {
@@ -34,10 +35,12 @@ struct SingleFileToolGenerationRuntime {
         let planningPolicy = planningPolicy ?? .manual(settings: settings)
 
         if let existingTool {
-            let effectivePrompt = existingTool.isGenerationReady
+            let effectivePrompt =
+                existingTool.isGenerationReady
                 ? trimmedPrompt
                 : Self.savedPrompt(for: existingTool, fallback: trimmedPrompt)
-            if !existingTool.isGenerationReady, (existingTool.generationMode ?? .create) == .create {
+            if !existingTool.isGenerationReady, (existingTool.generationMode ?? .create) == .create
+            {
                 return try await createTool(
                     prompt: effectivePrompt,
                     existingTool: existingTool,
@@ -45,7 +48,8 @@ struct SingleFileToolGenerationRuntime {
                     planningPolicy: planningPolicy,
                     imageGenerationProvider: imageGenerationProvider,
                     attachments: [],
-                    lifecycle: lifecycle
+                    lifecycle: lifecycle,
+                    storeAssistedGenerationEnabled: storeAssistedGenerationEnabled
                 )
             }
             return try await editTool(
@@ -64,7 +68,8 @@ struct SingleFileToolGenerationRuntime {
             planningPolicy: planningPolicy,
             imageGenerationProvider: imageGenerationProvider,
             attachments: attachments,
-            lifecycle: lifecycle
+            lifecycle: lifecycle,
+            storeAssistedGenerationEnabled: storeAssistedGenerationEnabled
         )
     }
 
@@ -115,7 +120,8 @@ struct SingleFileToolGenerationRuntime {
         let executableName = ToolNameSanitizer.executableName(from: displayName)
         let bundleIdentifier = ToolBundleIdentifier.make(executableName: executableName)
         let packageRootURL = try context.makeUniquePackageRoot(displayName: displayName)
-        let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
+        let layout = ToolPackageLayout(
+            packageRootURL: packageRootURL, executableName: executableName)
         let contentViewPath = layout.contentViewSourcePath
 
         try context.packageMaterializer.finalizePlaceholderPackage(
@@ -195,11 +201,14 @@ struct SingleFileToolGenerationRuntime {
         planningPolicy: ToolGenerationPlanningPolicy,
         imageGenerationProvider: ToolImageGenerationProvider,
         attachments: [ToolPromptAttachment],
-        lifecycle: ToolGenerationLifecycle
+        lifecycle: ToolGenerationLifecycle,
+        storeAssistedGenerationEnabled: Bool
     ) async throws -> ToolGenerationResult {
         let startingPhase = existingTool?.generationPhase ?? .initializing
         let setup: CreateToolSetup
-        if let existingTool, let resumedSetup = loadCreateSetup(for: existingTool, settings: settings) {
+        if let existingTool,
+            let resumedSetup = loadCreateSetup(for: existingTool, settings: settings)
+        {
             setup = resumedSetup
         } else {
             let placeholderRootURL: URL
@@ -250,6 +259,7 @@ struct SingleFileToolGenerationRuntime {
             """
         )
 
+        var effectiveSettings = setup.settings
         do {
             try Task.checkCancellation()
             let staggerIconGeneration = Self.shouldStaggerIconGeneration(
@@ -274,23 +284,150 @@ struct SingleFileToolGenerationRuntime {
             }
 
             let contentPrompt: String
-            if startingPhase == .generatingSource
+            var storeContextPlan: StoreGenerationContextPlan?
+            var resumedWithStoreBase = false
+            let savedStoreContext = existingTool.flatMap {
+                try? context.storeRemixStateClient.pendingContext($0.packageRootURL)
+            }
+            if savedStoreContext == nil,
+                existingTool?.generationMode == .create,
+                existingTool?.storeProvenance != nil
+            {
+                try await lifecycle.clearStoreGenerationContextForScratchFallback(
+                    prompt,
+                    nil
+                )
+            }
+            let currentStoreCodingAgent = StoreGenerationContextRequest.value(
+                for: context.pipelineConfiguration.codingAgent
+            )
+            if let snapshot = savedStoreContext,
+                Self.canReuseStoreContextPlan(snapshot, with: currentStoreCodingAgent)
+            {
+                effectiveSettings = Self.settings(
+                    effectiveSettings,
+                    applying: snapshot
+                )
+                contentPrompt = Self.storeAssistedPrompt(
+                    refinedPrompt: snapshot.refinedPrompt,
+                    promptContext: snapshot.promptContext
+                )
+                resumedWithStoreBase = snapshot.baseSourceCode != nil
+                if let baseSourceCode = snapshot.baseSourceCode,
+                    startingPhase == .initializing || startingPhase == .planning
+                        || startingPhase == .refiningPrompt
+                        || startingPhase == .searchingStore
+                        || startingPhase == .generatingSource
+                {
+                    try context.write(
+                        baseSourceCode,
+                        to: setup.contentViewPath,
+                        packageRootURL: setup.layout.packageRootURL
+                    )
+                }
+            } else if let snapshot = savedStoreContext {
+                storeContextPlan = await storeGenerationContext(
+                    originalPrompt: snapshot.originalPrompt,
+                    refinedPrompt: snapshot.refinedPrompt,
+                    setup: setup,
+                    planningPolicy: planningPolicy,
+                    enabled: storeAssistedGenerationEnabled,
+                    lifecycle: lifecycle
+                )
+                try Task.checkCancellation()
+                contentPrompt = storeContextPlan.map {
+                    Self.storeAssistedPrompt(
+                        refinedPrompt: snapshot.refinedPrompt,
+                        plan: $0
+                    )
+                } ?? snapshot.refinedPrompt
+                if let storeContextPlan {
+                    effectiveSettings = Self.settings(
+                        effectiveSettings,
+                        applying: storeContextPlan
+                    )
+                    let updatedSnapshot = StoreGenerationContextSnapshot(
+                        originalPrompt: snapshot.originalPrompt,
+                        refinedPrompt: snapshot.refinedPrompt,
+                        plan: storeContextPlan
+                    )
+                    try await lifecycle.updateStoreGenerationContext(updatedSnapshot)
+                    try context.storeRemixStateClient.stage(
+                        updatedSnapshot,
+                        setup.layout.packageRootURL
+                    )
+                    if let base = storeContextPlan.base {
+                        try context.write(
+                            base.sourceCode,
+                            to: setup.contentViewPath,
+                            packageRootURL: setup.layout.packageRootURL
+                        )
+                    }
+                    try await lifecycle.updatePendingPrompt(contentPrompt)
+                } else {
+                    try await lifecycle.clearStoreGenerationContextForScratchFallback(
+                        snapshot.refinedPrompt,
+                        nil
+                    )
+                    try context.storeRemixStateClient.clear(setup.layout.packageRootURL)
+                }
+            } else if startingPhase == .generatingSource
                 || startingPhase == .generatingRepairDiff
                 || startingPhase == .repairing
                 || startingPhase == .waitingForIcon
                 || startingPhase == .packaging
-                || startingPhase == .completed {
+                || startingPhase == .completed
+            {
                 contentPrompt = prompt
             } else {
-                contentPrompt = try await contentGenerationPrompt(
+                let refinedPrompt = try await contentGenerationPrompt(
                     for: prompt,
                     appKind: setup.settings.appKind,
                     sandboxEnabled: setup.settings.sandboxEnabled,
                     lifecycle: lifecycle
                 )
+                storeContextPlan = await storeGenerationContext(
+                    originalPrompt: prompt,
+                    refinedPrompt: refinedPrompt,
+                    setup: setup,
+                    planningPolicy: planningPolicy,
+                    enabled: storeAssistedGenerationEnabled,
+                    lifecycle: lifecycle
+                )
+                try Task.checkCancellation()
+                contentPrompt =
+                    storeContextPlan.map {
+                        Self.storeAssistedPrompt(refinedPrompt: refinedPrompt, plan: $0)
+                    } ?? refinedPrompt
+                if let storeContextPlan {
+                    effectiveSettings = Self.settings(
+                        effectiveSettings,
+                        applying: storeContextPlan
+                    )
+                    let snapshot = StoreGenerationContextSnapshot(
+                        originalPrompt: prompt,
+                        refinedPrompt: refinedPrompt,
+                        plan: storeContextPlan
+                    )
+                    try await lifecycle.updateStoreGenerationContext(snapshot)
+                    try context.storeRemixStateClient.stage(
+                        snapshot,
+                        setup.layout.packageRootURL
+                    )
+                    if let base = storeContextPlan.base {
+                        try context.write(
+                            base.sourceCode,
+                            to: setup.contentViewPath,
+                            packageRootURL: setup.layout.packageRootURL
+                        )
+                    }
+                    try await lifecycle.updatePendingPrompt(contentPrompt)
+                }
             }
 
-            if startingPhase == .waitingForIcon || startingPhase == .packaging || startingPhase == .completed {
+            if startingPhase == .waitingForIcon || startingPhase == .packaging
+                || startingPhase == .completed
+            {
                 return try await packageTool(
                     displayName: setup.displayName,
                     executableName: setup.executableName,
@@ -298,7 +435,7 @@ struct SingleFileToolGenerationRuntime {
                     category: setup.category,
                     versionNumber: 1,
                     packageRootURL: setup.layout.packageRootURL,
-                    settings: setup.settings,
+                    settings: effectiveSettings,
                     iconPrompt: setup.iconPrompt,
                     iconGeneration: iconGeneration,
                     lifecycle: lifecycle
@@ -313,7 +450,7 @@ struct SingleFileToolGenerationRuntime {
                     layout: setup.layout,
                     contentViewPath: setup.contentViewPath,
                     userPrompt: contentPrompt,
-                    settings: setup.settings,
+                    settings: effectiveSettings,
                     lifecycle: lifecycle
                 )
                 return try await packageTool(
@@ -323,25 +460,48 @@ struct SingleFileToolGenerationRuntime {
                     category: setup.category,
                     versionNumber: 1,
                     packageRootURL: setup.layout.packageRootURL,
-                    settings: setup.settings,
+                    settings: effectiveSettings,
                     iconPrompt: setup.iconPrompt,
                     iconGeneration: iconGeneration,
                     lifecycle: lifecycle
                 )
             }
 
-            let generator = createGenerator(
-                userPrompt: contentPrompt,
-                originalUserPrompt: prompt,
-                appKind: setup.settings.appKind,
-                sandboxEnabled: setup.settings.sandboxEnabled,
-                layout: setup.layout,
-                contentViewPath: setup.contentViewPath,
-                lifecycle: lifecycle,
-                resumePartialSource: startingPhase == .generatingSource,
-                useCurrentSourceOnFirstAttempt: startingPhase == .repairing || startingPhase == .generatingRepairDiff,
-                resumePartialRepairPatch: startingPhase == .generatingRepairDiff
+            let existingBaseSource = try context.readIfPresent(
+                setup.contentViewPath,
+                packageRootURL: setup.layout.packageRootURL
             )
+            let usesStoreBase =
+                resumedWithStoreBase || storeContextPlan?.base != nil
+                || (contentPrompt.contains(Self.storeContextMarker)
+                    && !existingBaseSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            let generator =
+                usesStoreBase
+                ? editGenerator(
+                    userPrompt: contentPrompt,
+                    layout: setup.layout,
+                    contentViewPath: setup.contentViewPath,
+                    existingSource: existingBaseSource,
+                    lifecycle: lifecycle,
+                    resumePartialPatch: startingPhase == .generatingSource,
+                    resumePartialSource: false,
+                    useCurrentSourceOnFirstAttempt: startingPhase == .repairing
+                        || startingPhase == .generatingRepairDiff,
+                    resumePartialRepairPatch: startingPhase == .generatingRepairDiff
+                )
+                : createGenerator(
+                    userPrompt: contentPrompt,
+                    originalUserPrompt: prompt,
+                    appKind: effectiveSettings.appKind,
+                    sandboxEnabled: effectiveSettings.sandboxEnabled,
+                    layout: setup.layout,
+                    contentViewPath: setup.contentViewPath,
+                    lifecycle: lifecycle,
+                    resumePartialSource: startingPhase == .generatingSource,
+                    useCurrentSourceOnFirstAttempt: startingPhase == .repairing
+                        || startingPhase == .generatingRepairDiff,
+                    resumePartialRepairPatch: startingPhase == .generatingRepairDiff
+                )
             try await compileGeneratedTool(
                 displayName: setup.displayName,
                 layout: setup.layout,
@@ -357,7 +517,7 @@ struct SingleFileToolGenerationRuntime {
                 category: setup.category,
                 versionNumber: 1,
                 packageRootURL: setup.layout.packageRootURL,
-                settings: setup.settings,
+                settings: effectiveSettings,
                 iconPrompt: setup.iconPrompt,
                 iconGeneration: iconGeneration,
                 lifecycle: lifecycle
@@ -415,6 +575,109 @@ struct SingleFileToolGenerationRuntime {
         return refinedPrompt
     }
 
+    private func storeGenerationContext(
+        originalPrompt: String,
+        refinedPrompt: String,
+        setup: CreateToolSetup,
+        planningPolicy: ToolGenerationPlanningPolicy,
+        enabled: Bool,
+        lifecycle: ToolGenerationLifecycle
+    ) async -> StoreGenerationContextPlan? {
+        guard enabled else { return nil }
+        do {
+            try await lifecycle.updatePhase(.generating, .searchingStore, nil)
+            try Task.checkCancellation()
+            let plan = try await context.storeClient.prepareGenerationContext(
+                StoreGenerationContextRequest(
+                    originalPrompt: originalPrompt,
+                    refinedPrompt: refinedPrompt,
+                    settings: setup.settings,
+                    codingAgent: context.pipelineConfiguration.codingAgent,
+                    automaticallySelectPermissions: planningPolicy
+                        .automaticallySelectPermissions
+                )
+            )
+            try Task.checkCancellation()
+            let baseVersionID = plan.base?.versionId ?? "none"
+            AgentDiagnosticsLog.append(
+                "Store generation context selected. mode: \(plan.mode.rawValue), base: \(baseVersionID), inspirations: \(plan.inspirations.count)"
+            )
+            return plan
+        } catch is CancellationError {
+            return nil
+        } catch {
+            AgentDiagnosticsLog.append(
+                "Store generation context unavailable; continuing from scratch. error: \(AgentDiagnosticsLog.renderError(error, limit: 500))"
+            )
+            return nil
+        }
+    }
+
+    private static let storeContextMarker = "[STORE-ASSISTED GENERATION CONTEXT]"
+
+    private static func storeAssistedPrompt(
+        refinedPrompt: String,
+        plan: StoreGenerationContextPlan
+    ) -> String {
+        storeAssistedPrompt(refinedPrompt: refinedPrompt, promptContext: plan.promptContext)
+    }
+
+    private static func storeAssistedPrompt(
+        refinedPrompt: String,
+        promptContext: String
+    ) -> String {
+        guard !promptContext.isEmpty else { return refinedPrompt }
+        return [refinedPrompt, promptContext].joined(separator: "\n\n")
+    }
+
+    private static func settings(
+        _ settings: ToolGenerationSettings,
+        applying plan: StoreGenerationContextPlan
+    ) -> ToolGenerationSettings {
+        ToolGenerationSettings(
+            appKind: settings.appKind,
+            menuBarSystemImage: settings.menuBarSystemImage,
+            sandboxEnabled: settings.sandboxEnabled,
+            sandboxPermissions: GeneratedAppSandboxPermissions(
+                rawValueList: plan.resolvedSandboxPermissions.joined(separator: ",")
+            ),
+            resourcePermissions: GeneratedAppResourcePermissions(
+                rawValueList: plan.resolvedResourcePermissions.joined(separator: ",")
+            )
+        )
+    }
+
+    private static func settings(
+        _ settings: ToolGenerationSettings,
+        applying context: PendingStoreGenerationContext
+    ) -> ToolGenerationSettings {
+        ToolGenerationSettings(
+            appKind: settings.appKind,
+            menuBarSystemImage: settings.menuBarSystemImage,
+            sandboxEnabled: settings.sandboxEnabled,
+            sandboxPermissions: GeneratedAppSandboxPermissions(
+                rawValueList: context.resolvedSandboxPermissions.joined(separator: ",")
+            ),
+            resourcePermissions: GeneratedAppResourcePermissions(
+                rawValueList: context.resolvedResourcePermissions.joined(separator: ",")
+            )
+        )
+    }
+
+    static func canReuseStoreContextPlan(
+        _ plan: StoreGenerationContextPlan,
+        with codingAgent: String
+    ) -> Bool {
+        plan.codingAgent == codingAgent
+    }
+
+    static func canReuseStoreContextPlan(
+        _ context: PendingStoreGenerationContext,
+        with codingAgent: String
+    ) -> Bool {
+        context.codingAgent == codingAgent
+    }
+
     private func persistSubmittedAttachments(
         _ attachments: [ToolPromptAttachment],
         layout: ToolPackageLayout,
@@ -433,7 +696,8 @@ struct SingleFileToolGenerationRuntime {
         planningPolicy: ToolGenerationPlanningPolicy,
         suggestion: ToolCreationPlan
     ) -> ToolGenerationSettings {
-        let appKind = planningPolicy.appKindPreference.explicitAppKind
+        let appKind =
+            planningPolicy.appKindPreference.explicitAppKind
             ?? suggestion.suggestedAppKind
         let sandboxPermissions: GeneratedAppSandboxPermissions
         let resourcePermissions: GeneratedAppResourcePermissions
@@ -563,7 +827,8 @@ struct SingleFileToolGenerationRuntime {
             executableName: existingTool.executableName
         )
         let contentViewPath = layout.contentViewSourcePath
-        let startingPhase = existingTool.isGenerationReady
+        let startingPhase =
+            existingTool.isGenerationReady
             ? ToolGenerationPhase.planning
             : (existingTool.generationPhase ?? .generatingEditDiff)
         if !attachments.isEmpty {
@@ -574,7 +839,8 @@ struct SingleFileToolGenerationRuntime {
             )
         }
         if !existingTool.isGenerationReady,
-           startingPhase == .packaging || startingPhase == .completed {
+            startingPhase == .packaging || startingPhase == .completed
+        {
             let result = try await packageTool(
                 displayName: existingTool.name,
                 executableName: existingTool.executableName,
@@ -591,7 +857,8 @@ struct SingleFileToolGenerationRuntime {
             )
             return result
         }
-        let existingSource = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
+        let existingSource = try context.readIfPresent(
+            contentViewPath, packageRootURL: layout.packageRootURL)
         let existingAppEntrySource = try context.readIfPresent(
             layout.appEntrySourcePath,
             packageRootURL: layout.packageRootURL
@@ -658,7 +925,8 @@ struct SingleFileToolGenerationRuntime {
                 lifecycle: lifecycle,
                 resumePartialPatch: startingPhase == .generatingEditDiff,
                 resumePartialSource: startingPhase == .generatingSource,
-                useCurrentSourceOnFirstAttempt: startingPhase == .repairing || startingPhase == .generatingRepairDiff,
+                useCurrentSourceOnFirstAttempt: startingPhase == .repairing
+                    || startingPhase == .generatingRepairDiff,
                 resumePartialRepairPatch: startingPhase == .generatingRepairDiff
             )
             try await compileGeneratedTool(
@@ -678,8 +946,12 @@ struct SingleFileToolGenerationRuntime {
             try? context.fileClient.removeItemIfExists(layout.pendingContentViewDraftURL)
             try context.versionBackupClient.promoteStagedVersion(backup)
         } catch {
-            let isCancellation = IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled
-            try? context.write(existingAppEntrySource, to: layout.appEntrySourcePath, packageRootURL: layout.packageRootURL)
+            let isCancellation =
+                IronsmithErrorPresentation.isCancellation(error) || Task.isCancelled
+            try? context.write(
+                existingAppEntrySource, to: layout.appEntrySourcePath,
+                packageRootURL: layout.packageRootURL
+            )
             AgentDiagnosticsLog.append(
                 """
                 Preserved current ContentView.swift after \(isCancellation ? "interrupted" : "failed") edit.
@@ -728,10 +1000,11 @@ struct SingleFileToolGenerationRuntime {
         let effectiveFailureRecovery: ContentViewBuildRepairLoop.FailureRecovery
         switch failureRecovery {
         case .restoreOriginalSource,
-             .restoreOriginalSourceAfterFailurePreservingInterruptedSource:
+            .restoreOriginalSourceAfterFailurePreservingInterruptedSource:
             effectiveFailureRecovery = failureRecovery
         case .restoreBestCandidate, .preserveCurrentSource:
-            effectiveFailureRecovery = context.pipelineConfiguration.restoresBestCandidateOnFailure
+            effectiveFailureRecovery =
+                context.pipelineConfiguration.restoresBestCandidateOnFailure
                 ? failureRecovery
                 : .preserveCurrentSource
         }
@@ -922,7 +1195,9 @@ struct SingleFileToolGenerationRuntime {
         }
     }
 
-    private func codingAgentProtectedFileBaselines(layout: ToolPackageLayout) throws -> [String: String] {
+    private func codingAgentProtectedFileBaselines(layout: ToolPackageLayout) throws -> [String:
+        String]
+    {
         [
             "Package.swift": try context.readIfPresent(
                 "Package.swift",
@@ -1026,11 +1301,13 @@ struct SingleFileToolGenerationRuntime {
         guard context.fileClient.fileExists(layout.sourceDirectoryURL) else {
             return []
         }
-        guard let enumerator = FileManager.default.enumerator(
-            at: layout.sourceDirectoryURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
+        guard
+            let enumerator = FileManager.default.enumerator(
+                at: layout.sourceDirectoryURL,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        else {
             return []
         }
 
@@ -1057,7 +1334,8 @@ struct SingleFileToolGenerationRuntime {
             throw CodingAgentError.missingContentView
         }
 
-        let generatedSource = try context.readIfPresent(contentViewPath, packageRootURL: layout.packageRootURL)
+        let generatedSource = try context.readIfPresent(
+            contentViewPath, packageRootURL: layout.packageRootURL)
         guard !generatedSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CodingAgentError.missingContentView
         }
@@ -1258,7 +1536,9 @@ struct SingleFileToolGenerationRuntime {
         useCurrentSourceOnFirstAttempt: Bool,
         resumePartialRepairPatch: Bool
     ) -> ContentViewCandidateGenerator {
-        if resumePartialSource || (!context.repairStrategy.usesModelRepair && !useCurrentSourceOnFirstAttempt) {
+        if resumePartialSource
+            || (!context.repairStrategy.usesModelRepair && !useCurrentSourceOnFirstAttempt)
+        {
             return wholeFileEditGenerator(
                 userPrompt: userPrompt,
                 layout: layout,
@@ -1282,7 +1562,8 @@ struct SingleFileToolGenerationRuntime {
             invalidCandidateFallback: context.pipelineConfiguration
                 .fallsBackToWholeFileEditAfterInvalidInitialPatch
                 ? ContentViewCandidateGenerator.InvalidCandidateFallback(
-                    threshold: ToolGenerationRepairPolicy.invalidInitialEditPatchesBeforeFullFileEdit,
+                    threshold: ToolGenerationRepairPolicy
+                        .invalidInitialEditPatchesBeforeFullFileEdit,
                     modeDescription: "edit whole-file fallback"
                 ) { session in
                     try await regenerateEditedContentView(
@@ -1387,10 +1668,11 @@ struct SingleFileToolGenerationRuntime {
         layout: ToolPackageLayout,
         contentViewPath: String,
         lifecycle: ToolGenerationLifecycle,
-        prompt: @escaping (
-            _ currentSource: String,
-            _ diagnostics: [SwiftCompilerDiagnostic]
-        ) -> String
+        prompt:
+            @escaping (
+                _ currentSource: String,
+                _ diagnostics: [SwiftCompilerDiagnostic]
+            ) -> String
     ) -> ContentViewCandidateGenerator.DiagnosticRewrite {
         ContentViewCandidateGenerator.DiagnosticRewrite { currentSource, diagnostics, session in
             try await regenerateContentViewFromDiagnostics(
@@ -1555,7 +1837,8 @@ struct SingleFileToolGenerationRuntime {
         iconGeneration: ToolIconGenerationHandle? = nil,
         lifecycle: ToolGenerationLifecycle
     ) async throws -> ToolGenerationResult {
-        let layout = ToolPackageLayout(packageRootURL: packageRootURL, executableName: executableName)
+        let layout = ToolPackageLayout(
+            packageRootURL: packageRootURL, executableName: executableName)
         try Task.checkCancellation()
         let binDirectory = try await context.processClient.showBinPath(packageRootURL)
         let binaryURL = binDirectory.appendingPathComponent(executableName)
@@ -1625,7 +1908,9 @@ struct SingleFileToolGenerationRuntime {
         let quoteCount = trimmed.filter { $0 == "\"" }.count
         if !quoteCount.isMultiple(of: 2) { return false }
         if trimmed.hasPrefix("import "), trimmed.split(separator: " ").count >= 2 { return true }
-        if trimmed.hasSuffix("{") || trimmed.hasSuffix("}") || trimmed.hasSuffix(")") || trimmed.hasSuffix("]") {
+        if trimmed.hasSuffix("{") || trimmed.hasSuffix("}") || trimmed.hasSuffix(")")
+            || trimmed.hasSuffix("]")
+        {
             return true
         }
         if trimmed.hasSuffix(",") || trimmed.hasSuffix(";") { return true }
@@ -1653,7 +1938,8 @@ struct SingleFileToolGenerationRuntime {
                 to: originalSource,
                 maximumPatchBlocks: maximumPatchBlocks
             )
-            try context.write(application.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            try context.write(
+                application.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
             AgentDiagnosticsLog.append(
                 """
                 Applied completed edit patch blocks from interrupted draft.
@@ -1662,11 +1948,13 @@ struct SingleFileToolGenerationRuntime {
                 """
             )
         case .unifiedDiff:
-            guard let application = try ContentViewRepairSupport.applyCompletedDiffHunks(
-                draft,
-                to: originalSource,
-                maximumHunks: maximumPatchBlocks
-            ) else {
+            guard
+                let application = try ContentViewRepairSupport.applyCompletedDiffHunks(
+                    draft,
+                    to: originalSource,
+                    maximumHunks: maximumPatchBlocks
+                )
+            else {
                 AgentDiagnosticsLog.append(
                     """
                     Cleared interrupted edit patch draft with no completed patch blocks.
@@ -1675,7 +1963,8 @@ struct SingleFileToolGenerationRuntime {
                 )
                 return
             }
-            try context.write(application.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
+            try context.write(
+                application.source, to: contentViewPath, packageRootURL: layout.packageRootURL)
             AgentDiagnosticsLog.append(
                 """
                 Applied completed edit patch blocks from interrupted draft.

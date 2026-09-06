@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import Ironsmith
 
 struct AppRoutingTests {
@@ -19,14 +20,16 @@ struct AppRoutingTests {
 
     @Test
     func appRouteParsesAddProviderURLWithInitialKind() throws {
-        let url = try #require(URL(string: "com.jeidoban.ironsmith://settings/add-provider?kind=openai"))
+        let url = try #require(
+            URL(string: "com.jeidoban.ironsmith://settings/add-provider?kind=openai"))
 
         #expect(IronsmithAppRoute(url: url) == .settings(.addProvider(initialKind: .openAI)))
     }
 
     @Test
     func appRouteKeepsAddProviderURLWhenInitialKindIsInvalid() throws {
-        let url = try #require(URL(string: "com.jeidoban.ironsmith://settings/add-provider?kind=bogus"))
+        let url = try #require(
+            URL(string: "com.jeidoban.ironsmith://settings/add-provider?kind=bogus"))
 
         #expect(IronsmithAppRoute(url: url) == .settings(.addProvider(initialKind: nil)))
     }
@@ -40,7 +43,8 @@ struct AppRoutingTests {
 
     @Test
     func appRouteParsesIronsmithCreditsURL() throws {
-        let url = try #require(URL(string: "com.jeidoban.ironsmith://settings/provider/ironsmith/credits"))
+        let url = try #require(
+            URL(string: "com.jeidoban.ironsmith://settings/provider/ironsmith/credits"))
 
         #expect(IronsmithAppRoute(url: url) == .settings(.buyIronsmithCredits))
     }

@@ -726,7 +726,17 @@ extension AgentPipelineTests {
             category: .music,
             sandboxEnabled: true,
             packageRootPath: packageRoot.path,
-            storeVersionNumber: 3
+            storeMetadata: ToolStoreMetadata(
+                publication: StorePublication(
+                    storeId: "store-1",
+                    appId: "app-1",
+                    versionId: "version-3",
+                    versionNumber: 3,
+                    sourceSha256: "source-hash",
+                    ownerUserId: "user-1",
+                    publishedAt: .now
+                )
+            )
         )
         try Self.writePlistDictionary(
             [

@@ -39,7 +39,9 @@ private enum IronsmithEditCommandMenu {
         if mainMenu.items.isEmpty {
             let appMenuItem = NSMenuItem()
             let appMenu = NSMenu(title: "Ironsmith")
-            appMenu.addItem(withTitle: "Quit Ironsmith", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            appMenu.addItem(
+                withTitle: "Quit Ironsmith", action: #selector(NSApplication.terminate(_:)),
+                keyEquivalent: "q")
             appMenuItem.submenu = appMenu
             mainMenu.addItem(appMenuItem)
         }
@@ -50,11 +52,17 @@ private enum IronsmithEditCommandMenu {
         let editMenu = NSMenu(title: "Edit")
         editMenuItem.submenu = editMenu
 
-        editMenu.addItem(makeMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
-        editMenu.addItem(makeMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
-        editMenu.addItem(makeMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(
+            makeMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(
+            makeMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(
+            makeMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(makeMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        editMenu.addItem(
+            makeMenuItem(
+                title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        )
 
         mainMenu.addItem(editMenuItem)
     }

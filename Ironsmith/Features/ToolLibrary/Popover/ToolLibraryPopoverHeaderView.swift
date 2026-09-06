@@ -105,9 +105,11 @@ struct ToolLibraryPopoverHeaderView: View {
                     Button("Browse Ironsmith Store...") {
                         onOpenStore()
                     }
-
-                    Divider()
                 }
+
+                Button("Settings…", action: onOpenSettings)
+
+                Divider()
 
                 Button("About Ironsmith") {
                     IronsmithAboutWindowController.shared.show()
@@ -130,7 +132,7 @@ struct ToolLibraryPopoverHeaderView: View {
             .foregroundStyle(.secondary)
             .help("Ironsmith")
             .accessibilityLabel("Ironsmith menu")
-            .accessibilityHint("Opens about, issue reporting, and quit actions.")
+            .accessibilityHint("Opens settings, about, issue reporting, and quit actions.")
             .accessibilityIdentifier("ironsmith-menu-button")
         }
         .onChange(of: isSearchPresented) { _, isPresented in

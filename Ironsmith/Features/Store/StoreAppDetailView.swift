@@ -9,7 +9,7 @@ struct StoreAppDetailView: View {
     let installDisposition: StoreAppInstallDisposition
     let versionInstallDisposition: (StoreAppDetail, StoreVersionMetadata) -> StoreAppInstallDisposition
     let onGet: (StoreAppDetail) -> Void
-    let onOpenRemix: (StoreRemixMetadata) -> Void
+    let onOpenStoreLink: (StoreVersionLinkMetadata) -> Void
     let onOpenCreator: (String, String) -> Void
     let loadSource: (StoreAppDetail, StoreVersionMetadata) async throws -> String
     let selectedModelName: String?
@@ -38,7 +38,7 @@ struct StoreAppDetailView: View {
                         StoreDetailMetadataStrip(
                             app: app,
                             onOpenCreator: onOpenCreator,
-                            onOpenRemix: onOpenRemix
+                            onOpenStoreLink: onOpenStoreLink
                         )
 
                         if let screenshot = app.screenshots.first {
@@ -380,48 +380,56 @@ private struct StoreSourceCodeTextView: NSViewRepresentable {
 private struct StoreDetailMetadataStrip: View {
     let app: StoreAppDetail
     let onOpenCreator: (String, String) -> Void
-    let onOpenRemix: (StoreRemixMetadata) -> Void
+    let onOpenStoreLink: (StoreVersionLinkMetadata) -> Void
     @State private var isShowingLicense = false
 
     private var columns: [GridItem] {
-        if app.remix != nil {
+        if app.remix != nil || !app.inspirations.isEmpty {
             return [GridItem(.adaptive(minimum: 128), spacing: 12, alignment: .top)]
         }
         return [GridItem(.adaptive(minimum: 140), spacing: 16, alignment: .top)]
     }
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-            if let handle = app.authorHandle, !handle.isEmpty {
-                StoreDetailCreatorMetadataItem(
-                    displayName: app.authorDisplayName,
-                    handle: handle,
-                    action: { onOpenCreator(app.authorDisplayName, handle) }
-                )
-            } else {
-                StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
-            }
-            if let remix = app.remix {
-                if remix.isDeleted {
-                    StoreDetailMetadataItem(title: "Remixed From", value: "[Deleted]")
+        VStack(alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                if let handle = app.authorHandle, !handle.isEmpty {
+                    StoreDetailCreatorMetadataItem(
+                        displayName: app.authorDisplayName,
+                        handle: handle,
+                        action: { onOpenCreator(app.authorDisplayName, handle) }
+                    )
                 } else {
-                    StoreDetailLinkedMetadataItem(
-                        title: "Remixed From",
-                        value: remix.appName,
-                        action: { onOpenRemix(remix) }
+                    StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
+                }
+                if let remix = app.remix {
+                    if remix.isDeleted {
+                        StoreDetailMetadataItem(title: "Remixed From", value: "[Deleted]")
+                    } else {
+                        StoreDetailLinkedMetadataItem(
+                            title: "Remixed From",
+                            value: remix.appName,
+                            action: { onOpenStoreLink(remix) }
+                        )
+                    }
+                }
+                if !app.inspirations.isEmpty {
+                    StoreDetailInspirationsMetadataItem(
+                        inspirations: app.inspirations,
+                        onOpen: onOpenStoreLink
                     )
                 }
+                StoreDetailMetadataItem(
+                    title: "Version",
+                    value: String(app.currentVersion.versionNumber)
+                )
+                StoreDetailMetadataItem(title: "Category", value: app.category.title)
+                StoreDetailLinkedMetadataItem(
+                    title: "License",
+                    value: app.currentVersion.license.title,
+                    action: { isShowingLicense = true }
+                )
             }
-            StoreDetailMetadataItem(
-                title: "Version",
-                value: String(app.currentVersion.versionNumber)
-            )
-            StoreDetailMetadataItem(title: "Category", value: app.category.title)
-            StoreDetailLinkedMetadataItem(
-                title: "License",
-                value: app.currentVersion.license.title,
-                action: { isShowingLicense = true }
-            )
         }
         .padding(.vertical, 16)
         .overlay(alignment: .top) { Divider() }
@@ -497,6 +505,70 @@ struct StoreLicenseDetailSheet: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
+        }
+    }
+
+}
+
+private struct StoreDetailInspirationsMetadataItem: View {
+    let inspirations: [StoreVersionLinkMetadata]
+    let onOpen: (StoreVersionLinkMetadata) -> Void
+
+    @State private var isShowingPopover = false
+
+    var body: some View {
+        if let inspiration = inspirations.first, inspirations.count == 1 {
+            if inspiration.isDeleted {
+                StoreDetailMetadataItem(title: "Using Ideas From", value: "[Deleted]")
+            } else {
+                StoreDetailLinkedMetadataItem(
+                    title: "Using Ideas From",
+                    value: inspiration.appName,
+                    action: { onOpen(inspiration) }
+                )
+            }
+        } else {
+            StoreDetailLinkedMetadataItem(
+                title: "Using Ideas From",
+                value: "\(inspirations.count) apps",
+                action: { isShowingPopover = true }
+            )
+            .popover(isPresented: $isShowingPopover) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Using Ideas From")
+                        .font(.headline)
+
+                    ForEach(inspirations) { inspiration in
+                        if inspiration.isDeleted {
+                            Text("[Deleted]")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                        } else {
+                            Button {
+                                isShowingPopover = false
+                                onOpen(inspiration)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(inspiration.appName)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 12)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(12)
+                .frame(minWidth: 220, alignment: .leading)
+            }
         }
     }
 }

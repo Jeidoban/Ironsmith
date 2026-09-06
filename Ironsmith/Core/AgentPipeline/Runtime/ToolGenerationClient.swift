@@ -27,38 +27,59 @@ nonisolated struct ToolGenerationPreparedTool {
 
 struct ToolGenerationLifecycle {
     let preservesCreatedPackageOnCancellation: Bool
-    nonisolated(unsafe) let prepareCreatedTool: (
-        _ preparedTool: ToolGenerationPreparedTool,
-        _ prompt: String
-    ) async throws -> Void
-    nonisolated(unsafe) let didPersistAttachments: (_ attachmentIDs: [UUID]) async throws -> Void
-    nonisolated(unsafe) let updatePendingPrompt: (_ prompt: String) async throws -> Void
-    nonisolated(unsafe) let updateRepairErrorCount: (_ count: Int?) async throws -> Void
-    nonisolated(unsafe) let updatePhase: (
-        _ state: ToolGenerationState,
-        _ phase: ToolGenerationPhase?,
-        _ errorSummary: String?
-    ) async throws -> Void
-
-    nonisolated init(
-        preservesCreatedPackageOnCancellation: Bool = false,
-        prepareCreatedTool: @escaping (
+    nonisolated(unsafe) let prepareCreatedTool:
+        (
             _ preparedTool: ToolGenerationPreparedTool,
             _ prompt: String
-        ) async throws -> Void = { _, _ in },
-        didPersistAttachments: @escaping (_ attachmentIDs: [UUID]) async throws -> Void = { _ in },
-        updatePendingPrompt: @escaping (_ prompt: String) async throws -> Void = { _ in },
-        updateRepairErrorCount: @escaping (_ count: Int?) async throws -> Void = { _ in },
-        updatePhase: @escaping (
+        ) async throws -> Void
+    nonisolated(unsafe) let didPersistAttachments: (_ attachmentIDs: [UUID]) async throws -> Void
+    nonisolated(unsafe) let updatePendingPrompt: (_ prompt: String) async throws -> Void
+    nonisolated(unsafe) let updateStoreGenerationContext:
+        (_ context: StoreGenerationContextSnapshot) async throws -> Void
+    nonisolated(unsafe) let clearStoreGenerationContextForScratchFallback:
+        (
+            _ refinedPrompt: String,
+            _ discardedBaseVersionId: String?
+        ) async throws -> Void
+    nonisolated(unsafe) let updateRepairErrorCount: (_ count: Int?) async throws -> Void
+    nonisolated(unsafe) let updatePhase:
+        (
             _ state: ToolGenerationState,
             _ phase: ToolGenerationPhase?,
             _ errorSummary: String?
-        ) async throws -> Void = { _, _, _ in }
+        ) async throws -> Void
+
+    nonisolated init(
+        preservesCreatedPackageOnCancellation: Bool = false,
+        prepareCreatedTool:
+            @escaping (
+                _ preparedTool: ToolGenerationPreparedTool,
+                _ prompt: String
+            ) async throws -> Void = { _, _ in },
+        didPersistAttachments: @escaping (_ attachmentIDs: [UUID]) async throws -> Void = { _ in },
+        updatePendingPrompt: @escaping (_ prompt: String) async throws -> Void = { _ in },
+        updateStoreGenerationContext:
+            @escaping (_ context: StoreGenerationContextSnapshot) async throws -> Void = { _ in },
+        clearStoreGenerationContextForScratchFallback:
+            @escaping (
+                _ refinedPrompt: String,
+                _ discardedBaseVersionId: String?
+            ) async throws -> Void = { _, _ in },
+        updateRepairErrorCount: @escaping (_ count: Int?) async throws -> Void = { _ in },
+        updatePhase:
+            @escaping (
+                _ state: ToolGenerationState,
+                _ phase: ToolGenerationPhase?,
+                _ errorSummary: String?
+            ) async throws -> Void = { _, _, _ in }
     ) {
         self.preservesCreatedPackageOnCancellation = preservesCreatedPackageOnCancellation
         self.prepareCreatedTool = prepareCreatedTool
         self.didPersistAttachments = didPersistAttachments
         self.updatePendingPrompt = updatePendingPrompt
+        self.updateStoreGenerationContext = updateStoreGenerationContext
+        self.clearStoreGenerationContextForScratchFallback =
+            clearStoreGenerationContextForScratchFallback
         self.updateRepairErrorCount = updateRepairErrorCount
         self.updatePhase = updatePhase
     }
@@ -77,6 +98,7 @@ nonisolated struct ToolGenerationRequest {
     let imageGenerationProvider: ToolImageGenerationProvider
     let attachments: [ToolPromptAttachment]
     let lifecycle: ToolGenerationLifecycle
+    let storeAssistedGenerationEnabled: Bool
 
     init(
         prompt: String,
@@ -86,7 +108,8 @@ nonisolated struct ToolGenerationRequest {
         languageModelContext: AgentLanguageModelContext,
         imageGenerationProvider: ToolImageGenerationProvider = .disabled,
         attachments: [ToolPromptAttachment] = [],
-        lifecycle: ToolGenerationLifecycle = .noop
+        lifecycle: ToolGenerationLifecycle = .noop,
+        storeAssistedGenerationEnabled: Bool = false
     ) {
         self.prompt = prompt
         self.existingTool = existingTool
@@ -96,6 +119,7 @@ nonisolated struct ToolGenerationRequest {
         self.imageGenerationProvider = imageGenerationProvider
         self.attachments = attachments
         self.lifecycle = lifecycle
+        self.storeAssistedGenerationEnabled = storeAssistedGenerationEnabled
     }
 }
 
@@ -138,7 +162,8 @@ struct ToolGenerationClient {
                     planningPolicy: request.planningPolicy,
                     imageGenerationProvider: request.imageGenerationProvider,
                     attachments: request.attachments,
-                    lifecycle: request.lifecycle
+                    lifecycle: request.lifecycle,
+                    storeAssistedGenerationEnabled: request.storeAssistedGenerationEnabled
                 )
             },
             cancelIconGeneration: { packageRootURL in
@@ -191,8 +216,9 @@ struct ToolRunnerClient {
             .appendingPathComponent("Contents", isDirectory: true)
             .appendingPathComponent("Info.plist")
         guard let data = try? Data(contentsOf: plistURL),
-              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
-              let dictionary = plist as? [String: Any]
+            let plist = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil),
+            let dictionary = plist as? [String: Any]
         else {
             return true
         }
@@ -200,8 +226,10 @@ struct ToolRunnerClient {
     }
 
     private static func appEntrySourceSupportsQuitOnClose(_ request: ToolAppBundleRequest) -> Bool {
-        guard let appEntryURL = try? request.layout.packageFileURL(for: request.layout.appEntrySourcePath),
-              let source = try? String(contentsOf: appEntryURL, encoding: .utf8)
+        guard
+            let appEntryURL = try? request.layout.packageFileURL(
+                for: request.layout.appEntrySourcePath),
+            let source = try? String(contentsOf: appEntryURL, encoding: .utf8)
         else {
             return false
         }

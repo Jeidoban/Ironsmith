@@ -62,8 +62,15 @@ extension ToolLibraryTests {
             name: "Old Name",
             executableName: "RenamePackage",
             packageRootPath: packageRoot.path,
-            storeSourceSha256: "downloaded-source-hash",
-            storeRemixedFromVersionId: "00000000-0000-4000-8000-000000000201"
+            storeMetadata: ToolStoreMetadata(
+                provenance: StoreProvenance(
+                    remixSource: StoreVersionReference(
+                        versionId: "00000000-0000-4000-8000-000000000201",
+                        sourceSha256: "downloaded-source-hash"
+                    ),
+                    inspirations: []
+                )
+            )
         )
         context.insert(tool)
         try FileManager.default.createDirectory(at: tool.appBundleURL, withIntermediateDirectories: true)
@@ -77,7 +84,7 @@ extension ToolLibraryTests {
         toolLibraryState.rename(tool, to: "  New Name  ", in: context)
 
         #expect(tool.name == "New Name")
-        #expect(tool.storeSourceSha256 == "downloaded-source-hash")
+        #expect(tool.storeRemixSource?.sourceSha256 == "downloaded-source-hash")
         #expect(toolLibraryState.promptPlaceholder == "Describe changes for New Name…")
         #expect(!(FileManager.default.fileExists(atPath: oldBundleURL.path)))
         #expect(FileManager.default.fileExists(atPath: newBundleURL.path))

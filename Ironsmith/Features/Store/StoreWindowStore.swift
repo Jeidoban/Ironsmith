@@ -397,20 +397,22 @@ final class StoreWindowStore {
         tools: [Tool]
     ) -> StoreAppInstallDisposition {
         let unchangedLinkedTools = tools.filter { tool in
-            guard tool.storeAppId == app.id,
-                let importedHash = tool.storeSourceSha256?.lowercased()
+            guard let link = storeLink(for: tool, appID: app.id),
+                let importedHash = link.sourceSha256?.lowercased()
             else {
                 return false
             }
             return localSourceHash(for: tool) == importedHash
         }
         if let currentTool = unchangedLinkedTools.first(where: {
-            $0.storeVersionNumber == app.latestVersionNumber
+            storeLink(for: $0, appID: app.id)?.versionNumber == app.latestVersionNumber
         }) {
             return .openExisting(currentTool)
         }
         if let olderTool = unchangedLinkedTools.first(where: {
-            guard let versionNumber = $0.storeVersionNumber else { return false }
+            guard let versionNumber = storeLink(for: $0, appID: app.id)?.versionNumber else {
+                return false
+            }
             return versionNumber < app.latestVersionNumber
         }) {
             return .updateExisting(olderTool)
@@ -419,14 +421,14 @@ final class StoreWindowStore {
     }
 
     func installDisposition(for app: StoreAppDetail, tools: [Tool]) -> StoreAppInstallDisposition {
-        let linkedTools = tools.filter { $0.storeAppId == app.id }
+        let linkedTools = tools.filter { storeLink(for: $0, appID: app.id) != nil }
         if let currentTool = linkedTools.first(where: {
             localSourceHash(for: $0) == app.currentVersion.sourceSha256.lowercased()
         }) {
             return .openExisting(currentTool)
         }
         if let updatableTool = linkedTools.first(where: { tool in
-            guard let importedHash = tool.storeSourceSha256,
+            guard let importedHash = storeLink(for: tool, appID: app.id)?.sourceSha256,
                 importedHash != app.currentVersion.sourceSha256
             else { return false }
             return localSourceHash(for: tool) == importedHash
@@ -443,8 +445,7 @@ final class StoreWindowStore {
     ) -> StoreAppInstallDisposition {
         guard
             let matchingTool = tools.first(where: {
-                $0.storeAppId == app.id
-                    && $0.storeVersionId == version.id
+                storeLink(for: $0, appID: app.id)?.versionId == version.id
                     && localSourceHash(for: $0) == version.sourceSha256.lowercased()
             })
         else {
@@ -624,17 +625,15 @@ final class StoreWindowStore {
             return
         }
 
-        let linkedTools = tools.filter { $0.storeId == app.storeId && $0.storeAppId == app.id }
+        let linkedTools = tools.filter {
+            $0.storePublication?.storeId == app.storeId
+                && $0.storePublication?.appId == app.id
+        }
         let previousLinkages = linkedTools.map {
             ($0, StoreToolLinkageSnapshot(tool: $0), $0.updatedAt)
         }
         for tool in linkedTools {
-            tool.storeId = nil
-            tool.storeAppId = nil
-            tool.storeVersionId = nil
-            tool.storeVersionNumber = nil
-            tool.storeSourceSha256 = nil
-            tool.storeImportedAt = nil
+            tool.storePublication = nil
             tool.updatedAt = .now
         }
         do {
@@ -893,14 +892,38 @@ final class StoreWindowStore {
         version: StoreVersionDownload,
         to tool: Tool
     ) {
-        tool.storeId = app.storeId
-        tool.storeAppId = app.id
-        tool.storeVersionId = version.id
-        tool.storeVersionNumber = version.versionNumber
-        tool.storeSourceSha256 = version.sourceSha256
-        tool.storeImportedAt = Date()
-        tool.storeRemixedFromVersionId = version.remixedFromVersionId
+        tool.storePublication = nil
+        tool.replaceStoreProvenance(
+            remixSource: StoreVersionReference(
+                versionId: version.id,
+                storeId: app.storeId,
+                appId: app.id,
+                appName: app.name,
+                versionNumber: version.versionNumber,
+                sourceSha256: version.sourceSha256
+            ),
+            inspirations: []
+        )
         tool.updatedAt = Date()
+    }
+
+    private func storeLink(
+        for tool: Tool,
+        appID: String
+    ) -> StoreVersionReference? {
+        if let publication = tool.storePublication, publication.appId == appID {
+            return StoreVersionReference(
+                versionId: publication.versionId,
+                storeId: publication.storeId,
+                appId: publication.appId,
+                versionNumber: publication.versionNumber,
+                sourceSha256: publication.sourceSha256
+            )
+        }
+        guard let remixSource = tool.storeRemixSource,
+            remixSource.appId == appID
+        else { return nil }
+        return remixSource
     }
 
     private func localSourceHash(for tool: Tool) -> String? {
@@ -997,31 +1020,13 @@ private struct ToolIconAssetSnapshot {
 }
 
 private struct StoreToolLinkageSnapshot {
-    let storeId: String?
-    let storeAppId: String?
-    let storeVersionId: String?
-    let storeVersionNumber: Int?
-    let storeSourceSha256: String?
-    let storeImportedAt: Date?
-    let storeRemixedFromVersionId: String?
+    let storeMetadata: ToolStoreMetadata?
 
     init(tool: Tool) {
-        storeId = tool.storeId
-        storeAppId = tool.storeAppId
-        storeVersionId = tool.storeVersionId
-        storeVersionNumber = tool.storeVersionNumber
-        storeSourceSha256 = tool.storeSourceSha256
-        storeImportedAt = tool.storeImportedAt
-        storeRemixedFromVersionId = tool.storeRemixedFromVersionId
+        storeMetadata = tool.storeMetadata
     }
 
     func apply(to tool: Tool) {
-        tool.storeId = storeId
-        tool.storeAppId = storeAppId
-        tool.storeVersionId = storeVersionId
-        tool.storeVersionNumber = storeVersionNumber
-        tool.storeSourceSha256 = storeSourceSha256
-        tool.storeImportedAt = storeImportedAt
-        tool.storeRemixedFromVersionId = storeRemixedFromVersionId
+        tool.storeMetadata = storeMetadata
     }
 }

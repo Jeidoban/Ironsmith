@@ -104,7 +104,7 @@ struct StoreAppQuestionTests {
                     license: .apache2
                 )
             ],
-            remix: StoreRemixMetadata(
+            remix: StoreVersionLinkMetadata(
                 storeId: "00000000-0000-4000-8000-000000000011",
                 appId: "00000000-0000-4000-8000-000000000102",
                 appName: "Original Greeting",
@@ -173,7 +173,7 @@ struct StoreAppQuestionTests {
     private static func app(
         sourceCode: String,
         legalAttributions: [StoreLegalAttribution] = [],
-        remix: StoreRemixMetadata? = nil
+        remix: StoreVersionLinkMetadata? = nil
     ) -> StoreAppDetail {
         let appID = "00000000-0000-4000-8000-000000000101"
         let version = StoreVersionMetadata(
@@ -207,7 +207,8 @@ struct StoreAppQuestionTests {
             screenshots: [],
             currentVersion: version,
             versions: [version],
-            remix: remix
+            remix: remix,
+            inspirations: []
         )
     }
 

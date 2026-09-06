@@ -1,5 +1,5 @@
-import AuthenticationServices
 import Auth
+import AuthenticationServices
 import Foundation
 import SwiftData
 import SwiftUI
@@ -105,214 +105,203 @@ struct ToolLibraryPopoverView: View {
 
     private var lifecycleContent: some View {
         popoverLayout
-        .padding(16)
-        .frame(width: 340, height: 500)
-        .accessibilityIdentifier("tool-library-root")
-        .task(id: restoreAvailabilityRefreshID) {
-            await toolLibraryStore.refreshRestoreAvailability(for: tools)
-        }
-        .task(id: storeSourceChangesRefreshID) {
-            guard isStoreFeatureEnabled else { return }
-            await storePublisher.refreshStoreSourceChanges(for: tools)
-        }
-        .task(id: publishedStoreLinkRefreshID) {
-            guard isStoreFeatureEnabled else {
-                await storePublisher.refreshPublishedStoreApps(
-                    isSignedIn: false,
-                    tools: tools
-                )
-                return
+            .padding(16)
+            .frame(width: 340, height: 500)
+            .accessibilityIdentifier("tool-library-root")
+            .task(id: restoreAvailabilityRefreshID) {
+                await toolLibraryStore.refreshRestoreAvailability(for: tools)
             }
-            await storePublisher.refreshPublishedStoreApps(
-                isSignedIn: inferenceStore.ironsmithSession != nil,
-                tools: tools
-            )
-        }
-        .onAppear {
-            handlePopoverAppear()
-        }
-        .onDisappear {
-            handlePopoverClose()
-        }
-        .onChange(of: menuBarPopoverPresentationStore.showCount) { _, _ in
-            handlePopoverShow()
-        }
-        .onChange(of: menuBarPopoverPresentationStore.closeCount) { _, _ in
-            handlePopoverClose()
-        }
-        .task(id: selectedIronsmithRefreshID) {
-            await refreshSelectedIronsmithAccountIfNeeded()
-        }
-        .task(id: inferenceStore.hasLoadedModels) {
-            presentWelcomeOnboardingIfNeeded()
-        }
-        .task(id: runningApplicationsRefreshID) {
-            await toolLibraryStore.refreshRunningApplications(for: tools)
-        }
-        .onChange(of: tools.map(\.id)) { _, _ in
-            toolLibraryStore.syncSelection(with: tools, defaultSettings: defaultGenerationSettings)
-            applyPendingToolLibraryRoute()
-        }
-        .onChange(of: defaultGenerationSettings) { _, settings in
-            toolLibraryStore.initializeNextGenerationSettingsIfNeeded(settings)
-        }
-        .onChange(of: showSandboxOverride) { _, isEnabled in
-            if !isEnabled {
-                toolLibraryStore.sandboxEnabled = true
-                toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
+            .task(id: storeSourceChangesRefreshID) {
+                guard isStoreFeatureEnabled else { return }
+                await storePublisher.refreshStoreSourceChanges(for: tools)
             }
-        }
+            .onAppear {
+                handlePopoverAppear()
+            }
+            .onDisappear {
+                handlePopoverClose()
+            }
+            .onChange(of: menuBarPopoverPresentationStore.showCount) { _, _ in
+                handlePopoverShow()
+            }
+            .onChange(of: menuBarPopoverPresentationStore.closeCount) { _, _ in
+                handlePopoverClose()
+            }
+            .task(id: selectedIronsmithRefreshID) {
+                await refreshSelectedIronsmithAccountIfNeeded()
+            }
+            .task(id: inferenceStore.hasLoadedModels) {
+                presentWelcomeOnboardingIfNeeded()
+            }
+            .task(id: runningApplicationsRefreshID) {
+                await toolLibraryStore.refreshRunningApplications(for: tools)
+            }
+            .onChange(of: tools.map(\.id)) { _, _ in
+                toolLibraryStore.syncSelection(
+                    with: tools, defaultSettings: defaultGenerationSettings)
+                applyPendingToolLibraryRoute()
+            }
+            .onChange(of: defaultGenerationSettings) { _, settings in
+                toolLibraryStore.initializeNextGenerationSettingsIfNeeded(settings)
+            }
+            .onChange(of: showSandboxOverride) { _, isEnabled in
+                if !isEnabled {
+                    toolLibraryStore.sandboxEnabled = true
+                    toolLibraryStore.rememberCurrentGenerationSettingsForNextGeneration()
+                }
+            }
     }
 
     private var alertContent: some View {
         lifecycleContent
-        .alert(
-            "Ironsmith couldn’t finish",
-            isPresented: toolLibraryErrorPresentedBinding
-        ) {
-            if toolLibraryStore.presentedErrorAction == .buyIronsmithCredits {
-                Button("Buy Credits") {
-                    openIronsmithCreditPurchase()
+            .alert(
+                "Ironsmith couldn’t finish",
+                isPresented: toolLibraryErrorPresentedBinding
+            ) {
+                if toolLibraryStore.presentedErrorAction == .buyIronsmithCredits {
+                    Button("Buy Credits") {
+                        openIronsmithCreditPurchase()
+                    }
                 }
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(toolLibraryStore.presentedErrorMessage ?? "")
             }
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(toolLibraryStore.presentedErrorMessage ?? "")
-        }
-        .alert(
-            "AI Model Unavailable",
-            isPresented: modelFallbackPresentedBinding
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(inferenceStore.selectedModelFallbackMessage ?? "")
-        }
-        .alert(
-            "Sign In Failed",
-            isPresented: signInErrorPresentedBinding
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(inferenceStore.presentedErrorMessage ?? "")
-        }
-        .alert(
-            "Ironsmith Store",
-            isPresented: storeErrorPresentedBinding
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(storePublisher.errorMessage ?? "")
-        }
-        .alert(
-            "Sign in to Publish",
-            isPresented: storeSignInRequiredBinding
-        ) {
-            Button("Cancel", role: .cancel) {
-                storePublisher.pendingSignInToolID = nil
+            .alert(
+                "AI Model Unavailable",
+                isPresented: modelFallbackPresentedBinding
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(inferenceStore.selectedModelFallbackMessage ?? "")
             }
-            Button("Sign In") {
-                let toolID = storePublisher.pendingSignInToolID
-                storePublisher.pendingSignInToolID = nil
-                signInToIronsmith(resumePublishingToolID: toolID)
+            .alert(
+                "Sign In Failed",
+                isPresented: signInErrorPresentedBinding
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(inferenceStore.presentedErrorMessage ?? "")
             }
-        } message: {
-            Text("Sign in with Ironsmith to publish this app to the Ironsmith Store.")
-        }
-        .alert(
-            "Create a Unique Remix?",
-            isPresented: remixIdentityNoticeBinding
-        ) {
-            Button("Skip Name & Icon", role: .cancel) {
-                continuePendingRemixEdit(generateIdentity: false)
+            .alert(
+                "Ironsmith Store",
+                isPresented: storeErrorPresentedBinding
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(storePublisher.errorMessage ?? "")
             }
-            Button("Continue") {
-                continuePendingRemixEdit(generateIdentity: true)
-            }
-        } message: {
-            Text(
-                "Ironsmith will generate a new name and icon so this remix has its own identity. "
-                    + "It will do the same for future remixes. You can turn this off anytime in Settings."
-            )
-        }
-        .confirmationDialog(
-            "Delete App?",
-            isPresented: deleteConfirmationBinding
-        ) {
-            Button("Delete App", role: .destructive) {
-                if let toolPendingDeletion {
-                    toolLibraryStore.delete(toolPendingDeletion, in: modelContext)
+            .alert(
+                "Sign in to Publish",
+                isPresented: storeSignInRequiredBinding
+            ) {
+                Button("Cancel", role: .cancel) {
+                    storePublisher.pendingSignInToolID = nil
                 }
-                toolPendingDeletion = nil
+                Button("Sign In") {
+                    let toolID = storePublisher.pendingSignInToolID
+                    storePublisher.pendingSignInToolID = nil
+                    signInToIronsmith(resumePublishingToolID: toolID)
+                }
+            } message: {
+                Text("Sign in with Ironsmith to publish this app to the Ironsmith Store.")
             }
-            Button("Cancel", role: .cancel) {
-                toolPendingDeletion = nil
+            .alert(
+                "Create a Unique Remix?",
+                isPresented: remixIdentityNoticeBinding
+            ) {
+                Button("Skip Name & Icon", role: .cancel) {
+                    continuePendingRemixEdit(generateIdentity: false)
+                }
+                Button("Continue") {
+                    continuePendingRemixEdit(generateIdentity: true)
+                }
+            } message: {
+                Text(
+                    "Ironsmith will generate a new name and icon so this remix has its own identity. "
+                        + "It will do the same for future remixes. You can turn this off anytime in Settings."
+                )
             }
-        } message: {
-            Text(
-                toolPendingDeletion.map { "Delete \($0.name)? This can't be undone." }
-                    ?? "Delete this app? This can't be undone.")
-        }
+            .confirmationDialog(
+                "Delete App?",
+                isPresented: deleteConfirmationBinding
+            ) {
+                Button("Delete App", role: .destructive) {
+                    if let toolPendingDeletion {
+                        toolLibraryStore.delete(toolPendingDeletion, in: modelContext)
+                    }
+                    toolPendingDeletion = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    toolPendingDeletion = nil
+                }
+            } message: {
+                Text(
+                    toolPendingDeletion.map { "Delete \($0.name)? This can't be undone." }
+                        ?? "Delete this app? This can't be undone.")
+            }
     }
 
     private var sheetContent: some View {
         @Bindable var storePublisher = storePublisher
         @Bindable var detailsEditor = detailsEditor
 
-        return alertContent
-        .sheet(
-            isPresented: $isShowingWelcomeOnboarding,
-            onDismiss: dismissWelcomeOnboardingPresentation
-        ) {
-            IronsmithWelcomeOnboardingSheetView(
-                onComplete: completeWelcomeOnboarding
-            )
-        }
-        .sheet(
-            isPresented: $storePublisher.isShowingPublishSheet,
-            onDismiss: handlePublishSheetDismissed
-        ) {
-            storePublishSheet
-        }
-        .sheet(isPresented: $storePublisher.isShowingCreatorProfileSheet) {
-            ToolLibraryCreatorProfileSheetView(
-                displayName: $storePublisher.creatorDisplayName,
-                handle: $storePublisher.creatorHandle,
-                errorMessage: $storePublisher.errorMessage,
-                isSaving: storePublisher.isSavingCreatorProfile,
-                isClaimingHandle:
-                    inferenceStore.ironsmithAccountSummary?.profile?.handle == nil,
-                onCancel: {
-                    storePublisher.isShowingCreatorProfileSheet = false
-                    storePublisher.pendingCreatorProfileToolID = nil
-                },
-                onSave: {
-                    guard isStoreFeatureEnabled else { return }
-                    Task {
-                        await storePublisher.saveCreatorProfile(
-                            inferenceStore: inferenceStore,
-                            tools: tools
-                        )
-                    }
-                }
-            )
-        }
-        .sheet(
-            isPresented: $detailsEditor.isShowingSheet,
-            onDismiss: handleDetailsEditorDismissed
-        ) {
-            detailsEditorSheet
-        }
-        .sheet(isPresented: $isShowingModelPicker) {
-            ModelPickerSheetView()
-        }
-        .sheet(item: $customCodingAgentSheet) { sheet in
-            switch sheet {
-            case .add:
-                AddCustomCodingAgentSheetView(store: inferenceStore.customCodingAgents)
-            case .manage:
-                ManageCustomCodingAgentsSheetView(store: inferenceStore.customCodingAgents)
+        return
+            alertContent
+            .sheet(
+                isPresented: $isShowingWelcomeOnboarding,
+                onDismiss: dismissWelcomeOnboardingPresentation
+            ) {
+                IronsmithWelcomeOnboardingSheetView(
+                    onComplete: completeWelcomeOnboarding
+                )
             }
-        }
+            .sheet(
+                isPresented: $storePublisher.isShowingPublishSheet,
+                onDismiss: handlePublishSheetDismissed
+            ) {
+                storePublishSheet
+            }
+            .sheet(isPresented: $storePublisher.isShowingCreatorProfileSheet) {
+                ToolLibraryCreatorProfileSheetView(
+                    displayName: $storePublisher.creatorDisplayName,
+                    handle: $storePublisher.creatorHandle,
+                    errorMessage: $storePublisher.errorMessage,
+                    isSaving: storePublisher.isSavingCreatorProfile,
+                    isClaimingHandle:
+                        inferenceStore.ironsmithAccountSummary?.profile?.handle == nil,
+                    onCancel: {
+                        storePublisher.isShowingCreatorProfileSheet = false
+                        storePublisher.pendingCreatorProfileToolID = nil
+                    },
+                    onSave: {
+                        guard isStoreFeatureEnabled else { return }
+                        Task {
+                            await storePublisher.saveCreatorProfile(
+                                inferenceStore: inferenceStore,
+                                tools: tools
+                            )
+                        }
+                    }
+                )
+            }
+            .sheet(
+                isPresented: $detailsEditor.isShowingSheet,
+                onDismiss: handleDetailsEditorDismissed
+            ) {
+                detailsEditorSheet
+            }
+            .sheet(isPresented: $isShowingModelPicker) {
+                ModelPickerSheetView()
+            }
+            .sheet(item: $customCodingAgentSheet) { sheet in
+                switch sheet {
+                case .add:
+                    AddCustomCodingAgentSheetView(store: inferenceStore.customCodingAgents)
+                case .manage:
+                    ManageCustomCodingAgentsSheetView(store: inferenceStore.customCodingAgents)
+                }
+            }
     }
 
     // The menu bar popover stays intentionally small: tool list first, prompt last.
@@ -358,15 +347,20 @@ struct ToolLibraryPopoverView: View {
                 resourcePermissions: resourcePermissionsBinding,
                 codingAgentPreference: codingAgentPreferenceBinding,
                 reasoningEffort: reasoningEffortBinding,
+                autoRemixEnabled: autoRemixEnabledBinding,
                 placeholder: toolLibraryStore.promptPlaceholder,
                 showsSandboxControl: showSandboxOverride,
                 showsPermissionControls: !inferenceStore.generationPreferences
                     .automaticallySelectGeneratedAppPermissions,
+                showsAutoRemixControl: !toolLibraryStore.hasSelectedTool
+                    && isStoreFeatureEnabled,
+                isAutoRemixAvailable: inferenceStore.ironsmithSession != nil,
                 modelPickerTitle: composerModelPickerTitle,
                 isModelPickerEnabled: isComposerModelPickerEnabled,
                 isSubmitEnabled: canSubmitPrompt,
                 isSubmitting: toolLibraryStore.isGenerating || remixIdentityGeneratingToolID != nil,
-                isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(.codex),
+                isCodexAgentSupported: inferenceStore.selectedModelSupportsCodingAgentPreference(
+                    .codex),
                 customCodingAgents: inferenceStore.customCodingAgents.agents,
                 selectedCustomCodingAgentID: inferenceStore.customCodingAgents.selectedAgentID,
                 showsAttachmentControls: selectedModelCanUseCodexAttachments
@@ -511,9 +505,14 @@ struct ToolLibraryPopoverView: View {
             canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
             showsStoreActions: isStoreFeatureEnabled,
             canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
-            hasStoreSourceChanges: storePublisher.hasStoreSourceChanges(for: tool),
+            hasStoreSourceChanges: storePublisher.hasStoreSourceChanges(
+                for: tool,
+                userID: inferenceStore.ironsmithSession?.user.id.uuidString
+            ),
             activeCodingAgent: toolLibraryStore.activeCodingAgent(for: tool),
-            canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool)
+            canShowAgentOutput: toolLibraryStore.canShowAgentOutput(for: tool),
+            storeInspirations: tool.storeInspirationLinks,
+            isActivelyRemixingFromStore: toolLibraryStore.isActivelyRemixingFromStore(tool)
         )
     }
 
@@ -548,6 +547,28 @@ struct ToolLibraryPopoverView: View {
             },
             onPublishToStore: {
                 routeStore.open(.toolLibrary(.publishTool(tool.id)))
+            },
+            onOpenStoreApp: {
+                if let publication = tool.storePublication
+                {
+                    routeStore.open(
+                        .store(.app(storeId: publication.storeId, appId: publication.appId))
+                    )
+                }
+            },
+            onOpenStoreSource: {
+                if let storeID = tool.storeRemixSource?.storeId,
+                    let appID = tool.storeRemixSource?.appId
+                {
+                    routeStore.open(.store(.app(storeId: storeID, appId: appID)))
+                } else {
+                    routeStore.open(.store(.root))
+                }
+            },
+            onOpenStoreInspiration: { capability in
+                if let storeID = capability.storeId, let appID = capability.appId {
+                    routeStore.open(.store(.app(storeId: storeID, appId: appID)))
+                }
             },
             onRevert: {
                 Task {
@@ -641,7 +662,7 @@ struct ToolLibraryPopoverView: View {
                             in: modelContext,
                             rename: { renameTool(tool, to: $0) }
                         )
-                        if didSave, tool.storeRemixedFromVersionId != nil {
+                        if didSave, tool.storeRemixSource != nil {
                             remixIdentityHandledToolIDs.insert(tool.id)
                         }
                         if !didSave, shouldReturnToPublishing {
@@ -768,28 +789,15 @@ struct ToolLibraryPopoverView: View {
     private var storeSourceChangesRefreshID: [String] {
         [isStoreFeatureEnabled ? "store-on" : "store-off"]
             + tools.map {
-                "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)-\($0.storeSourceSha256 ?? "")"
+                "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)-\($0.storeBaselineSourceSha256 ?? "")"
             }
-    }
-
-    private var publishedStoreLinkRefreshID: String {
-        let session = inferenceStore.ironsmithSession?.user.id.uuidString ?? "signed-out"
-        let storeFeature = isStoreFeatureEnabled ? "store-on" : "store-off"
-        let links =
-            tools
-            .compactMap { tool -> String? in
-                guard let storeId = tool.storeId,
-                    let storeAppId = tool.storeAppId
-                else { return nil }
-                return "\(storeId):\(storeAppId)"
-            }
-            .sorted()
-            .joined(separator: "|")
-        return "\(storeFeature)|\(session)|\(links)"
     }
 
     private func canUpdateStoreVersion(for tool: Tool) -> Bool {
-        storePublisher.canUpdateStoreVersion(for: tool)
+        storePublisher.canUpdateStoreVersion(
+            for: tool,
+            userID: inferenceStore.ironsmithSession?.user.id.uuidString
+        )
     }
 
     private var canSubmitPrompt: Bool {
@@ -953,6 +961,13 @@ struct ToolLibraryPopoverView: View {
         )
     }
 
+    private var autoRemixEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { inferenceStore.generationPreferences.autoRemixEnabled },
+            set: { inferenceStore.generationPreferences.autoRemixEnabled = $0 }
+        )
+    }
+
     private var reasoningEffortBinding: Binding<ToolReasoningEffort> {
         Binding(
             get: { inferenceStore.generationPreferences.reasoningEffort },
@@ -970,7 +985,8 @@ struct ToolLibraryPopoverView: View {
         isSigningInToIronsmith = true
 
         Task {
-            let didFinishProviderSetup = await inferenceStore.signInToIronsmithWithAppleOAuth { @MainActor url in
+            let didFinishProviderSetup = await inferenceStore.signInToIronsmithWithAppleOAuth {
+                @MainActor url in
                 try await webAuthenticationSession.authenticate(
                     using: url,
                     callbackURLScheme: IronsmithOAuthRedirect.appCallbackScheme
@@ -989,8 +1005,7 @@ struct ToolLibraryPopoverView: View {
             else { return }
             await storePublisher.beginPublishing(
                 tool,
-                inferenceStore: inferenceStore,
-                tools: tools
+                inferenceStore: inferenceStore
             )
         }
     }
@@ -1027,8 +1042,8 @@ struct ToolLibraryPopoverView: View {
             isStoreFeatureEnabled: isStoreFeatureEnabled,
             generatesIdentity: generatesIdentityForNewRemixes,
             hasPresentedNotice: hasPresentedRemixIdentityNotice,
-            isConfirmedDownloadedFromAnotherUser: storePublisher
-                .isConfirmedDownloadedFromAnotherUser(tool)
+            isConfirmedDownloadedFromAnotherUser:
+                tool.storePublication == nil && tool.storeRemixSource?.isRoutable == true
         ) {
         case .submit:
             submitCurrentPrompt()
@@ -1074,19 +1089,22 @@ struct ToolLibraryPopoverView: View {
         }
         toolLibraryStore.startPromptSubmission(
             modelContext: modelContext,
-            inferenceStore: inferenceStore
+            inferenceStore: inferenceStore,
+            storeAssistedGenerationAvailable: isStoreFeatureEnabled
+                && inferenceStore.ironsmithSession != nil
         )
     }
 
     private func generateRemixIdentity(_ tool: Tool) async -> Bool {
         do {
             try await inferenceStore.prepareSelectedModelForGeneration()
-            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
-                resolutionContext: ToolCodingAgentResolutionContext(
-                    generationMode: .edit,
-                    existingSourceLineCount: nil
+            let languageModelContext =
+                try await inferenceStore.makeSelectedAgentLanguageModelContext(
+                    resolutionContext: ToolCodingAgentResolutionContext(
+                        generationMode: .edit,
+                        existingSourceLineCount: nil
+                    )
                 )
-            )
             let sourceURL = try tool.packageLayout.packageFileURL(for: tool.contentViewSourcePath)
             let source = try String(contentsOf: sourceURL, encoding: .utf8)
             let suggestion = await remixMetadataClient.planCreation(
@@ -1171,8 +1189,7 @@ struct ToolLibraryPopoverView: View {
             Task {
                 await storePublisher.beginPublishing(
                     tool,
-                    inferenceStore: inferenceStore,
-                    tools: tools
+                    inferenceStore: inferenceStore
                 )
             }
         }

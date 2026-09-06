@@ -17,9 +17,12 @@ struct PromptComposerView: View {
     @Binding var resourcePermissions: GeneratedAppResourcePermissions
     @Binding var codingAgentPreference: ToolCodingAgentPreference
     @Binding var reasoningEffort: ToolReasoningEffort
+    @Binding var autoRemixEnabled: Bool
     let placeholder: String
     let showsSandboxControl: Bool
     let showsPermissionControls: Bool
+    let showsAutoRemixControl: Bool
+    let isAutoRemixAvailable: Bool
     let modelPickerTitle: String
     let isModelPickerEnabled: Bool
     let isSubmitEnabled: Bool
@@ -126,9 +129,9 @@ struct PromptComposerView: View {
                 isSubmitEnabled: isSubmitEnabled,
                 onSubmit: onSubmit
             )
-                .padding(.horizontal, PromptEditorLayout.textEditorHorizontalPadding)
-                .padding(.top, PromptEditorLayout.textEditorTopPadding)
-                .accessibilityIdentifier("tool-prompt-field")
+            .padding(.horizontal, PromptEditorLayout.textEditorHorizontalPadding)
+            .padding(.top, PromptEditorLayout.textEditorTopPadding)
+            .accessibilityIdentifier("tool-prompt-field")
 
             if prompt.isEmpty {
                 Text(placeholder)
@@ -329,10 +332,23 @@ struct PromptComposerView: View {
                 }
             }
 
-            if showsSandboxControl {
+            if showsSandboxControl || showsAutoRemixControl {
                 Divider()
+            }
+
+            if showsSandboxControl {
                 Toggle("Sandbox Enabled", isOn: $sandboxEnabled)
                     .help(sandboxHelpText)
+            }
+
+            if showsAutoRemixControl {
+                Toggle("Auto Remix", isOn: $autoRemixEnabled)
+                    .disabled(!isAutoRemixAvailable)
+                    .help(
+                        isAutoRemixAvailable
+                            ? "Find a compatible Store app and reusable capabilities before generating."
+                            : "Sign in with Ironsmith to use Store-assisted generation."
+                    )
             }
 
             if showsPermissionControls {
@@ -371,7 +387,10 @@ struct PromptComposerView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) {
             notification in
             guard let menu = notification.object as? NSMenu else { return }
-            CodingAgentMenuHelp.apply(to: menu)
+            GenerationSettingsMenuHelp.apply(
+                to: menu,
+                isAutoRemixAvailable: isAutoRemixAvailable
+            )
         }
     }
 
@@ -547,7 +566,7 @@ private enum PromptAttachmentOpenPanel {
     }
 }
 
-private enum CodingAgentMenuHelp {
+private enum GenerationSettingsMenuHelp {
     private static let tooltips: [String: String] = [
         ToolCodingAgentPreference.ironsmithSpark.displayName:
             "Best for simple apps using on-device AI.",
@@ -557,13 +576,18 @@ private enum CodingAgentMenuHelp {
             "Best for complex, feature-rich apps. Typically uses 1.5-2x more tokens than Flame.",
     ]
 
-    static func apply(to menu: NSMenu) {
+    static func apply(to menu: NSMenu, isAutoRemixAvailable: Bool) {
         for item in menu.items {
             if let tooltip = tooltips[item.title] {
                 item.toolTip = tooltip
+            } else if item.title == "Auto Remix" {
+                item.toolTip =
+                    isAutoRemixAvailable
+                    ? "Remix an existing store app and reuse its capabilities in your generated app."
+                    : "Sign in with Ironsmith to use store-assisted generation."
             }
             if let submenu = item.submenu {
-                apply(to: submenu)
+                apply(to: submenu, isAutoRemixAvailable: isAutoRemixAvailable)
             }
         }
     }
@@ -656,11 +680,14 @@ private struct PromptComposerPreview: View {
             ),
             codingAgentPreference: .constant(.automatic),
             reasoningEffort: .constant(.default),
+            autoRemixEnabled: .constant(true),
             placeholder: isEditing
                 ? "Describe changes for Clipboard Cleaner…"
                 : "Describe a new app to build…",
             showsSandboxControl: isEditing,
             showsPermissionControls: true,
+            showsAutoRemixControl: !isEditing,
+            isAutoRemixAvailable: true,
             modelPickerTitle: "DeepSeek V4 Flash",
             isModelPickerEnabled: true,
             isSubmitEnabled: isEditing,

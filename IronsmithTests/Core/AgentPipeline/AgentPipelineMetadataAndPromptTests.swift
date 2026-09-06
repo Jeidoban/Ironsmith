@@ -495,6 +495,359 @@ extension AgentPipelineTests {
 
     @MainActor
     @Test
+    func storeGenerationRequestUsesCodingAgentAndPermissionPolicy() throws {
+        let request = StoreGenerationContextRequest(
+            originalPrompt: "Build a timer",
+            refinedPrompt: "Build a focused timer",
+            settings: .default,
+            codingAgent: .ironsmithFlame,
+            automaticallySelectPermissions: false
+        )
+
+        #expect(request.codingAgent == "flame")
+        #expect(request.permissionMode == "strict")
+        let encoded = try String(
+            decoding: JSONEncoder().encode(request),
+            as: UTF8.self
+        )
+        #expect(!encoded.contains("runtimeVersion"))
+    }
+
+    @MainActor
+    @Test
+    func compactStoreGenerationContextPlanDecodesGenerationAndProvenanceData() throws {
+        let data = Data(
+            #"""
+            {
+              "mode": "base_with_capabilities",
+              "codingAgent": "flame",
+              "promptContext": "[STORE-ASSISTED GENERATION CONTEXT]",
+              "resolvedSandboxPermissions": ["internet"],
+              "resolvedResourcePermissions": ["camera"],
+              "base": {
+                "versionId": "base-version",
+                "storeId": "store-1",
+                "appId": "app-1",
+                "appName": "Simple Timer",
+                "versionNumber": 3,
+                "sourceSha256": "base-sha",
+                "sourceCode": "import SwiftUI"
+              },
+              "inspirations": [{
+                "versionId": "inspiration-version",
+                "storeId": "store-2",
+                "appId": "app-2",
+                "appName": "Preset Timer"
+              }]
+            }
+            """#.utf8
+        )
+
+        let plan = try JSONDecoder().decode(StoreGenerationContextPlan.self, from: data)
+
+        #expect(plan.mode == .baseWithCapabilities)
+        #expect(plan.codingAgent == "flame")
+        #expect(plan.promptContext == "[STORE-ASSISTED GENERATION CONTEXT]")
+        #expect(plan.resolvedSandboxPermissions == ["internet"])
+        #expect(plan.resolvedResourcePermissions == ["camera"])
+        #expect(plan.base?.sourceCode == "import SwiftUI")
+        #expect(plan.base?.versionId == "base-version")
+        #expect(plan.inspirations.first?.appName == "Preset Timer")
+        #expect(plan.inspirations.map(\.versionId) == ["inspiration-version"])
+    }
+
+    @MainActor
+    @Test
+    func storeContextPlanMustMatchTheResumeCodingAgent() {
+        let plan = StoreGenerationContextPlan(
+            mode: .scratch,
+            codingAgent: "flame",
+            promptContext: "",
+            resolvedSandboxPermissions: [],
+            resolvedResourcePermissions: [],
+            base: nil,
+            inspirations: []
+        )
+
+        #expect(SingleFileToolGenerationRuntime.canReuseStoreContextPlan(plan, with: "flame"))
+        #expect(!SingleFileToolGenerationRuntime.canReuseStoreContextPlan(plan, with: "spark"))
+    }
+
+    @MainActor
+    @Test
+    func storeAssistedCreateMaterializesBaseAndUsesItAsAnEditContext() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let refinedPrompt = "Build a focused timer with selectable presets."
+        let promptCapture = PromptCapture()
+        let storeCapture = StoreGenerationCapture()
+        let plan = StoreGenerationContextPlan(
+            mode: .baseWithCapabilities,
+            codingAgent: "spark",
+            promptContext: """
+                [STORE-ASSISTED GENERATION CONTEXT]
+                Selection mode: base_with_capabilities
+                Reusable capability from “Preset Timer”: Selectable presets
+            """,
+            resolvedSandboxPermissions: ["internet", "userSelectedFiles"],
+            resolvedResourcePermissions: ["camera"],
+            base: StoreGenerationBaseContext(
+                versionId: "version-base",
+                storeId: "store-1",
+                appId: "app-1",
+                appName: "Simple Timer",
+                versionNumber: 3,
+                sourceSha256: "sha256",
+                sourceCode: Self.originalEditableSource
+            ),
+            inspirations: [
+                StoreGenerationInspirationReference(
+                    versionId: "version-capability",
+                    storeId: "store-1",
+                    appId: "app-2",
+                    appName: "Preset Timer"
+                )
+            ]
+        )
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.prepareGenerationContext = { request in
+            await storeCapture.record(request: request)
+            return plan
+        }
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await promptCapture.record(prompt)
+                return Self.renameOldToNewUnifiedDiff
+            },
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            planningClient: ToolGenerationPlanningClient { _ in
+                ToolCreationPlan(displayName: "Auto Remix Timer", iconPrompt: "")
+            },
+            promptRefinementClient: ToolPromptRefinementClient { _ in refinedPrompt },
+            storeClient: storeClient
+        )
+        let lifecycle = ToolGenerationLifecycle(
+            updateStoreGenerationContext: { context in
+                await storeCapture.record(snapshot: context)
+            },
+            updatePhase: { _, phase, _ in
+                await storeCapture.record(phase: phase)
+            }
+        )
+
+        let result = try await runtime.generateTool(
+            for: "Make a timer with presets",
+            settings: .default,
+            planningPolicy: ToolGenerationPlanningPolicy(
+                appKindPreference: .automatic,
+                automaticallySelectPermissions: true,
+                alwaysIncludedSandboxPermissions: .none,
+                alwaysIncludedResourcePermissions: .none
+            ),
+            lifecycle: lifecycle,
+            storeAssistedGenerationEnabled: true
+        )
+
+        let source = try String(contentsOf: Self.contentViewURL(for: result), encoding: .utf8)
+        let prompts = await promptCapture.prompts
+        #expect(source.contains(#"Text("new")"#))
+        #expect(!(source.contains(#"Text("old")"#)))
+        #expect(await storeCapture.request?.originalPrompt == "Make a timer with presets")
+        #expect(await storeCapture.request?.refinedPrompt == refinedPrompt)
+        #expect(await storeCapture.request?.codingAgent == "spark")
+        #expect(await storeCapture.request?.permissionMode == "automatic")
+        #expect(result.settings.sandboxPermissions.contains(.outgoingConnections))
+        #expect(result.settings.resourcePermissions.contains(.camera))
+        #expect(await storeCapture.plan == plan)
+        #expect(await storeCapture.snapshot?.originalPrompt == "Make a timer with presets")
+        #expect(await storeCapture.snapshot?.refinedPrompt == refinedPrompt)
+        let pendingContext = try ToolStoreRemixStateClient.live.pendingContext(
+            result.packageRootURL
+        )
+        #expect(pendingContext?.promptContext == plan.promptContext)
+        #expect(pendingContext?.resolvedSandboxPermissions == plan.resolvedSandboxPermissions)
+        #expect(pendingContext?.resolvedResourcePermissions == plan.resolvedResourcePermissions)
+        #expect(await storeCapture.phases.contains(.searchingStore))
+        #expect(prompts.first?.contains("[STORE-ASSISTED GENERATION CONTEXT]") == true)
+        #expect(prompts.first?.contains("Selectable presets") == true)
+        #expect(prompts.first?.contains("Edit ContentView.swift by returning a unified diff only.") == true)
+    }
+
+    @MainActor
+    @Test
+    func failedResumeReplanClearsPreviousStoreContextBeforeScratchGeneration() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: "ReplannedTimer",
+            source: Self.originalEditableSource
+        )
+        tool.generationState = .stopped
+        tool.generationPhase = .planning
+        tool.generationMode = .create
+        let savedSnapshot = StoreRemixTestFixture.snapshot(codingAgent: "flame")
+        try ToolStoreRemixStateClient.live.stage(savedSnapshot, tool.packageRootURL)
+        tool.replaceStoreProvenance(
+            remixSource: savedSnapshot.plan.base.map {
+                StoreVersionReference(
+                    versionId: $0.versionId,
+                    storeId: $0.storeId,
+                    appId: $0.appId,
+                    appName: $0.appName,
+                    versionNumber: $0.versionNumber,
+                    sourceSha256: $0.sourceSha256
+                )
+            },
+            inspirations: savedSnapshot.plan.inspirations.map {
+                StoreVersionReference(
+                    versionId: $0.versionId,
+                    storeId: $0.storeId,
+                    appId: $0.appId,
+                    appName: $0.appName
+                )
+            }
+        )
+
+        let promptCapture = PromptCapture()
+        let clearCapture = StoreGenerationClearCapture()
+        var storeClient = IronsmithStoreClient.unconfigured
+        storeClient.prepareGenerationContext = { _ in
+            throw FakeAgentError.expected
+        }
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await promptCapture.record(prompt)
+                return Self.simpleContentViewSource(text: "scratch")
+            },
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient(),
+            storeClient: storeClient
+        )
+        let lifecycle = ToolGenerationLifecycle(
+            clearStoreGenerationContextForScratchFallback: {
+                refinedPrompt,
+                discardedBaseVersionId in
+                await clearCapture.record(
+                    refinedPrompt: refinedPrompt,
+                    discardedBaseVersionId: discardedBaseVersionId
+                )
+                await MainActor.run {
+                    tool.storeProvenance = nil
+                    tool.pendingPrompt = refinedPrompt
+                }
+            }
+        )
+
+        _ = try await runtime.generateTool(
+            for: savedSnapshot.originalPrompt,
+            existingTool: tool,
+            settings: .default,
+            lifecycle: lifecycle,
+            storeAssistedGenerationEnabled: true
+        )
+
+        #expect(await clearCapture.refinedPrompt == savedSnapshot.refinedPrompt)
+        #expect(
+            await clearCapture.discardedBaseVersionId == nil
+        )
+        #expect(try ToolStoreRemixStateClient.live.pendingContext(tool.packageRootURL) == nil)
+        #expect(tool.storeProvenance == nil)
+        #expect(tool.pendingPrompt == savedSnapshot.refinedPrompt)
+        #expect(await promptCapture.prompts.first?.contains(savedSnapshot.refinedPrompt) == true)
+        #expect(
+            await promptCapture.prompts.first?.contains(
+                "[STORE-ASSISTED GENERATION CONTEXT]"
+            ) == false
+        )
+    }
+
+    @MainActor
+    @Test
+    func missingPendingStoreContextClearsDurableProvenanceBeforeScratchResume() async throws {
+        let toolsDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+
+        let tool = try Self.makeExistingTool(
+            toolsDirectory: toolsDirectory,
+            executableName: "MissingStoreContext",
+            source: Self.originalEditableSource
+        )
+        tool.generationState = .stopped
+        tool.generationPhase = .generatingSource
+        tool.generationMode = .create
+        tool.replaceStoreProvenance(
+            remixSource: StoreVersionReference(
+                versionId: "missing-base-version",
+                storeId: "store-1",
+                appId: "base-app"
+            ),
+            inspirations: [StoreVersionReference(versionId: "inspiration-version")]
+        )
+
+        let promptCapture = PromptCapture()
+        let clearCapture = StoreGenerationClearCapture()
+        let runtime = Self.makeRuntime(
+            languageModel: StubAgentLanguageModel { prompt, _ in
+                await promptCapture.record(prompt)
+                return Self.simpleContentViewSource(text: "scratch")
+            },
+            generationOptions: GenerationOptions(),
+            pipelineConfiguration: .ironsmithSpark(
+                repairStrategy: .modelSearchReplace(maxPatchBlocksPerTurn: 1)
+            ),
+            toolsDirectoryURL: toolsDirectory,
+            processClient: Self.successfulProcessClient()
+        )
+        let originalPrompt = "Build a timer from scratch"
+        let lifecycle = ToolGenerationLifecycle(
+            clearStoreGenerationContextForScratchFallback: {
+                refinedPrompt,
+                discardedBaseVersionId in
+                await clearCapture.record(
+                    refinedPrompt: refinedPrompt,
+                    discardedBaseVersionId: discardedBaseVersionId
+                )
+                await MainActor.run {
+                    tool.storeProvenance = nil
+                    tool.pendingPrompt = refinedPrompt
+                }
+            }
+        )
+
+        _ = try await runtime.generateTool(
+            for: originalPrompt,
+            existingTool: tool,
+            settings: .default,
+            lifecycle: lifecycle,
+            storeAssistedGenerationEnabled: false
+        )
+
+        #expect(await clearCapture.refinedPrompt == originalPrompt)
+        #expect(await clearCapture.discardedBaseVersionId == nil)
+        #expect(tool.storeProvenance == nil)
+        #expect(tool.pendingPrompt == originalPrompt)
+        #expect(await promptCapture.prompts.first?.contains(originalPrompt) == true)
+        #expect(
+            await promptCapture.prompts.first?.contains(
+                "[STORE-ASSISTED GENERATION CONTEXT]"
+            ) == false
+        )
+    }
+
+    @MainActor
+    @Test
     func editModeKeepsOriginalPromptAndSkipsMetadataRefinement() async throws {
         let toolsDirectory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: toolsDirectory) }
