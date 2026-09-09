@@ -12,6 +12,10 @@ struct LaunchRouterView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     @State private var appUpdateStore: AppUpdateStore
     @State private var imagePlaygroundCoordinator: ImagePlaygroundSheetCoordinator
+    #if DEBUG
+    @AppStorage(IronsmithPreferenceKeys.debugCommandLineToolsState)
+    private var debugCommandLineToolsState = CommandLineToolsDebugState.automatic.rawValue
+    #endif
     let gate: CommandLineToolsGate
 
     @MainActor
@@ -45,6 +49,11 @@ struct LaunchRouterView: View {
             appUpdateStore.startAutomaticChecks()
             await inferenceStore.loadIfNeeded(modelContext: modelContext)
         }
+        #if DEBUG
+        .onChange(of: debugCommandLineToolsState) { _, _ in
+            gate.refreshNow()
+        }
+        #endif
         .imagePlaygroundSheet(
             isPresented: Binding(
                 get: { imagePlaygroundCoordinator.isPresented },

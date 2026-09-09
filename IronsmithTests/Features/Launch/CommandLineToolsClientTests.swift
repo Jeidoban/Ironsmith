@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import Ironsmith
@@ -64,4 +65,55 @@ struct CommandLineToolsClientTests {
         #expect(xcode.usesXcode)
         #expect(!standalone.usesXcode)
     }
+
+    #if DEBUG
+    @Test func debugStatesRepresentEveryLaunchGateOutcome() throws {
+        #expect(CommandLineToolsDebugState.automatic.availability == nil)
+        #expect(CommandLineToolsDebugState.missing.availability == .unavailable)
+
+        let supported = try #require(CommandLineToolsDebugState.supported.availability)
+        guard case .available = supported else {
+            Issue.record("Supported debug state should pass the launch gate")
+            return
+        }
+
+        let standalone = try #require(
+            CommandLineToolsDebugState.outdatedStandalone.availability
+        )
+        guard case .unsupported(let standaloneSelection) = standalone else {
+            Issue.record("Standalone update debug state should be unsupported")
+            return
+        }
+        #expect(!standaloneSelection.usesXcode)
+
+        let xcode = try #require(CommandLineToolsDebugState.outdatedXcode.availability)
+        guard case .unsupported(let xcodeSelection) = xcode else {
+            Issue.record("Xcode update debug state should be unsupported")
+            return
+        }
+        #expect(xcodeSelection.usesXcode)
+    }
+
+    @Test func debugStateDefaultsToAutomaticForUnknownStoredValues() {
+        let suiteName = "CommandLineToolsClientTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(CommandLineToolsDebugState.selected(userDefaults: userDefaults) == .automatic)
+
+        userDefaults.set(
+            CommandLineToolsDebugState.outdatedXcode.rawValue,
+            forKey: IronsmithPreferenceKeys.debugCommandLineToolsState
+        )
+        #expect(
+            CommandLineToolsDebugState.selected(userDefaults: userDefaults) == .outdatedXcode
+        )
+
+        userDefaults.set(
+            "future-state",
+            forKey: IronsmithPreferenceKeys.debugCommandLineToolsState
+        )
+        #expect(CommandLineToolsDebugState.selected(userDefaults: userDefaults) == .automatic)
+    }
+    #endif
 }
