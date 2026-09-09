@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Ironsmith
@@ -9,6 +10,57 @@ extension ToolLibraryTests {
         #expect(ToolLibraryViewMode.resolved("unknown") == .list)
         #expect(ToolLibrarySortOrder.resolved("alphabetical") == .alphabetical)
         #expect(ToolLibrarySortOrder.resolved("unknown") == .latest)
+    }
+
+    @MainActor
+    @Test
+    func generationSettingsMenuAddsNativeSelectionStatesAndTooltips() {
+        let rootMenu = NSMenu()
+        let appTypeMenu = submenu(named: "App Type", in: rootMenu)
+        let appTypeAutomatic = addItem(named: "Automatic", to: appTypeMenu)
+        appTypeAutomatic.state = .on
+
+        let codingAgentMenu = submenu(named: "Coding Agent", in: rootMenu)
+        let automaticAgent = addItem(named: "Automatic", to: codingAgentMenu)
+        let flameAgent = addItem(named: "Ironsmith Flame", to: codingAgentMenu)
+        let codexAgent = addItem(named: "Codex", to: codingAgentMenu)
+        let customAgentMenu = submenu(named: "Custom", in: codingAgentMenu)
+        let selectedCustomAgent = addItem(named: "Claude Code", to: customAgentMenu)
+        let addAgent = addItem(named: "Add Agent…", to: customAgentMenu)
+
+        let reasoningMenu = submenu(named: "Reasoning", in: rootMenu)
+        let defaultReasoning = addItem(named: "Default", to: reasoningMenu)
+        let highReasoning = addItem(named: "High", to: reasoningMenu)
+
+        GenerationSettingsMenuHelp.apply(
+            to: reasoningMenu,
+            codingAgentPreference: .codex,
+            reasoningEffort: .high,
+            selectedCustomCodingAgentName: "Claude Code",
+            isAutoRemixAvailable: true
+        )
+
+        #expect(appTypeAutomatic.state == .on)
+        #expect(automaticAgent.state == .off)
+        #expect(flameAgent.state == .off)
+        #expect(codexAgent.state == .on)
+        #expect(codexAgent.toolTip != nil)
+        #expect(flameAgent.toolTip != nil)
+        #expect(defaultReasoning.state == .off)
+        #expect(highReasoning.state == .on)
+        #expect(selectedCustomAgent.state == .off)
+        #expect(addAgent.state == .off)
+
+        GenerationSettingsMenuHelp.apply(
+            to: customAgentMenu,
+            codingAgentPreference: .custom,
+            reasoningEffort: .default,
+            selectedCustomCodingAgentName: "Claude Code",
+            isAutoRemixAvailable: true
+        )
+
+        #expect(selectedCustomAgent.state == .on)
+        #expect(addAgent.state == .off)
     }
 
     @MainActor
@@ -146,5 +198,21 @@ extension ToolLibraryTests {
             activeCodingAgent: nil,
             canShowAgentOutput: false
         )
+    }
+
+    @MainActor
+    private func submenu(named title: String, in parent: NSMenu) -> NSMenu {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: title)
+        item.submenu = submenu
+        parent.addItem(item)
+        return submenu
+    }
+
+    @MainActor
+    private func addItem(named title: String, to menu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        menu.addItem(item)
+        return item
     }
 }
