@@ -393,7 +393,7 @@ nonisolated enum CustomCodingAgentPrompt {
             - Do not modify Package.swift or Sources/\(executableName)/\(executableName).swift.
             - Do not add other source files or package dependencies.
             - Do not add previews, @main declarations, or App-conforming helper types.
-            - Keep working until ContentView.swift is complete and `swift build --disable-sandbox` succeeds.
+            - Keep working until ContentView.swift is complete and `xcrun swift build --disable-sandbox` succeeds.
             - Define ContentView as the root View. Helper types may live in the same file.
             - This is a macOS SwiftUI app. Do not use iOS-only modifiers.
             - Keep the app local-only; do not add a backend, accounts, analytics, subscriptions, push notifications, or cloud sync.

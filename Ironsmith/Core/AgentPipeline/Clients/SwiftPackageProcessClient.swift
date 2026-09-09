@@ -90,8 +90,8 @@ struct SwiftPackageProcessClient: Sendable {
     nonisolated static let live = SwiftPackageProcessClient(
         build: { packageRootURL in
             let result = try await runProcess(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: ["build", "--package-path", packageRootURL.path],
+                executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                arguments: ["swift", "build", "--package-path", packageRootURL.path],
                 currentDirectoryURL: packageRootURL
             )
             return SwiftPackageBuildResult(
@@ -103,8 +103,8 @@ struct SwiftPackageProcessClient: Sendable {
         },
         buildRelease: { packageRootURL in
             let result = try await runProcess(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: ["build", "-c", "release", "--package-path", packageRootURL.path],
+                executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                arguments: ["swift", "build", "-c", "release", "--package-path", packageRootURL.path],
                 currentDirectoryURL: packageRootURL
             )
             return SwiftPackageBuildResult(
@@ -116,8 +116,8 @@ struct SwiftPackageProcessClient: Sendable {
         },
         showBinPath: { packageRootURL in
             let result = try await runProcess(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: ["build", "--show-bin-path", "--package-path", packageRootURL.path],
+                executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                arguments: ["swift", "build", "--show-bin-path", "--package-path", packageRootURL.path],
                 currentDirectoryURL: packageRootURL
             )
 
@@ -139,8 +139,8 @@ struct SwiftPackageProcessClient: Sendable {
         },
         showReleaseBinPath: { packageRootURL in
             let result = try await runProcess(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: ["build", "-c", "release", "--show-bin-path", "--package-path", packageRootURL.path],
+                executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                arguments: ["swift", "build", "-c", "release", "--show-bin-path", "--package-path", packageRootURL.path],
                 currentDirectoryURL: packageRootURL
             )
 

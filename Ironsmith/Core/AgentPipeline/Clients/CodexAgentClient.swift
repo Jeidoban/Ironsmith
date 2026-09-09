@@ -740,11 +740,11 @@ extension CodexAgentClient {
             - Do not add other source files.
             - Do not add package dependencies.
             - Do not add previews or @main declarations.
-            - Run `swift build --disable-sandbox` when you need to check compilation.
+            - Run `xcrun swift build --disable-sandbox` when you need to check compilation.
             - Use \(temporaryWorkspaceURL.path) for any temporary scratch files you deliberately create.
             - Do not write deliberate scratch files directly in the top-level system temp directory.
             - Ironsmith will clean up the temporary workspace after Codex exits.
-            - Keep working until ContentView.swift exists, is complete, and `swift build --disable-sandbox` succeeds.
+            - Keep working until ContentView.swift exists, is complete, and `xcrun swift build --disable-sandbox` succeeds.
             - Define ContentView as the root View, but you may create helper types in the same file. Helper types must not conform to App.
             - An entry point already exists and already calls ContentView, so do not add another @main or App type.
             - This is a macOS SwiftUI app. Do not use iOS-only modifiers.

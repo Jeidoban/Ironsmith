@@ -78,7 +78,7 @@ extension AgentPipelineTests {
         #expect(arguments.contains(#"model_reasoning_effort="xhigh""#))
         let prompt = try #require(arguments.last)
         #expect(prompt.contains("Create or edit only Sources/MortgageMate/ContentView.swift"))
-        #expect(prompt.contains("Run `swift build --disable-sandbox`"))
+        #expect(prompt.contains("Run `xcrun swift build --disable-sandbox`"))
         #expect(!prompt.contains("HOME="))
         #expect(!prompt.contains("XDG_CACHE_HOME="))
         #expect(!prompt.contains("CLANG_MODULE_CACHE_PATH="))

@@ -7,6 +7,7 @@ import AppKit
 import SwiftUI
 
 struct CommandLineToolsOnboardingView: View {
+    let availability: CommandLineToolsAvailability
     let isChecking: Bool
     let notFoundMessageID: Int
     let onRetry: () -> Void
@@ -17,7 +18,7 @@ struct CommandLineToolsOnboardingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center) {
-                Label("Install Xcode Command Line Tools", systemImage: "terminal")
+                Label(title, systemImage: symbolName)
                     .font(.title2.weight(.semibold))
                     .lineLimit(1)
 
@@ -26,18 +27,32 @@ struct CommandLineToolsOnboardingView: View {
                 quitButton
             }
 
-            Text("Ironsmith needs the Xcode Command Line Tools to build apps. macOS should show an install popup now. Click “Install” or run the command below, then return here when it finishes. The tools are a 500MB download.")
+            Text(message)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            commandRow
+            if case .unavailable = availability {
+                commandRow
+            }
+
+            if case .unsupported(let selection) = availability {
+                Text(
+                    "Selected: Swift \(selection.swiftVersion.displayName), macOS SDK \(selection.sdkVersion.displayName)"
+                )
+                .font(.footnote.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
 
             HStack {
-                Button("Check for installation", action: onRetry)
+                Button(retryButtonTitle, action: onRetry)
                     .buttonStyle(.borderedProminent)
                     .disabled(isChecking)
 
-                if isShowingNotFoundMessage {
+                if isChecking {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if isShowingNotFoundMessage {
                     Text("Not found")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -55,6 +70,48 @@ struct CommandLineToolsOnboardingView: View {
         }
         .onDisappear {
             notFoundMessageTask?.cancel()
+        }
+    }
+
+    private var title: String {
+        switch availability {
+        case .unsupported:
+            "Update Developer Tools"
+        case .available, .unavailable:
+            "Install Xcode Command Line Tools"
+        }
+    }
+
+    private var symbolName: String {
+        switch availability {
+        case .unsupported:
+            "arrow.triangle.2.circlepath"
+        case .available, .unavailable:
+            "terminal"
+        }
+    }
+
+    private var message: String {
+        switch availability {
+        case .available:
+            "The selected developer tools are ready."
+        case .unavailable:
+            "Ironsmith needs Apple’s developer tools to build apps. macOS should show an installation dialog now. Complete the installation, then return here and check again."
+        case .unsupported(let selection):
+            if selection.usesXcode {
+                "Ironsmith requires Swift \(GeneratedToolRequirements.swiftVersion) or newer and the macOS \(GeneratedToolRequirements.sdkMajorVersion) SDK or newer. Update the selected version of Xcode, then check again."
+            } else {
+                "Ironsmith requires Swift \(GeneratedToolRequirements.swiftVersion) or newer and the macOS \(GeneratedToolRequirements.sdkMajorVersion) SDK or newer. Update the Command Line Tools in System Settings › General › Software Update, then check again."
+            }
+        }
+    }
+
+    private var retryButtonTitle: String {
+        switch availability {
+        case .unsupported:
+            "Check again"
+        case .available, .unavailable:
+            "Check for installation"
         }
     }
 
@@ -94,7 +151,9 @@ struct CommandLineToolsOnboardingView: View {
             .foregroundStyle(didCopyInstallCommand ? .green : .secondary)
             .contentShape(Rectangle())
             .help("Copy command")
-            .accessibilityLabel(didCopyInstallCommand ? "Install command copied" : "Copy install command")
+            .accessibilityLabel(
+                didCopyInstallCommand ? "Install command copied" : "Copy install command"
+            )
             .accessibilityHint("Copies the Xcode Command Line Tools install command.")
             .accessibilityIdentifier("copy-command-line-tools-command-button")
         }
@@ -105,7 +164,10 @@ struct CommandLineToolsOnboardingView: View {
 
     private func copyInstallCommand() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(CommandLineToolsClient.manualInstallCommand, forType: .string)
+        NSPasteboard.general.setString(
+            CommandLineToolsClient.manualInstallCommand,
+            forType: .string
+        )
         didCopyInstallCommand = true
 
         Task { @MainActor in
@@ -136,8 +198,24 @@ struct CommandLineToolsOnboardingView: View {
     }
 }
 
-#Preview("CLT Onboarding") {
+#Preview("CLT Installation") {
     CommandLineToolsOnboardingView(
+        availability: .unavailable,
+        isChecking: false,
+        notFoundMessageID: 0,
+        onRetry: {}
+    )
+}
+
+#Preview("CLT Update") {
+    CommandLineToolsOnboardingView(
+        availability: .unsupported(
+            CommandLineToolsSelection(
+                developerDirectory: "/Library/Developer/CommandLineTools",
+                swiftVersion: .init(major: 6, minor: 1),
+                sdkVersion: .init(major: 25, minor: 4)
+            )
+        ),
         isChecking: false,
         notFoundMessageID: 0,
         onRetry: {}

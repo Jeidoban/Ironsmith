@@ -1,103 +1,94 @@
 import Foundation
 import Testing
+
 @testable import Ironsmith
 
 struct LaunchTests {
-    @MainActor
-    @Test
-    func commandLineToolsClientUsesTestOverrideForSwiftCompilerAvailability() async {
+    @Test func commandLineToolsClientUsesTestOverride() async {
         let availableClient = CommandLineToolsClient.live(environment: [
             "IRONSMITH_TEST_SWIFTC_AVAILABLE": "1"
         ])
-
         let unavailableClient = CommandLineToolsClient.live(environment: [
             "IRONSMITH_TEST_SWIFTC_AVAILABLE": "0"
         ])
 
-        switch await availableClient.detectAvailability() {
-        case .available(path: "/usr/bin/swiftc"):
-            break
-        default:
-            Issue.record("Expected available swiftc override.")
+        guard case .available = await availableClient.detectAvailability() else {
+            Issue.record("Expected the available developer-tools override.")
+            return
         }
-
-        switch await unavailableClient.detectAvailability() {
-        case .unavailable:
-            break
-        default:
-            Issue.record("Expected unavailable swiftc override.")
-        }
+        #expect(await unavailableClient.detectAvailability() == .unavailable)
     }
 
     @MainActor
-    @Test
-    func gateRoutesIntoShellWhenSwiftCompilerExists() async {
-        let gate = CommandLineToolsGate(client: .fixed(availability: .available(path: "/usr/bin/swiftc")))
+    @Test func gateInitialRouteIsChecking() {
+        let gate = CommandLineToolsGate(client: .fixed(availability: .available(Self.selection())))
+
+        #expect(gate.route == .checking)
+        #expect(gate.availability == nil)
+    }
+
+    @MainActor
+    @Test func availableToolsOpenTheLibrary() async {
+        let selection = Self.selection()
+        let gate = CommandLineToolsGate(client: .fixed(availability: .available(selection)))
 
         await gate.refreshStatus()
 
         #expect(gate.route == .shell)
-        #expect(gate.swiftCompilerPath == "/usr/bin/swiftc")
+        #expect(gate.availability == .available(selection))
+        #expect(!gate.isCheckingInstallation)
     }
 
     @MainActor
-    @Test
-    func gateRoutesIntoOnboardingWhenSwiftCompilerMissing() async {
-        let gate = CommandLineToolsGate(client: .fixed(availability: .unavailable))
+    @Test func unsupportedToolsShowOnboardingWithoutRequestingInstallation() async {
+        let recorder = InstallationRequestRecorder()
+        let selection = Self.selection(swift: (6, 1))
+        let gate = CommandLineToolsGate(
+            client: .fixed(
+                availability: .unsupported(selection),
+                requestInstallation: { await recorder.record() }
+            )
+        )
 
-        await gate.refreshStatus()
+        await gate.refreshStatus(requestsInstallationIfMissing: true)
 
         #expect(gate.route == .onboarding)
-        #expect(gate.swiftCompilerPath == nil)
+        #expect(gate.availability == .unsupported(selection))
+        #expect(await recorder.count == 0)
     }
 
     @MainActor
-    @Test
-    func gateInitialRouteIsChecking() {
-        let gate = CommandLineToolsGate(client: .fixed(availability: .available(path: "/usr/bin/swiftc")))
-
-        #expect(gate.route == .checking)
-        #expect(gate.swiftCompilerPath == nil)
-    }
-
-    @MainActor
-    @Test
-    func gateStartChecksOnceWhenSwiftCompilerIsMissing() async {
-        let availabilitySource = SequencedAvailabilitySource(
-            [
-                .unavailable,
-                .available(path: "/usr/bin/swiftc")
-            ]
-        )
+    @Test func gateStartChecksOnceAndRequestsInstallationWhenToolsAreMissing() async {
+        let availabilitySource = SequencedAvailabilitySource([
+            .unavailable,
+            .available(Self.selection()),
+        ])
+        let installationRecorder = InstallationRequestRecorder()
         let gate = CommandLineToolsGate(
             client: CommandLineToolsClient(
-                detectAvailability: { await availabilitySource.nextAvailability() }
+                detectAvailability: { await availabilitySource.nextAvailability() },
+                requestInstallation: { await installationRecorder.record() }
             )
         )
 
         gate.start()
 
         await Self.eventually {
-            gate.route == .onboarding
+            let installationCount = await installationRecorder.count
+            return gate.route == .onboarding && installationCount == 1
         }
-
-        try? await Task.sleep(nanoseconds: 20_000_000)
+        try? await Task.sleep(for: .milliseconds(20))
 
         #expect(gate.route == .onboarding)
-        #expect(gate.swiftCompilerPath == nil)
+        #expect(gate.availability == .unavailable)
         #expect(await availabilitySource.callCount() == 1)
+        #expect(await installationRecorder.count == 1)
         #expect(gate.notFoundMessageID == 0)
     }
 
     @MainActor
-    @Test
-    func gateStartIsIdempotent() async {
-        let availabilitySource = SequencedAvailabilitySource(
-            [
-                .unavailable,
-                .unavailable
-            ]
-        )
+    @Test func gateStartIsIdempotent() async {
+        let availabilitySource = SequencedAvailabilitySource([.unavailable, .unavailable])
         let gate = CommandLineToolsGate(
             client: CommandLineToolsClient(
                 detectAvailability: { await availabilitySource.nextAvailability() }
@@ -115,14 +106,11 @@ struct LaunchTests {
     }
 
     @MainActor
-    @Test
-    func gateRefreshNowChecksAgainAfterOnboarding() async {
-        let availabilitySource = SequencedAvailabilitySource(
-            [
-                .unavailable,
-                .available(path: "/usr/bin/swiftc")
-            ]
-        )
+    @Test func gateRefreshNowChecksAgainAfterOnboarding() async {
+        let availabilitySource = SequencedAvailabilitySource([
+            .unavailable,
+            .available(Self.selection()),
+        ])
         let gate = CommandLineToolsGate(
             client: CommandLineToolsClient(
                 detectAvailability: { await availabilitySource.nextAvailability() }
@@ -130,31 +118,17 @@ struct LaunchTests {
         )
 
         gate.start()
-
-        await Self.eventually {
-            gate.route == .onboarding
-        }
-
+        await Self.eventually { gate.route == .onboarding }
         gate.refreshNow()
-
-        await Self.eventually {
-            gate.route == .shell
-        }
+        await Self.eventually { gate.route == .shell }
 
         #expect(gate.route == .shell)
-        #expect(gate.swiftCompilerPath == "/usr/bin/swiftc")
         #expect(await availabilitySource.callCount() == 2)
     }
 
     @MainActor
-    @Test
-    func gateRefreshNowShowsNotFoundWhenStillMissing() async {
-        let availabilitySource = SequencedAvailabilitySource(
-            [
-                .unavailable,
-                .unavailable
-            ]
-        )
+    @Test func gateRefreshNowShowsNotFoundWhenStillMissing() async {
+        let availabilitySource = SequencedAvailabilitySource([.unavailable, .unavailable])
         let gate = CommandLineToolsGate(
             client: CommandLineToolsClient(
                 detectAvailability: { await availabilitySource.nextAvailability() }
@@ -162,32 +136,21 @@ struct LaunchTests {
         )
 
         gate.start()
-
-        await Self.eventually {
-            gate.route == .onboarding
-        }
-
+        await Self.eventually { gate.route == .onboarding }
         gate.refreshNow()
-
-        await Self.eventually {
-            await availabilitySource.callCount() >= 2
-        }
+        await Self.eventually { await availabilitySource.callCount() >= 2 }
 
         #expect(gate.route == .onboarding)
-        #expect(gate.swiftCompilerPath == nil)
         #expect(gate.notFoundMessageID == 1)
         #expect(await availabilitySource.callCount() == 2)
     }
 
     @MainActor
-    @Test
-    func gateStartDoesNotRecheckAfterShellRoute() async {
-        let availabilitySource = SequencedAvailabilitySource(
-            [
-                .available(path: "/usr/bin/swiftc"),
-                .available(path: "/unexpected/swiftc")
-            ]
-        )
+    @Test func gateStartDoesNotRecheckAfterShellRoute() async {
+        let availabilitySource = SequencedAvailabilitySource([
+            .available(Self.selection()),
+            .unavailable,
+        ])
         let gate = CommandLineToolsGate(
             client: CommandLineToolsClient(
                 detectAvailability: { await availabilitySource.nextAvailability() }
@@ -195,17 +158,23 @@ struct LaunchTests {
         )
 
         gate.start()
-
-        await Self.eventually {
-            gate.route == .shell
-        }
-
+        await Self.eventually { gate.route == .shell }
         gate.start()
-        try? await Task.sleep(nanoseconds: 20_000_000)
+        try? await Task.sleep(for: .milliseconds(20))
 
         #expect(gate.route == .shell)
-        #expect(gate.swiftCompilerPath == "/usr/bin/swiftc")
         #expect(await availabilitySource.callCount() == 1)
+    }
+
+    private static func selection(
+        swift: (Int, Int) = (6, 2),
+        sdk: (Int, Int) = (26, 0)
+    ) -> CommandLineToolsSelection {
+        CommandLineToolsSelection(
+            developerDirectory: "/Library/Developer/CommandLineTools",
+            swiftVersion: .init(major: swift.0, minor: swift.1),
+            sdkVersion: .init(major: sdk.0, minor: sdk.1)
+        )
     }
 
     @MainActor
@@ -216,8 +185,16 @@ struct LaunchTests {
         let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
         while DispatchTime.now().uptimeNanoseconds < deadline {
             if await predicate() { return }
-            try? await Task.sleep(nanoseconds: 10_000_000)
+            try? await Task.sleep(for: .milliseconds(10))
         }
+    }
+}
+
+private actor InstallationRequestRecorder {
+    private(set) var count = 0
+
+    func record() {
+        count += 1
     }
 }
 
@@ -235,15 +212,12 @@ private actor SequencedAvailabilitySource {
 
     func nextAvailability() -> CommandLineToolsAvailability {
         count += 1
-
         if availabilities.isEmpty {
             return .unavailable
         }
-
         if availabilities.count == 1 {
             return availabilities[0]
         }
-
         return availabilities.removeFirst()
     }
 }

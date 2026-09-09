@@ -31,6 +31,7 @@ struct LaunchRouterView: View {
                     .accessibilityIdentifier("app-launch-checking")
             case .onboarding:
                 CommandLineToolsOnboardingView(
+                    availability: gate.availability ?? .unavailable,
                     isChecking: gate.isCheckingInstallation,
                     notFoundMessageID: gate.notFoundMessageID,
                     onRetry: gate.refreshNow
