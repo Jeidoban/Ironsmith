@@ -344,6 +344,10 @@ struct CustomCodingAgentTests {
         #expect(prompt.contains(attachmentURL.path))
         #expect(prompt.contains("strictly as read-only context"))
         #expect(prompt.contains("Create or edit only Sources/Example/ContentView.swift"))
+        #expect(prompt.contains("existing hosted API or managed service"))
+        #expect(prompt.contains("Never embed server-side secrets"))
+        #expect(!prompt.contains("This is a local-only app."))
+        #expect(!prompt.contains("External service policy:"))
     }
 
     @MainActor

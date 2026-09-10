@@ -1442,6 +1442,9 @@ struct SingleFileToolGenerationRuntime {
 
         return ContentViewCandidateGenerator(
             modeDescription: resumePartialSource ? "continue create" : "create",
+            instructions: ToolGenerationPrompts.singleFileCodingInstructions(
+                for: context.pipelineConfiguration.codingAgent
+            ),
             diagnosticRewrite: makeDiagnosticRewrite(
                 layout: layout,
                 contentViewPath: contentViewPath,
@@ -1564,7 +1567,10 @@ struct SingleFileToolGenerationRuntime {
                 ? ContentViewCandidateGenerator.InvalidCandidateFallback(
                     threshold: ToolGenerationRepairPolicy
                         .invalidInitialEditPatchesBeforeFullFileEdit,
-                    modeDescription: "edit whole-file fallback"
+                    modeDescription: "edit whole-file fallback",
+                    instructions: ToolGenerationPrompts.singleFileCodingInstructions(
+                        for: context.pipelineConfiguration.codingAgent
+                    )
                 ) { session in
                     try await regenerateEditedContentView(
                         userPrompt: userPrompt,
@@ -1674,7 +1680,11 @@ struct SingleFileToolGenerationRuntime {
                 _ diagnostics: [SwiftCompilerDiagnostic]
             ) -> String
     ) -> ContentViewCandidateGenerator.DiagnosticRewrite {
-        ContentViewCandidateGenerator.DiagnosticRewrite { currentSource, diagnostics, session in
+        ContentViewCandidateGenerator.DiagnosticRewrite(
+            instructions: ToolGenerationPrompts.singleFileCodingInstructions(
+                for: context.pipelineConfiguration.codingAgent
+            )
+        ) { currentSource, diagnostics, session in
             try await regenerateContentViewFromDiagnostics(
                 prompt: prompt(currentSource, diagnostics),
                 layout: layout,
@@ -1745,6 +1755,9 @@ struct SingleFileToolGenerationRuntime {
 
         return ContentViewCandidateGenerator(
             modeDescription: resumePartialSource ? "continue edit source" : "edit",
+            instructions: ToolGenerationPrompts.singleFileCodingInstructions(
+                for: context.pipelineConfiguration.codingAgent
+            ),
             diagnosticRewrite: makeDiagnosticRewrite(
                 layout: layout,
                 contentViewPath: contentViewPath,

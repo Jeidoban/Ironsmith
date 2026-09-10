@@ -756,9 +756,12 @@ extension CodexAgentClient {
             - Define ContentView as the root View, but you may create helper types in the same file. Helper types must not conform to App.
             - An entry point already exists and already calls ContentView, so do not add another @main or App type.
             - This is a macOS SwiftUI app. Do not use iOS-only modifiers.
-            - This is a local only app. Do not add or imply a separate backend service, custom server component, account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync.
+            - Keep the app self-contained and client-side. Do not assume or invent an undeployed backend, custom server, or placeholder server-dependent functionality.
+            - You may connect directly to an existing hosted API or managed service when it meaningfully supports the user's request and requires no custom backend deployment.
+            - If external setup is required, include clear in-app instructions for configuring the service, applying any required schema or SQL, granting permissions, and entering client-safe endpoints, API keys, or tokens. Never embed server-side secrets.
+            - Do not add an app-owned account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync unless the user requests them.
             - Make the app feel native to macOS.
-            - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and local-only state.
+            - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and state appropriate to the requested experience.
             - Apple frameworks and APIs are allowed and encouraged over custom solutions, but do not add any third-party dependencies.
             \(finalRules)
             """

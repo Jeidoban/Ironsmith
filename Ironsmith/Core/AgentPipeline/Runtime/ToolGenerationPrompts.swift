@@ -6,7 +6,35 @@ enum ToolSourcePatchFormat: Equatable, Sendable {
 }
 
 enum ToolGenerationPrompts {
-    static let singleFileCodingInstructions = """
+    static let flameSingleFileCodingInstructions = """
+        You are Ironsmith's Coding Agent.
+        Write exactly one complete Swift file named ContentView.swift for a SwiftUI app based on the user's request.
+        Return only Swift source code.
+        Do not add comments except for MARK.
+        Do not add introductions, explanations, or labels like "Here is the fixed ContentView.swift file:".
+        Define ContentView as the root View; same-file helper View types are allowed for complex UI.
+        Helper types are allowed, but helper types must not conform to App.
+        Do not create preview providers or #Preview blocks.
+        Do not create Package.swift, AppDelegate, or SceneDelegate.
+        Do NOT append @main to any struct. This entry point already exists and already calls ContentView
+        This is a macOS SwiftUI app. Do not use iOS-only modifiers such as keyboardType.
+        The prompt states whether ContentView is hosted as a normal window app or a menu bar app. Respect that app type when choosing scope, layout density, and sizing.
+        The generated app is self-contained and runs on the user's Mac, with direct internet requests allowed when they meaningfully support the user's request.
+        The prompt states whether the generated app uses the app sandbox. Treat that as runtime context, not a reason to reduce useful scope: when sandboxed, use sandbox-compatible macOS patterns such as user-selected files, and open/save/import panels etc.; when unsandboxed, use what is needed to complete the user's ask, but do not change the user's system unless asked or required.
+        Local persistence is welcome when useful: in-memory state, @AppStorage, UserDefaults, local files, import/export, and open/save panels are all fine if they fit in this single file.
+        The generated app is a self-contained client-side macOS app. Do not assume or invent an undeployed backend, custom server, or placeholder server-dependent functionality. You may connect directly to an existing hosted API or managed service when it meaningfully supports the user's request and requires no custom backend deployment. If external setup is required, include clear in-app instructions for creating and configuring the service, applying any required schema or SQL, granting permissions, and entering client-safe endpoints, API keys, or tokens. Never embed server-side secrets. Do not add an app-owned account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync unless the user requests them.
+        Make the app feel native to macOS: prefer SwiftUI controls such as Form, List, Table, Picker, Toggle, Slider, Stepper, DatePicker, NavigationSplitView, toolbars, menus, keyboard shortcuts, system colors, and adaptive materials.
+        Avoid mobile-first patterns, oversized marketing-style layouts, fake web dashboards, and custom controls when native macOS controls fit better.
+        Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and state appropriate to the requested experience.
+        Prefer Apple platform frameworks and native APIs when they fit the request, such as Vision for OCR, PDFKit for PDFs, AVFoundation for media etc.
+        Use these stable sections when possible:
+        // MARK: - State
+        // MARK: - Body
+        // MARK: - Actions
+        // MARK: - Helpers
+        """
+
+    static let sparkSingleFileCodingInstructions = """
         You are Ironsmith's Coding Agent.
         Write exactly one complete Swift file named ContentView.swift for a SwiftUI app based on the user's request.
         Return only Swift source code.
@@ -23,7 +51,7 @@ enum ToolGenerationPrompts {
         The generated app is self-contained and runs on the user's Mac, with direct internet requests allowed when the user's request requires them.
         The prompt states whether the generated app uses the app sandbox. Treat that as runtime context, not a reason to reduce useful scope: when sandboxed, use sandbox-compatible macOS patterns such as user-selected files, and open/save/import panels etc.; when unsandboxed, use what is needed to complete the user's ask, but do not change the user's system unless asked or required.
         Local persistence is welcome when useful: in-memory state, @AppStorage, UserDefaults, local files, import/export, and open/save panels are all fine if they fit in this single file.
-        Do not add or imply a separate backend service, custom server component, account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync.
+        This is a local-only app. Do not add or imply a separate backend service, custom server component, account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync.
         Make the app feel native to macOS: prefer SwiftUI controls such as Form, List, Table, Picker, Toggle, Slider, Stepper, DatePicker, NavigationSplitView, toolbars, menus, keyboard shortcuts, system colors, and adaptive materials.
         Avoid mobile-first patterns, oversized marketing-style layouts, fake web dashboards, and custom controls when native macOS controls fit better.
         Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and local-only state.
@@ -41,6 +69,12 @@ enum ToolGenerationPrompts {
         // MARK: - Actions
         // MARK: - Helpers
         """
+
+    static func singleFileCodingInstructions(for codingAgent: ToolCodingAgent) -> String {
+        codingAgent == .ironsmithSpark
+            ? sparkSingleFileCodingInstructions
+            : flameSingleFileCodingInstructions
+    }
 
     static let searchReplaceRepairInstructions = """
         You are Ironsmith's Swift compiler repair agent.
@@ -167,17 +201,18 @@ enum ToolGenerationPrompts {
         currentSource: String,
         diagnostics: [SwiftCompilerDiagnostic]
     ) -> String {
-        let refinedContext = generationPrompt == userPrompt
+        let refinedContext =
+            generationPrompt == userPrompt
             ? ""
             : "Refined generation brief: \(generationPrompt)"
         return diagnosticWholeFileRewritePrompt(
             requestContext: """
-            Original create request: \(userPrompt)
-            \(refinedContext)
-            Fixed package and target name: \(executableName).
-            \(appPresentationContext(appKind: appKind))
-            \(sandboxContext(sandboxEnabled: sandboxEnabled))
-            """,
+                Original create request: \(userPrompt)
+                \(refinedContext)
+                Fixed package and target name: \(executableName).
+                \(appPresentationContext(appKind: appKind))
+                \(sandboxContext(sandboxEnabled: sandboxEnabled))
+                """,
             currentSource: currentSource,
             diagnostics: diagnostics
         )
@@ -191,10 +226,10 @@ enum ToolGenerationPrompts {
     ) -> String {
         diagnosticWholeFileRewritePrompt(
             requestContext: """
-            Original edit request: \(userPrompt)
-            Fixed package and target name: \(executableName).
-            Preserve the requested edit and all working behavior in the current implementation.
-            """,
+                Original edit request: \(userPrompt)
+                Fixed package and target name: \(executableName).
+                Preserve the requested edit and all working behavior in the current implementation.
+                """,
             currentSource: currentSource,
             diagnostics: diagnostics
         )
@@ -247,21 +282,21 @@ enum ToolGenerationPrompts {
         diagnostics: [SwiftCompilerDiagnostic]
     ) -> String {
         return """
-        Narrow compiler repair stalled on this app.
-        Rewrite the complete ContentView.swift to fix every compiler error listed below.
-        Preserve the current app's working behavior, structure, and visual design wherever possible.
-        Return only the complete corrected Swift source file. Do not return a diff, patch, explanation, or markdown fence.
+            Narrow compiler repair stalled on this app.
+            Rewrite the complete ContentView.swift to fix every compiler error listed below.
+            Preserve the current app's working behavior, structure, and visual design wherever possible.
+            Return only the complete corrected Swift source file. Do not return a diff, patch, explanation, or markdown fence.
 
-        \(requestContext)
+            \(requestContext)
 
-        Current authoritative ContentView.swift:
-        ```swift
-        \(currentSource)
-        ```
+            Current authoritative ContentView.swift:
+            ```swift
+            \(currentSource)
+            ```
 
-        Current actionable compiler errors:
-        \(formattedDiagnostics(diagnostics))
-        """
+            Current actionable compiler errors:
+            \(formattedDiagnostics(diagnostics))
+            """
     }
 
     static func conversationalRepairPrompt(
@@ -373,14 +408,14 @@ enum ToolGenerationPrompts {
         switch format {
         case .searchReplace:
             return """
-            Return at most \(max(1, maximumPatchBlocks)) search/replace patch block(s).
-            Follow the search/replace patch output contract from your instructions.
-            """
+                Return at most \(max(1, maximumPatchBlocks)) search/replace patch block(s).
+                Follow the search/replace patch output contract from your instructions.
+                """
         case .unifiedDiff:
             return """
-            Return at most \(max(1, maximumPatchBlocks)) unified diff hunk(s).
-            Follow the unified diff output contract from your instructions.
-            """
+                Return at most \(max(1, maximumPatchBlocks)) unified diff hunk(s).
+                Follow the unified diff output contract from your instructions.
+                """
         }
     }
 
@@ -405,23 +440,25 @@ enum ToolGenerationPrompts {
     private static func repairPatchScopeDescription(for format: ToolSourcePatchFormat) -> String {
         switch format {
         case .searchReplace:
-            return "Your search/replace patch may edit any part of ContentView.swift needed to repair the listed diagnostics."
+            return
+                "Your search/replace patch may edit any part of ContentView.swift needed to repair the listed diagnostics."
         case .unifiedDiff:
-            return "Your unified diff may edit any part of ContentView.swift needed to repair the listed diagnostics."
+            return
+                "Your unified diff may edit any part of ContentView.swift needed to repair the listed diagnostics."
         }
     }
 
     private static func previousPatchFailureSection(_ failure: String?) -> String {
         guard let failure = failure?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !failure.isEmpty
+            !failure.isEmpty
         else {
             return ""
         }
         return """
-        Previous patch attempt failed:
-        \(failure)
-        Only patch the current authoritative source below.
-        """
+            Previous patch attempt failed:
+            \(failure)
+            Only patch the current authoritative source below.
+            """
     }
 
     private static let validSearchReplaceShapeExample = """
