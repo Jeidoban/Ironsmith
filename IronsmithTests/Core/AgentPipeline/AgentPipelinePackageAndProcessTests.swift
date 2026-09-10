@@ -1295,6 +1295,154 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func processHelpersParseColorizedStructuredDiagnostics() {
+        let root = URL(fileURLWithPath: "/tmp/GeneratedTool", isDirectory: true)
+        let escape = "\u{001B}"
+        let output = """
+            /tmp/GeneratedTool/Sources/GeneratedTool/ContentView.swift:237:77: \(escape)[1;31merror: \(escape)[1;39mmember 'orange' produces result of type 'Color'\(escape)[0;0m
+            \(escape)[0;36m237 |\(escape)[0;0m .foregroundStyle(isValid ? .secondary : .orange)
+                \(escape)[0;36m|\(escape)[0;0m `- \(escape)[1;31merror: \(escape)[1;39mmember 'orange' produces result of type 'Color'\(escape)[0;0m
+            """
+
+        let diagnostics = SwiftPackageProcessClient.parseDiagnostics(
+            in: output,
+            packageRootURL: root
+        )
+
+        #expect(diagnostics.count == 1)
+        #expect(diagnostics.first?.relativePath == "Sources/GeneratedTool/ContentView.swift")
+        #expect(diagnostics.first?.line == 237)
+        #expect(diagnostics.first?.column == 77)
+        #expect(diagnostics.first?.severity == .error)
+        #expect(diagnostics.first?.message == "member 'orange' produces result of type 'Color'")
+        #expect(diagnostics.first?.supportingLines.allSatisfy { !$0.contains(escape) } == true)
+        #expect(!SwiftPackageProcessClient.compilerExcerpt(from: output).contains(escape))
+
+        let buildResult = SwiftPackageBuildResult(
+            succeeded: false,
+            stdout: "",
+            stderr: output,
+            terminationStatus: 1
+        )
+        #expect(!buildResult.combinedOutput.contains(escape))
+    }
+
+    @Test
+    func processHelpersParseSwiftBuildPrefixDiagnostics() {
+        let root = URL(fileURLWithPath: "/tmp/GeneratedTool", isDirectory: true)
+        let output = """
+            error: /tmp/GeneratedTool/Sources/GeneratedTool/ContentView.swift:459:2 consecutive statements on a line must be separated by ';': FixIt(sourceRange: XCBuild.SwiftBuildMessage.DiagnosticInfo.SourceRange(path: "/tmp/GeneratedTool/Sources/GeneratedTool/ContentView.swift", startLine: 459, startColumn: 2, endLine: 459, endColumn: 2), textToInsert: ";")
+            error: SwiftDriver GeneratedTool normal arm64 com.apple.xcode.tools.swift.compiler failed with a nonzero exit code.
+            """
+
+        let diagnostics = SwiftPackageProcessClient.parseDiagnostics(
+            in: output,
+            packageRootURL: root
+        )
+
+        #expect(diagnostics.count == 1)
+        #expect(diagnostics.first?.relativePath == "Sources/GeneratedTool/ContentView.swift")
+        #expect(diagnostics.first?.line == 459)
+        #expect(diagnostics.first?.column == 2)
+        #expect(diagnostics.first?.severity == .error)
+        #expect(
+            diagnostics.first?.message == "consecutive statements on a line must be separated by ';'"
+        )
+        #expect(diagnostics.first?.supportingLines.isEmpty == true)
+        #expect(
+            SwiftPackageProcessClient.firstActionableSwiftFile(
+                in: output,
+                packageRootURL: root
+            ) == "Sources/GeneratedTool/ContentView.swift"
+        )
+    }
+
+    @Test
+    func processHelpersParseObservedToolchainDiagnosticMatrix() {
+        let root = URL(
+            fileURLWithPath: "/private/tmp/ironsmith-diagnostic-matrix/GeneratedTool",
+            isDirectory: true
+        )
+        let contentViewPath =
+            "/private/tmp/ironsmith-diagnostic-matrix/GeneratedTool/Sources/GeneratedTool/ContentView.swift"
+        let output = """
+            [19\u{2009}/\u{2009}24]
+            \(contentViewPath):5:11: error: no exact matches in call to global function 'convert'
+            1 | func convert(_ value: Int) -> String { "int" }
+              |      `- note: 'nil' is not compatible with expected argument type 'Int' at position #1
+            2 | func convert(_ value: String) -> String { "string" }
+              |      `- note: 'nil' is not compatible with expected argument type 'String' at position #1
+            5 |     print(convert(nil))
+              |           `- error: no exact matches in call to global function 'convert'
+            Failed frontend command:
+            /Applications/Xcode-beta.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -c -primary-file \(contentViewPath)
+            error: Build failed
+            """
+
+        let diagnostics = SwiftPackageProcessClient.parseDiagnostics(
+            in: output,
+            packageRootURL: root
+        )
+
+        #expect(diagnostics.count == 1)
+        #expect(diagnostics.first?.relativePath == "Sources/GeneratedTool/ContentView.swift")
+        #expect(diagnostics.first?.severity == .error)
+        #expect(
+            diagnostics.first?.supportingLines.contains {
+                $0.contains("note: 'nil' is not compatible with expected argument type 'Int'")
+            } == true
+        )
+        #expect(
+            diagnostics.first?.supportingLines.contains {
+                $0.contains("note: 'nil' is not compatible with expected argument type 'String'")
+            } == true
+        )
+        #expect(
+            diagnostics.first?.supportingLines.allSatisfy {
+                !$0.contains("Failed frontend command") && !$0.contains("swift-frontend")
+            } == true
+        )
+    }
+
+    @Test
+    func processHelpersParseObservedWarningsAndMultipleErrors() {
+        let root = URL(
+            fileURLWithPath: "/private/tmp/ironsmith-diagnostic-matrix/GeneratedTool",
+            isDirectory: true
+        )
+        let contentViewPath =
+            "/private/tmp/ironsmith-diagnostic-matrix/GeneratedTool/Sources/GeneratedTool/ContentView.swift"
+        let output = """
+            \(contentViewPath):8:5: warning: 'legacy()' is deprecated: Use replacement() [#DeprecatedDeclaration]
+             8 |     legacy()
+               |     `- warning: 'legacy()' is deprecated: Use replacement() [#DeprecatedDeclaration]
+            \(contentViewPath):7:9: warning: variable 'count' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+             7 |     var count = 0
+               |         `- warning: variable 'count' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+            [#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+            \(contentViewPath):12:60: error: static property 'orange' requires the types 'HierarchicalShapeStyle' and 'Color' be equivalent
+            SwiftUI.ShapeStyle:2:11: note: where 'Self' = 'HierarchicalShapeStyle'
+            \(contentViewPath):12:60: error: member 'orange' produces result of type 'Color', but context expects 'HierarchicalShapeStyle'
+            """
+
+        let diagnostics = SwiftPackageProcessClient.parseDiagnostics(
+            in: output,
+            packageRootURL: root
+        )
+
+        #expect(diagnostics.count == 4)
+        #expect(diagnostics.map(\.severity) == [.warning, .warning, .error, .error])
+        #expect(diagnostics.allSatisfy { $0.relativePath == "Sources/GeneratedTool/ContentView.swift" })
+        #expect(diagnostics[0].message.contains("[#DeprecatedDeclaration]"))
+        #expect(diagnostics[1].message.contains("[#VariableNeverMutated]"))
+        #expect(
+            diagnostics[2].supportingLines.contains {
+                $0.contains("SwiftUI.ShapeStyle:2:11: note:")
+            }
+        )
+    }
+
+    @Test
     func diagnosticsLogRendersCompactDiagnosticsByDefault() {
         let diagnostics = [
             SwiftCompilerDiagnostic(

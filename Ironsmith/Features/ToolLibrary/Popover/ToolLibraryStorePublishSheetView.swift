@@ -23,7 +23,7 @@ struct ToolLibraryStorePublishSheetView: View {
     let onEditDetails: () -> Void
     let onPublish: () -> Void
     @State private var isChoosingScreenshot = false
-    @State private var isShowingLicense = false
+    @State private var licenseSheetPresenter = StoreLicenseSheetPresenter()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -92,7 +92,11 @@ struct ToolLibraryStorePublishSheetView: View {
                     .labelsHidden()
                     Spacer()
                     Button("View License…") {
-                        isShowingLicense = true
+                        licenseSheetPresenter.present(
+                            license: publishLicense,
+                            documents: previewLegalDocuments,
+                            inheritedAttributions: inheritedLegalAttributions
+                        )
                     }
                 }
                 if isUpdatingPublishedListing {
@@ -138,12 +142,8 @@ struct ToolLibraryStorePublishSheetView: View {
                 onChooseScreenshot(url)
             }
         }
-        .sheet(isPresented: $isShowingLicense) {
-            StoreLicenseDetailSheet(
-                license: publishLicense,
-                documents: previewLegalDocuments,
-                inheritedAttributions: inheritedLegalAttributions
-            )
+        .background {
+            StoreLicenseSheetAnchor(presenter: licenseSheetPresenter)
         }
         .alert(
             "Ironsmith Store",

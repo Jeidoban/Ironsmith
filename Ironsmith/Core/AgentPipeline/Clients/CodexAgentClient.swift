@@ -70,6 +70,13 @@ nonisolated struct CodexAgentRequest: Sendable {
         }
     }
 
+    var effectiveCodexReasoningEffort: ToolReasoningEffort {
+        if reasoningEffort == .default, modelFamily == .gemini {
+            return .medium
+        }
+        return reasoningEffort
+    }
+
     init(
         packageRootURL: URL,
         executableName: String,
@@ -626,9 +633,10 @@ extension CodexAgentClient {
                 arguments.append(contentsOf: ["--model", model])
             }
             arguments.append(contentsOf: contextConfigurationArguments(for: request.contextWindowTokens))
-            if request.reasoningEffort != .default {
+            let reasoningEffort = request.effectiveCodexReasoningEffort
+            if reasoningEffort != .default {
                 arguments.append(contentsOf: [
-                    "-c", "model_reasoning_effort=\(tomlString(request.reasoningEffort.rawValue))",
+                    "-c", "model_reasoning_effort=\(tomlString(reasoningEffort.rawValue))",
                 ])
             }
             if let resumeSession {

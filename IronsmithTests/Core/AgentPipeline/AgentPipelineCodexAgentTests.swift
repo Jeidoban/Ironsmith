@@ -161,6 +161,59 @@ extension AgentPipelineTests {
     }
 
     @Test
+    func codexAgentClientDefaultsGeminiReasoningToMedium() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let capture = CodexAgentCLICapture()
+        let cliClient = CodexCLIClient(
+            run: { _ in CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1) },
+            runStreaming: { arguments, environment, _, _ in
+                await capture.record(arguments: arguments, environment: environment)
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured,
+            temporaryDirectory: temporaryDirectory
+        )
+        let provider = CodexAgentCustomResponsesProvider(
+            configurationIdentifier: "ironsmith",
+            sessionProviderIdentifier: "ironsmith",
+            displayName: "Ironsmith",
+            baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
+            authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
+            authenticationToken: "token"
+        )
+
+        _ = try await client.run(
+            CodexAgentRequest(
+                packageRootURL: packageRoot,
+                executableName: "Demo",
+                displayName: "Demo",
+                appKind: .window,
+                sandboxEnabled: true,
+                userPrompt: "Make a demo",
+                modelIdentifier: "google/gemini-3.1-pro-preview",
+                reasoningEffort: .default,
+                authentication: .customResponsesProvider(provider)
+            )
+        )
+
+        let arguments = try #require(await capture.arguments)
+        #expect(arguments.contains(#"model_reasoning_effort="medium""#))
+        #expect(!arguments.contains(#"model_reasoning_effort="default""#))
+    }
+
+    @Test
     func codexAgentClientUsesPackageAttachmentsAndPassesImagesToExec() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
