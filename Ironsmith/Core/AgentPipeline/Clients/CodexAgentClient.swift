@@ -758,8 +758,9 @@ extension CodexAgentClient {
             - This is a macOS SwiftUI app. Do not use iOS-only modifiers.
             - Keep the app self-contained and client-side. Do not assume or invent an undeployed backend, custom server, or placeholder server-dependent functionality.
             - You may connect directly to an existing hosted API or managed service when it meaningfully supports the user's request and requires no custom backend deployment.
+            - If only a general-purpose backend is needed and the user did not name a specific service, prefer Supabase and direct the user to https://database.new to create their project.
             - If external setup is required, include clear in-app instructions for configuring the service, applying any required schema or SQL, granting permissions, and entering client-safe endpoints, API keys, or tokens. Never embed server-side secrets.
-            - Do not add an app-owned account system, iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync unless the user requests them.
+            - Do not add iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync unless the user requests them.
             - Make the app feel native to macOS.
             - Games, drawing canvases, and highly visual toys may use custom graphics and game-like UI, but they should still use sensible macOS window sizing, pointer and keyboard behavior, and state appropriate to the requested experience.
             - Apple frameworks and APIs are allowed and encouraged over custom solutions, but do not add any third-party dependencies.
