@@ -107,7 +107,7 @@ struct ToolLibraryPopoverHeaderView: View {
                     }
                 }
 
-                Button("Settings…", action: onOpenSettings)
+                Button("Open Settings…", action: onOpenSettings)
 
                 Divider()
 
