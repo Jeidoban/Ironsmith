@@ -292,16 +292,8 @@ struct PromptComposerView: View {
                 )
                 Menu("Custom") {
                     ForEach(customCodingAgents) { agent in
-                        Button {
+                        Button(agent.name) {
                             onSelectCustomCodingAgent(agent.id)
-                        } label: {
-                            if codingAgentPreference == .custom
-                                && selectedCustomCodingAgentID == agent.id
-                            {
-                                Label(agent.name, systemImage: "checkmark")
-                            } else {
-                                Text(agent.name)
-                            }
                         }
                     }
                     if !customCodingAgents.isEmpty {
@@ -389,6 +381,11 @@ struct PromptComposerView: View {
             guard let menu = notification.object as? NSMenu else { return }
             GenerationSettingsMenuHelp.apply(
                 to: menu,
+                codingAgentPreference: codingAgentPreference,
+                reasoningEffort: reasoningEffort,
+                selectedCustomCodingAgentName: customCodingAgents.first {
+                    $0.id == selectedCustomCodingAgentID
+                }?.name,
                 isAutoRemixAvailable: isAutoRemixAvailable
             )
         }
@@ -475,15 +472,9 @@ struct PromptComposerView: View {
         displayName: String,
         isEnabled: Bool = true
     ) -> some View {
-        Button {
+        Button(displayName) {
             guard isEnabled else { return }
             selection.wrappedValue = value
-        } label: {
-            if selection.wrappedValue == value {
-                Label(displayName, systemImage: "checkmark")
-            } else {
-                Text(displayName)
-            }
         }
         .disabled(!isEnabled)
     }
@@ -566,7 +557,14 @@ private enum PromptAttachmentOpenPanel {
     }
 }
 
-private enum GenerationSettingsMenuHelp {
+enum GenerationSettingsMenuHelp {
+    private enum SelectionGroup {
+        case none
+        case codingAgent
+        case reasoning
+        case customCodingAgent
+    }
+
     private static let tooltips: [String: String] = [
         ToolCodingAgentPreference.ironsmithSpark.displayName:
             "Best for simple apps using on-device AI.",
@@ -576,7 +574,35 @@ private enum GenerationSettingsMenuHelp {
             "Best for complex, feature-rich apps. Typically uses 1.5-2x more tokens than Flame.",
     ]
 
-    static func apply(to menu: NSMenu, isAutoRemixAvailable: Bool) {
+    static func apply(
+        to trackedMenu: NSMenu,
+        codingAgentPreference: ToolCodingAgentPreference,
+        reasoningEffort: ToolReasoningEffort,
+        selectedCustomCodingAgentName: String?,
+        isAutoRemixAvailable: Bool
+    ) {
+        var rootMenu = trackedMenu
+        while let supermenu = rootMenu.supermenu {
+            rootMenu = supermenu
+        }
+        apply(
+            to: rootMenu,
+            selectionGroup: .none,
+            codingAgentPreference: codingAgentPreference,
+            reasoningEffort: reasoningEffort,
+            selectedCustomCodingAgentName: selectedCustomCodingAgentName,
+            isAutoRemixAvailable: isAutoRemixAvailable
+        )
+    }
+
+    private static func apply(
+        to menu: NSMenu,
+        selectionGroup: SelectionGroup,
+        codingAgentPreference: ToolCodingAgentPreference,
+        reasoningEffort: ToolReasoningEffort,
+        selectedCustomCodingAgentName: String?,
+        isAutoRemixAvailable: Bool
+    ) {
         for item in menu.items {
             if let tooltip = tooltips[item.title] {
                 item.toolTip = tooltip
@@ -586,8 +612,44 @@ private enum GenerationSettingsMenuHelp {
                     ? "Remix an existing store app and reuse its capabilities in your generated app."
                     : "Sign in with Ironsmith to use store-assisted generation."
             }
+
+            switch selectionGroup {
+            case .none:
+                break
+            case .codingAgent:
+                let preference = ToolCodingAgentPreference.allCases.first {
+                    $0 != .custom && $0.displayName == item.title
+                }
+                item.state = preference == codingAgentPreference ? .on : .off
+            case .reasoning:
+                let effort = ToolReasoningEffort.allCases.first {
+                    $0.displayName == item.title
+                }
+                item.state = effort == reasoningEffort ? .on : .off
+            case .customCodingAgent:
+                guard item.submenu == nil, item.title != "Add Agent…",
+                    item.title != "Manage Agents…"
+                else { break }
+                item.state = codingAgentPreference == .custom
+                    && item.title == selectedCustomCodingAgentName ? .on : .off
+            }
+
             if let submenu = item.submenu {
-                apply(to: submenu, isAutoRemixAvailable: isAutoRemixAvailable)
+                let submenuSelectionGroup: SelectionGroup
+                switch item.title {
+                case "Coding Agent": submenuSelectionGroup = .codingAgent
+                case "Reasoning": submenuSelectionGroup = .reasoning
+                case "Custom": submenuSelectionGroup = .customCodingAgent
+                default: submenuSelectionGroup = selectionGroup
+                }
+                apply(
+                    to: submenu,
+                    selectionGroup: submenuSelectionGroup,
+                    codingAgentPreference: codingAgentPreference,
+                    reasoningEffort: reasoningEffort,
+                    selectedCustomCodingAgentName: selectedCustomCodingAgentName,
+                    isAutoRemixAvailable: isAutoRemixAvailable
+                )
             }
         }
     }

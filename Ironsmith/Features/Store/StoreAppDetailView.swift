@@ -7,7 +7,8 @@ struct StoreAppDetailView: View {
     let isWorking: Bool
     let workingVersionID: String?
     let installDisposition: StoreAppInstallDisposition
-    let versionInstallDisposition: (StoreAppDetail, StoreVersionMetadata) -> StoreAppInstallDisposition
+    let versionInstallDisposition:
+        (StoreAppDetail, StoreVersionMetadata) -> StoreAppInstallDisposition
     let onGet: (StoreAppDetail) -> Void
     let onOpenStoreLink: (StoreVersionLinkMetadata) -> Void
     let onOpenCreator: (String, String) -> Void
@@ -273,10 +274,11 @@ private struct StoreSourceCodeSheet: View {
 
             Group {
                 if sourceStore.sourceVersionID == version.id,
-                   let sourceCode = sourceStore.sourceCode
+                    let sourceCode = sourceStore.sourceCode
                 {
                     StoreSourceCodeTextView(sourceCode: sourceCode)
-                    .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
+                        .background(
+                            .quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
                 } else if sourceStore.isLoading {
                     ProgressView("Loading source code…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -308,7 +310,8 @@ private struct StoreSourceCodeSheet: View {
                 Button("Open in Default Editor") {
                     sourceStore.openInDefaultEditor(for: app, version: version)
                 }
-                .disabled(sourceStore.sourceVersionID != version.id || sourceStore.sourceCode == nil)
+                .disabled(
+                    sourceStore.sourceVersionID != version.id || sourceStore.sourceCode == nil)
             }
         }
         .padding(24)
@@ -381,7 +384,7 @@ private struct StoreDetailMetadataStrip: View {
     let app: StoreAppDetail
     let onOpenCreator: (String, String) -> Void
     let onOpenStoreLink: (StoreVersionLinkMetadata) -> Void
-    @State private var isShowingLicense = false
+    @State private var licenseSheetPresenter = StoreLicenseSheetPresenter()
 
     private var columns: [GridItem] {
         if app.remix != nil || !app.inspirations.isEmpty {
@@ -427,36 +430,45 @@ private struct StoreDetailMetadataStrip: View {
                 StoreDetailLinkedMetadataItem(
                     title: "License",
                     value: app.currentVersion.license.title,
-                    action: { isShowingLicense = true }
+                    action: {
+                        licenseSheetPresenter.present(
+                            license: app.currentVersion.license,
+                            documents: StoreLegalDocumentRenderer.render(
+                                appName: app.name,
+                                currentVersionId: app.currentVersion.id,
+                                primaryLicense: app.currentVersion.license,
+                                attributions: app.currentVersion.legalAttributions
+                            ),
+                            inheritedAttributions: app.currentVersion.legalAttributions.filter {
+                                $0.versionId != app.currentVersion.id
+                            }
+                        )
+                    }
                 )
             }
         }
         .padding(.vertical, 16)
         .overlay(alignment: .top) { Divider() }
         .overlay(alignment: .bottom) { Divider() }
-        .sheet(isPresented: $isShowingLicense) {
-            StoreLicenseDetailSheet(
-                license: app.currentVersion.license,
-                documents: StoreLegalDocumentRenderer.render(
-                    appName: app.name,
-                    currentVersionId: app.currentVersion.id,
-                    primaryLicense: app.currentVersion.license,
-                    attributions: app.currentVersion.legalAttributions
-                ),
-                inheritedAttributions: app.currentVersion.legalAttributions.filter {
-                    $0.versionId != app.currentVersion.id
-                }
-            )
+        .background {
+            StoreLicenseSheetAnchor(presenter: licenseSheetPresenter)
         }
     }
 
 }
 
 struct StoreLicenseDetailSheet: View {
+    private enum Document: Hashable {
+        case license
+        case notice
+        case attributions
+    }
+
     let license: StoreLicenseIdentifier
     let documents: StoreLegalDocuments
     let inheritedAttributions: [StoreLegalAttribution]
-    @Environment(\.dismiss) private var dismiss
+    let onDismiss: () -> Void
+    @State private var selectedDocument = Document.license
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -468,7 +480,7 @@ struct StoreLicenseDetailSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Done") { dismiss() }
+                Button("Done", action: onDismiss)
                     .keyboardShortcut(.defaultAction)
             }
 
@@ -485,14 +497,18 @@ struct StoreLicenseDetailSheet: View {
                 }
             }
 
-            TabView {
-                legalText(documents.license)
-                    .tabItem { Text("License") }
-                legalText(documents.notice)
-                    .tabItem { Text("Notice") }
-                legalText(documents.attributions)
-                    .tabItem { Text("Attributions") }
+            TabView(selection: $selectedDocument) {
+                Tab("License", systemImage: "doc.text", value: Document.license) {
+                    legalText(documents.license)
+                }
+                Tab("Notice", systemImage: "info.circle", value: Document.notice) {
+                    legalText(documents.notice)
+                }
+                Tab("Attributions", systemImage: "person.2", value: Document.attributions) {
+                    legalText(documents.attributions)
+                }
             }
+            .tabViewStyle(.automatic)
         }
         .padding(20)
         .frame(width: 680, height: 620)
@@ -726,10 +742,12 @@ private struct StorePermissionsSection: View {
                             .foregroundStyle(.blue)
                         Text("No Additional Permissions")
                             .font(.headline)
-                        Text("This version does not request additional sandbox or system resources.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
+                        Text(
+                            "This version does not request additional sandbox or system resources."
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -780,7 +798,8 @@ nonisolated struct StorePermissionPresentation: Identifiable, Equatable, Sendabl
     }
 
     static func items(for settings: ToolGenerationSettings) -> [Self] {
-        let sandbox: [Self] = settings.sandboxEnabled
+        let sandbox: [Self] =
+            settings.sandboxEnabled
             ? settings.sandboxPermissions.enabledPermissions.map { permission in
                 switch permission {
                 case .incomingConnections:

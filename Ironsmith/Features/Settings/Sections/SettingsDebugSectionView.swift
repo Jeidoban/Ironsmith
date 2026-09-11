@@ -16,6 +16,8 @@
         @AppStorage(IronsmithPreferenceKeys.debugPopoverEmptyStateMode)
         private var popoverEmptyStateModeRawValue = ToolLibraryDebugPopoverEmptyStateMode.off
             .rawValue
+        @AppStorage(IronsmithPreferenceKeys.debugCommandLineToolsState)
+        private var commandLineToolsStateRawValue = CommandLineToolsDebugState.automatic.rawValue
         @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled)
         private var storeFeatureEnabled = false
         @AppStorage(IronsmithPreferenceKeys.featureDiagnosticWholeFileRewriteEnabled)
@@ -64,6 +66,17 @@
                             .tag(mode.rawValue)
                     }
                 }
+
+                Picker("Command Line Tools", selection: $commandLineToolsStateRawValue) {
+                    ForEach(CommandLineToolsDebugState.allCases) { state in
+                        Text(state.displayName)
+                            .tag(state.rawValue)
+                    }
+                }
+
+                Text("Overrides the startup gate in debug builds.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Feature Flags")

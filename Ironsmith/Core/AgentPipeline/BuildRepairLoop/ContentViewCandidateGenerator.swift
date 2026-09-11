@@ -11,7 +11,7 @@ struct ContentViewCandidateGenerator {
         ) async throws -> Void
 
         init(
-            instructions: String = ToolGenerationPrompts.singleFileCodingInstructions,
+            instructions: String = ToolGenerationPrompts.flameSingleFileCodingInstructions,
             writeCandidate: @escaping (
                 _ currentSource: String,
                 _ diagnostics: [SwiftCompilerDiagnostic],
@@ -32,7 +32,7 @@ struct ContentViewCandidateGenerator {
         init(
             threshold: Int,
             modeDescription: String,
-            instructions: String = ToolGenerationPrompts.singleFileCodingInstructions,
+            instructions: String = ToolGenerationPrompts.flameSingleFileCodingInstructions,
             writeFreshCandidate: @escaping (LanguageModelSession) async throws -> Void
         ) {
             self.threshold = max(1, threshold)
@@ -59,7 +59,7 @@ struct ContentViewCandidateGenerator {
 
     init(
         modeDescription: String,
-        instructions: String = ToolGenerationPrompts.singleFileCodingInstructions,
+        instructions: String = ToolGenerationPrompts.flameSingleFileCodingInstructions,
         retriesInvalidCandidates: Bool = false,
         invalidCandidateFallback: InvalidCandidateFallback? = nil,
         diagnosticRewrite: DiagnosticRewrite? = nil,

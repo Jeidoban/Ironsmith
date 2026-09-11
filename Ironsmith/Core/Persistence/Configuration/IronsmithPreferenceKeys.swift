@@ -20,5 +20,6 @@ enum IronsmithPreferenceKeys {
     nonisolated static let debugAlwaysOpenOllamaEditorAfterAdd = "debug.alwaysOpenOllamaEditorAfterAdd"
     nonisolated static let debugAlwaysShowAppleFoundationModelWarning = "debug.alwaysShowAppleFoundationModelWarning"
     nonisolated static let debugPopoverEmptyStateMode = "debug.popoverEmptyStateMode"
+    nonisolated static let debugCommandLineToolsState = "debug.commandLineToolsState"
     #endif
 }

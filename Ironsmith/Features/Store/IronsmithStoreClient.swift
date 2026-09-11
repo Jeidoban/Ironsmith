@@ -486,6 +486,14 @@ extension IronsmithStoreClient {
             return .unconfigured
         }
         let api = StoreHTTPClient(configuration: configuration, accountClient: accountClient)
+        let publicationSessionConfiguration = URLSessionConfiguration.default
+        publicationSessionConfiguration.timeoutIntervalForRequest = 7 * 60
+        publicationSessionConfiguration.timeoutIntervalForResource = 7 * 60
+        let publicationAPI = StoreHTTPClient(
+            configuration: configuration,
+            accountClient: accountClient,
+            session: URLSession(configuration: publicationSessionConfiguration)
+        )
         return Self(
             listStores: {
                 let response: StoreDataEnvelope<[AppStoreDescriptor]> = try await api.request(
@@ -588,7 +596,7 @@ extension IronsmithStoreClient {
                         data: request.iconThumbnailJPEG
                     )
                     .addingScreenshotFiles(request.screenshotJPEGs)
-                let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
+                let response: StoreDataEnvelope<StoreAppDetail> = try await publicationAPI.request(
                     "api/v1/stores/\(request.storeId)/apps",
                     method: "POST",
                     body: body.data,
@@ -640,7 +648,7 @@ extension IronsmithStoreClient {
                     )
                 }
                 body = body.addingScreenshotFiles(request.screenshotJPEGs)
-                let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
+                let response: StoreDataEnvelope<StoreAppDetail> = try await publicationAPI.request(
                     "api/v1/stores/\(request.storeId)/apps/\(request.appId)/versions",
                     method: "POST",
                     body: body.data,
@@ -758,6 +766,7 @@ nonisolated private enum StoreAuthentication {
 nonisolated private struct StoreHTTPClient {
     let configuration: IronsmithBackendConfiguration
     let accountClient: IronsmithAccountClient
+    var session: URLSession = .shared
 
     func request<Response: Decodable>(
         _ path: String,
@@ -775,7 +784,7 @@ nonisolated private struct StoreHTTPClient {
             contentType: contentType,
             authentication: authentication
         )
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw IronsmithStoreClientError.invalidResponse
         }

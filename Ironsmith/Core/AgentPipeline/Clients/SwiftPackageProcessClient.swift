@@ -33,9 +33,10 @@ struct SwiftPackageBuildResult: Codable, Equatable, Sendable {
     let terminationStatus: Int32
 
     var combinedOutput: String {
-        [stdout, stderr]
+        let output = [stdout, stderr]
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
+        return SwiftPackageProcessClient.removingANSIEscapeSequences(from: output)
     }
 }
 
@@ -90,8 +91,11 @@ struct SwiftPackageProcessClient: Sendable {
     nonisolated static let live = SwiftPackageProcessClient(
         build: { packageRootURL in
             let result = try await runProcess(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: ["build", "--package-path", packageRootURL.path],
+                executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                arguments: [
+                    "swift", "build", "--no-color-diagnostics", "--package-path",
+                    packageRootURL.path,
+                ],
                 currentDirectoryURL: packageRootURL
             )
             return SwiftPackageBuildResult(
@@ -103,8 +107,11 @@ struct SwiftPackageProcessClient: Sendable {
         },
         buildRelease: { packageRootURL in
             let result = try await runProcess(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: ["build", "-c", "release", "--package-path", packageRootURL.path],
+                executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                arguments: [
+                    "swift", "build", "--no-color-diagnostics", "-c", "release",
+                    "--package-path", packageRootURL.path,
+                ],
                 currentDirectoryURL: packageRootURL
             )
             return SwiftPackageBuildResult(
@@ -116,8 +123,11 @@ struct SwiftPackageProcessClient: Sendable {
         },
         showBinPath: { packageRootURL in
             let result = try await runProcess(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: ["build", "--show-bin-path", "--package-path", packageRootURL.path],
+                executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                arguments: [
+                    "swift", "build", "--no-color-diagnostics", "--show-bin-path",
+                    "--package-path", packageRootURL.path,
+                ],
                 currentDirectoryURL: packageRootURL
             )
 
@@ -139,8 +149,11 @@ struct SwiftPackageProcessClient: Sendable {
         },
         showReleaseBinPath: { packageRootURL in
             let result = try await runProcess(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: ["build", "-c", "release", "--show-bin-path", "--package-path", packageRootURL.path],
+                executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                arguments: [
+                    "swift", "build", "--no-color-diagnostics", "-c", "release",
+                    "--show-bin-path", "--package-path", packageRootURL.path,
+                ],
                 currentDirectoryURL: packageRootURL
             )
 
@@ -251,16 +264,21 @@ struct SwiftPackageProcessClient: Sendable {
     }
 
     static func firstActionableSwiftFile(in output: String, packageRootURL: URL) -> String? {
+        let output = removingANSIEscapeSequences(from: output)
         let escapedRoot = NSRegularExpression.escapedPattern(for: packageRootURL.standardizedFileURL.path)
-        let absolutePattern = "\(escapedRoot)/([^:\\n]+\\.swift):\\d+:\\d+:"
+        let absolutePattern = "\(escapedRoot)/([^:\\n]+\\.swift):\\d+:\\d+(?::|\\s)"
         if let relative = firstCapture(in: output, pattern: absolutePattern) {
             return relative
         }
 
-        return firstCapture(in: output, pattern: "((?:Sources|Tests)/[^:\\n]+\\.swift):\\d+:\\d+:")
+        return firstCapture(
+            in: output,
+            pattern: "((?:Sources|Tests)/[^:\\n]+\\.swift):\\d+:\\d+(?::|\\s)"
+        )
     }
 
     static func compilerExcerpt(from output: String, limit: Int = 3_500) -> String {
+        let output = removingANSIEscapeSequences(from: output)
         guard output.count > limit else { return output }
         return String(output.prefix(limit))
     }
@@ -285,6 +303,7 @@ struct SwiftPackageProcessClient: Sendable {
         in output: String,
         packageRootURL: URL
     ) -> [SwiftCompilerDiagnostic] {
+        let output = removingANSIEscapeSequences(from: output)
         let packageRootPath = packageRootURL.standardizedFileURL.path
         let lines = output.components(separatedBy: .newlines)
         var diagnostics: [SwiftCompilerDiagnostic] = []
@@ -328,6 +347,14 @@ struct SwiftPackageProcessClient: Sendable {
         return diagnostics
     }
 
+    static func removingANSIEscapeSequences(from output: String) -> String {
+        output.replacingOccurrences(
+            of: "\u{001B}\\[[0-?]*[ -/]*[@-~]",
+            with: "",
+            options: .regularExpression
+        )
+    }
+
     private static func firstCapture(in output: String, pattern: String) -> String? {
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(output.startIndex..<output.endIndex, in: output)
@@ -346,50 +373,66 @@ struct SwiftPackageProcessClient: Sendable {
 
     private static func isBuildProgressLine(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        return trimmed.hasPrefix("[") || trimmed.hasPrefix("Build ") || trimmed.hasPrefix("Compile ")
+        return trimmed.hasPrefix("[") || trimmed.hasPrefix("Build ")
+            || trimmed.hasPrefix("Compile ") || trimmed.hasPrefix("error:")
+            || trimmed == "Failed frontend command:"
     }
 
     private static func diagnosticHeader(
         from line: String,
         packageRootPath: String?
     ) -> (relativePath: String?, line: Int, column: Int, severity: SwiftCompilerDiagnosticSeverity, message: String)? {
-        let pattern = #"(.+\.swift):(\d+):(\d+):\s+(error|warning|note):\s+(.+)"#
-        guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let range = NSRange(line.startIndex..<line.endIndex, in: line)
-        guard let match = expression.firstMatch(in: line, range: range), match.numberOfRanges == 6 else {
-            return nil
+        let formats: [(pattern: String, path: Int, line: Int, column: Int, severity: Int, message: Int)] = [
+            (#"(.+\.swift):(\d+):(\d+):\s+(error|warning|note):\s+(.+)"#, 1, 2, 3, 4, 5),
+            (#"^(error|warning|note):\s+(.+\.swift):(\d+):(\d+):?\s+(.+)$"#, 2, 3, 4, 1, 5),
+        ]
+
+        for format in formats {
+            guard let expression = try? NSRegularExpression(pattern: format.pattern) else {
+                continue
+            }
+            let range = NSRange(line.startIndex..<line.endIndex, in: line)
+            guard
+                let match = expression.firstMatch(in: line, range: range),
+                let pathRange = Range(match.range(at: format.path), in: line),
+                let lineRange = Range(match.range(at: format.line), in: line),
+                let columnRange = Range(match.range(at: format.column), in: line),
+                let severityRange = Range(match.range(at: format.severity), in: line),
+                let messageRange = Range(match.range(at: format.message), in: line),
+                let lineNumber = Int(line[lineRange]),
+                let columnNumber = Int(line[columnRange]),
+                let severity = SwiftCompilerDiagnosticSeverity(
+                    rawValue: String(line[severityRange])
+                )
+            else {
+                continue
+            }
+
+            let absolutePath = String(line[pathRange])
+            let relativePath: String?
+            if let packageRootPath, absolutePath.hasPrefix(packageRootPath + "/") {
+                relativePath = String(absolutePath.dropFirst(packageRootPath.count + 1))
+            } else if absolutePath.hasPrefix("Sources/") || absolutePath.hasPrefix("Tests/") {
+                relativePath = absolutePath
+            } else {
+                relativePath = nil
+            }
+
+            let message = String(line[messageRange]).replacingOccurrences(
+                of: #":\s+FixIt\(.*$"#,
+                with: "",
+                options: .regularExpression
+            )
+            return (
+                relativePath: relativePath,
+                line: lineNumber,
+                column: columnNumber,
+                severity: severity,
+                message: message
+            )
         }
 
-        guard
-            let pathRange = Range(match.range(at: 1), in: line),
-            let lineRange = Range(match.range(at: 2), in: line),
-            let columnRange = Range(match.range(at: 3), in: line),
-            let severityRange = Range(match.range(at: 4), in: line),
-            let messageRange = Range(match.range(at: 5), in: line),
-            let lineNumber = Int(line[lineRange]),
-            let columnNumber = Int(line[columnRange]),
-            let severity = SwiftCompilerDiagnosticSeverity(rawValue: String(line[severityRange]))
-        else {
-            return nil
-        }
-
-        let absolutePath = String(line[pathRange])
-        let relativePath: String?
-        if let packageRootPath, absolutePath.hasPrefix(packageRootPath + "/") {
-            relativePath = String(absolutePath.dropFirst(packageRootPath.count + 1))
-        } else if absolutePath.hasPrefix("Sources/") || absolutePath.hasPrefix("Tests/") {
-            relativePath = absolutePath
-        } else {
-            relativePath = nil
-        }
-
-        return (
-            relativePath: relativePath,
-            line: lineNumber,
-            column: columnNumber,
-            severity: severity,
-            message: String(line[messageRange])
-        )
+        return nil
     }
 
     private static func runProcess(
