@@ -144,7 +144,7 @@ struct AppRoutingTests {
             openSettingsWindow: {
                 settingsCapture.open()
             },
-            openStoreWindow: {
+            openStoreWindow: { _ in
                 storeCapture.open()
             },
             openToolLibraryPopover: {
@@ -171,7 +171,7 @@ struct AppRoutingTests {
         let storeCapture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(
             openSettingsWindow: {},
-            openStoreWindow: {
+            openStoreWindow: { _ in
                 storeCapture.open()
             }
         )
@@ -193,7 +193,7 @@ struct AppRoutingTests {
         let storeCapture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(
             openSettingsWindow: {},
-            openStoreWindow: {
+            openStoreWindow: { _ in
                 storeCapture.open()
             },
             isStoreFeatureEnabled: { false }
@@ -235,7 +235,7 @@ struct AppRoutingTests {
         let storeCapture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(
             openSettingsWindow: {},
-            openStoreWindow: {
+            openStoreWindow: { _ in
                 storeCapture.open()
             },
             isStoreFeatureEnabled: { false }
@@ -257,7 +257,7 @@ struct AppRoutingTests {
         let storeCapture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(
             openSettingsWindow: {},
-            openStoreWindow: {
+            openStoreWindow: { _ in
                 storeCapture.open()
             },
             isStoreFeatureEnabled: { false }
