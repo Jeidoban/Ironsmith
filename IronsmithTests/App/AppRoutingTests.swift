@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import Ironsmith
 
 struct AppRoutingTests {
@@ -19,14 +20,16 @@ struct AppRoutingTests {
 
     @Test
     func appRouteParsesAddProviderURLWithInitialKind() throws {
-        let url = try #require(URL(string: "com.jeidoban.ironsmith://settings/add-provider?kind=openai"))
+        let url = try #require(
+            URL(string: "com.jeidoban.ironsmith://settings/add-provider?kind=openai"))
 
         #expect(IronsmithAppRoute(url: url) == .settings(.addProvider(initialKind: .openAI)))
     }
 
     @Test
     func appRouteKeepsAddProviderURLWhenInitialKindIsInvalid() throws {
-        let url = try #require(URL(string: "com.jeidoban.ironsmith://settings/add-provider?kind=bogus"))
+        let url = try #require(
+            URL(string: "com.jeidoban.ironsmith://settings/add-provider?kind=bogus"))
 
         #expect(IronsmithAppRoute(url: url) == .settings(.addProvider(initialKind: nil)))
     }
@@ -40,7 +43,8 @@ struct AppRoutingTests {
 
     @Test
     func appRouteParsesIronsmithCreditsURL() throws {
-        let url = try #require(URL(string: "com.jeidoban.ironsmith://settings/provider/ironsmith/credits"))
+        let url = try #require(
+            URL(string: "com.jeidoban.ironsmith://settings/provider/ironsmith/credits"))
 
         #expect(IronsmithAppRoute(url: url) == .settings(.buyIronsmithCredits))
     }
@@ -69,8 +73,8 @@ struct AppRoutingTests {
             IronsmithAppRoute(url: detailURL)
                 == .store(
                     .app(
-                        storeID: "00000000-0000-4000-8000-000000000011",
-                        appID: "11111111-2222-4333-8444-555555555555"
+                        storeId: "00000000-0000-4000-8000-000000000011",
+                        appId: "11111111-2222-4333-8444-555555555555"
                     )
                 )
         )
@@ -172,8 +176,8 @@ struct AppRoutingTests {
             }
         )
         let route = IronsmithStoreRoute.app(
-            storeID: "00000000-0000-4000-8000-000000000011",
-            appID: "11111111-2222-4333-8444-555555555555"
+            storeId: "00000000-0000-4000-8000-000000000011",
+            appId: "11111111-2222-4333-8444-555555555555"
         )
 
         store.open(.store(route))
@@ -237,8 +241,8 @@ struct AppRoutingTests {
             isStoreFeatureEnabled: { false }
         )
         let route = IronsmithStoreRoute.app(
-            storeID: "00000000-0000-4000-8000-000000000011",
-            appID: "11111111-2222-4333-8444-555555555555"
+            storeId: "00000000-0000-4000-8000-000000000011",
+            appId: "11111111-2222-4333-8444-555555555555"
         )
 
         store.open(.store(route))

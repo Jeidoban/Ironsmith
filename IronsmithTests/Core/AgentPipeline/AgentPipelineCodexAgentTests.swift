@@ -78,7 +78,7 @@ extension AgentPipelineTests {
         #expect(arguments.contains(#"model_reasoning_effort="xhigh""#))
         let prompt = try #require(arguments.last)
         #expect(prompt.contains("Create or edit only Sources/MortgageMate/ContentView.swift"))
-        #expect(prompt.contains("Run `swift build --disable-sandbox`"))
+        #expect(prompt.contains("Run `xcrun swift build --disable-sandbox`"))
         #expect(!prompt.contains("HOME="))
         #expect(!prompt.contains("XDG_CACHE_HOME="))
         #expect(!prompt.contains("CLANG_MODULE_CACHE_PATH="))
@@ -92,6 +92,13 @@ extension AgentPipelineTests {
         #expect(prompt.contains("Do not write deliberate scratch files directly in the top-level system temp directory."))
         #expect(prompt.contains("Ironsmith will clean up the temporary workspace after Codex exits."))
         #expect(prompt.contains("Internet searches are encouraged"))
+        #expect(prompt.contains("existing hosted API or managed service"))
+        #expect(prompt.contains("prefer Supabase"))
+        #expect(prompt.contains("https://database.new"))
+        #expect(prompt.contains("Never embed server-side secrets"))
+        #expect(!prompt.contains("app-owned account system"))
+        #expect(!prompt.contains("This is a local-only app."))
+        #expect(!prompt.contains("External service policy:"))
         #expect(!arguments.contains("--disable"))
         #expect(environment["CODEX_API_KEY"] == "sk-test")
         #expect(environment["OPENAI_API_KEY"] == nil)
@@ -158,6 +165,59 @@ extension AgentPipelineTests {
             }
             return false
         })
+    }
+
+    @Test
+    func codexAgentClientDefaultsGeminiReasoningToMedium() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageRoot = root.appendingPathComponent("Generated", isDirectory: true)
+        let temporaryDirectory = root.appendingPathComponent("Temporary", isDirectory: true)
+        try FileManager.default.createDirectory(at: packageRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let capture = CodexAgentCLICapture()
+        let cliClient = CodexCLIClient(
+            run: { _ in CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 1) },
+            runStreaming: { arguments, environment, _, _ in
+                await capture.record(arguments: arguments, environment: environment)
+                return CodexCLIProcessResult(stdout: "", stderr: "", terminationStatus: 0)
+            }
+        )
+        let client = CodexAgentClient.live(
+            cliClient: cliClient,
+            openAICodexAuthClient: .unconfigured,
+            temporaryDirectory: temporaryDirectory
+        )
+        let provider = CodexAgentCustomResponsesProvider(
+            configurationIdentifier: "ironsmith",
+            sessionProviderIdentifier: "ironsmith",
+            displayName: "Ironsmith",
+            baseURL: URL(string: "https://api.ironsmith.test/api/v1")!,
+            authenticationEnvironmentVariable: "IRONSMITH_CODEX_ACCESS_TOKEN",
+            authenticationToken: "token"
+        )
+
+        _ = try await client.run(
+            CodexAgentRequest(
+                packageRootURL: packageRoot,
+                executableName: "Demo",
+                displayName: "Demo",
+                appKind: .window,
+                sandboxEnabled: true,
+                userPrompt: "Make a demo",
+                modelIdentifier: "google/gemini-3.1-pro-preview",
+                reasoningEffort: .default,
+                authentication: .customResponsesProvider(provider)
+            )
+        )
+
+        let arguments = try #require(await capture.arguments)
+        #expect(arguments.contains(#"model_reasoning_effort="medium""#))
+        #expect(!arguments.contains(#"model_reasoning_effort="default""#))
     }
 
     @Test

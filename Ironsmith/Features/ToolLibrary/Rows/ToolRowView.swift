@@ -26,12 +26,53 @@ struct ToolRowView: View {
                             .lineLimit(1)
 
                         if let generationStatusText {
-                            Text(generationStatusText)
-                                .font(.caption)
-                                .foregroundStyle(statusStyle)
-                                .lineLimit(1)
+                            if state.showsStoreActions,
+                                tool.generationState == .generating,
+                                state.isActivelyRemixingFromStore,
+                                let baseAppName = tool.storeRemixSource?.appName
+                            {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Button {
+                                        actions.onOpenStoreSource()
+                                    } label: {
+                                        Text(
+                                            "\(Text("Remixing ").foregroundColor(.secondary))\(Text(baseAppName).foregroundColor(.accentColor))"
+                                        )
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("View \(baseAppName) in the Store")
+
+                                    Text(generationStatusText)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            } else if state.showsStoreActions,
+                                tool.generationState == .generating,
+                                state.isActivelyRemixingFromStore,
+                                !tool.storeInspirationLinks.isEmpty
+                            {
+                                let inspirationCount = tool.storeInspirationLinks.count
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(
+                                        "Using ideas from \(inspirationCount) \(inspirationCount == 1 ? "app" : "apps")"
+                                    )
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                    Text(generationStatusText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            } else {
+                                Text(generationStatusText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+                    .font(.caption)
+                    .foregroundStyle(statusStyle)
 
                     Spacer()
                 }
@@ -206,6 +247,9 @@ struct ToolRowView: View {
             onEditDetails: {},
             onRebuild: {},
             onPublishToStore: {},
+            onOpenStoreApp: {},
+            onOpenStoreSource: {},
+            onOpenStoreInspiration: { _ in },
             onRevert: {},
             onExport: {},
             onShowInFinder: {},
@@ -244,6 +288,8 @@ enum ToolRowGenerationStatusResolver {
             return "Waiting for icon"
         case .refiningPrompt:
             return "Enhancing prompt"
+        case .searchingStore:
+            return "Finding a starting point"
         case .generatingSource:
             return "Generating source"
         case .generatingEditDiff:
@@ -264,6 +310,7 @@ enum ToolRowGenerationStatusResolver {
         case .generatingSource, .generatingEditDiff, .generatingRepairDiff, .repairing:
             return true
         case .initializing, .planning, .generatingIcon, .waitingForIcon, .refiningPrompt,
+            .searchingStore,
             .packaging,
             .completed, nil:
             return false

@@ -23,7 +23,8 @@ private enum ToolLibraryGenerationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingPreparedTool:
-            return "Ironsmith could not finish this app because generation did not prepare a library record."
+            return
+                "Ironsmith could not finish this app because generation did not prepare a library record."
         }
     }
 }
@@ -76,11 +77,13 @@ final class ToolLibraryStore {
     var rebuildingToolID: UUID?
     var restoringToolID: UUID?
     private(set) var activeCodingAgentByToolID: [UUID: ToolCodingAgent] = [:]
+    private(set) var activeStoreRemixGenerationToolID: UUID?
     private(set) var selectedToolID: UUID?
     private(set) var selectedToolName: String?
     private var restorableToolIDs = Set<UUID>()
     @ObservationIgnored private var nextGenerationSettings: ToolGenerationSettings?
-    @ObservationIgnored private var nextGenerationAppKindPreference: ToolAppKindPreference = .automatic
+    @ObservationIgnored private var nextGenerationAppKindPreference: ToolAppKindPreference =
+        .automatic
     @ObservationIgnored private var hasCustomizedNextGenerationSettings = false
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var generationStopWasRequested = false
@@ -152,8 +155,21 @@ final class ToolLibraryStore {
 
     func handleDeletedTool(_ tool: Tool) {
         restorableToolIDs.remove(tool.id)
+        setStoreRemixGenerationActive(false, for: tool)
         if selectedToolID == tool.id {
             clearSelection()
+        }
+    }
+
+    func isActivelyRemixingFromStore(_ tool: Tool) -> Bool {
+        activeStoreRemixGenerationToolID == tool.id
+    }
+
+    private func setStoreRemixGenerationActive(_ isActive: Bool, for tool: Tool) {
+        if isActive {
+            activeStoreRemixGenerationToolID = tool.id
+        } else if activeStoreRemixGenerationToolID == tool.id {
+            activeStoreRemixGenerationToolID = nil
         }
     }
 
@@ -209,8 +225,8 @@ final class ToolLibraryStore {
 
     func delete(_ tool: Tool, in modelContext: ModelContext) {
         guard rebuildingToolID != tool.id,
-              restoringToolID != tool.id,
-              !(isGenerating && tool.generationState == .generating)
+            restoringToolID != tool.id,
+            !(isGenerating && tool.generationState == .generating)
         else { return }
         let packageRootURL = tool.packageRootURL
         handleDeletedTool(tool)
@@ -228,15 +244,17 @@ final class ToolLibraryStore {
         do {
             try removePackageIfExists(packageRootURL)
         } catch {
-            presentError("Deleted app from the library, but could not remove its files: \(error.localizedDescription)")
+            presentError(
+                "Deleted app from the library, but could not remove its files: \(error.localizedDescription)"
+            )
         }
     }
 
     @discardableResult
     func rename(_ tool: Tool, to proposedName: String, in modelContext: ModelContext) -> Bool {
         guard rebuildingToolID != tool.id,
-              restoringToolID != tool.id,
-              !(isGenerating && tool.generationState == .generating)
+            restoringToolID != tool.id,
+            !(isGenerating && tool.generationState == .generating)
         else { return false }
 
         let trimmedName = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -258,7 +276,8 @@ final class ToolLibraryStore {
         } catch {
             modelContext.rollback()
             if let movedAppBundle {
-                try? FileManager.default.moveItem(at: movedAppBundle.newURL, to: movedAppBundle.oldURL)
+                try? FileManager.default.moveItem(
+                    at: movedAppBundle.newURL, to: movedAppBundle.oldURL)
             }
             if selectedToolID == tool.id {
                 selectedToolName = originalName
@@ -302,17 +321,28 @@ final class ToolLibraryStore {
         restorableToolIDs = nextRestorableToolIDs
     }
 
-    nonisolated private static func computeCanRestorePreviousVersion(_ snapshot: RestoreAvailabilitySnapshot) -> Bool {
+    nonisolated private static func computeCanRestorePreviousVersion(
+        _ snapshot: RestoreAvailabilitySnapshot
+    ) -> Bool {
         let packageRootURL = URL(fileURLWithPath: snapshot.packageRootPath, isDirectory: true)
-        let previousVersionURL = ToolPackageLayout.previousContentViewVersionURL(for: packageRootURL)
+        let previousVersionURL = ToolPackageLayout.previousContentViewVersionURL(
+            for: packageRootURL)
         return FileManager.default.fileExists(atPath: previousVersionURL.path)
     }
 
-    func startPromptSubmission(modelContext: ModelContext, inferenceStore: InferenceStore) {
+    func startPromptSubmission(
+        modelContext: ModelContext,
+        inferenceStore: InferenceStore,
+        storeAssistedGenerationAvailable: Bool = false
+    ) {
         guard canSubmitPrompt, generationTask == nil else { return }
         generationStopWasRequested = false
         generationTask = Task { @MainActor in
-            await submitPrompt(modelContext: modelContext, inferenceStore: inferenceStore)
+            await submitPrompt(
+                modelContext: modelContext,
+                inferenceStore: inferenceStore,
+                storeAssistedGenerationAvailable: storeAssistedGenerationAvailable
+            )
             generationTask = nil
         }
     }
@@ -334,10 +364,10 @@ final class ToolLibraryStore {
         inferenceStore: InferenceStore
     ) {
         guard canContinueGeneration(tool),
-              generationTask == nil,
-              !isGenerating,
-              rebuildingToolID == nil,
-              restoringToolID == nil
+            generationTask == nil,
+            !isGenerating,
+            rebuildingToolID == nil,
+            restoringToolID == nil
         else { return }
         generationStopWasRequested = false
         generationTask = Task { @MainActor in
@@ -348,9 +378,9 @@ final class ToolLibraryStore {
 
     func discardGeneration(_ tool: Tool, in modelContext: ModelContext) {
         guard !isGenerating,
-              rebuildingToolID != tool.id,
-              restoringToolID != tool.id,
-              canContinueGeneration(tool)
+            rebuildingToolID != tool.id,
+            restoringToolID != tool.id,
+            canContinueGeneration(tool)
         else { return }
         let packageRootURL = tool.packageRootURL
         removePendingDraft(for: tool)
@@ -365,11 +395,12 @@ final class ToolLibraryStore {
                 try removePackageIfExists(packageRootURL)
             case .edit:
                 do {
-                    let restoredSettings = try dependencies.versionBackupClient.restoreStagedVersion(
-                        packageRootURL,
-                        tool.contentViewSourcePath,
-                        tool.generationSettings(defaults: .default)
-                    )
+                    let restoredSettings = try dependencies.versionBackupClient
+                        .restoreStagedVersion(
+                            packageRootURL,
+                            tool.contentViewSourcePath,
+                            tool.generationSettings(defaults: .default)
+                        )
                     tool.applyGenerationSettings(restoredSettings)
                     try dependencies.packageMaterializer.writeAppEntry(
                         layout: tool.packageLayout,
@@ -399,7 +430,8 @@ final class ToolLibraryStore {
     }
 
     func restorePreviousVersion(_ tool: Tool, in modelContext: ModelContext) async {
-        guard !isGenerating, rebuildingToolID == nil, restoringToolID == nil, tool.isGenerationReady else { return }
+        guard !isGenerating, rebuildingToolID == nil, restoringToolID == nil, tool.isGenerationReady
+        else { return }
         isGenerating = true
         restoringToolID = tool.id
         clearPresentedErrorState()
@@ -436,9 +468,9 @@ final class ToolLibraryStore {
 
     func rebuild(_ tool: Tool, in modelContext: ModelContext) async {
         guard !isGenerating,
-              rebuildingToolID == nil,
-              restoringToolID == nil,
-              tool.isGenerationReady
+            rebuildingToolID == nil,
+            restoringToolID == nil,
+            tool.isGenerationReady
         else { return }
         rebuildingToolID = tool.id
         clearPresentedErrorState()
@@ -446,7 +478,8 @@ final class ToolLibraryStore {
             rebuildingToolID = nil
         }
 
-        let settings = selectedToolID == tool.id
+        let settings =
+            selectedToolID == tool.id
             ? currentComposerSettings
             : tool.generationSettings(defaults: .default)
 
@@ -466,14 +499,19 @@ final class ToolLibraryStore {
         }
     }
 
-    func submitPrompt(modelContext: ModelContext, inferenceStore: InferenceStore) async {
+    func submitPrompt(
+        modelContext: ModelContext,
+        inferenceStore: InferenceStore,
+        storeAssistedGenerationAvailable: Bool = false
+    ) async {
         guard canSubmitPrompt else { return }
 
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedSelectedToolID = selectedToolID
         let submittedToolName = selectedToolName
         let submittedSettings = submittedGenerationSettings(
-            defaultSettings: Self.defaultGenerationSettings(from: inferenceStore.generationPreferences)
+            defaultSettings: Self.defaultGenerationSettings(
+                from: inferenceStore.generationPreferences)
         )
         let submittedAppKindPreference = appKindPreference
         let submittedAttachments = attachments
@@ -490,13 +528,14 @@ final class ToolLibraryStore {
             }
 
             try await inferenceStore.prepareSelectedModelForGeneration()
-            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
-                resolutionContext: codingAgentResolutionContext(
-                    for: selectedTool,
-                    generationMode: selectedTool == nil ? .create : .edit,
-                    requiresAttachmentSupport: !submittedAttachments.isEmpty
+            let languageModelContext =
+                try await inferenceStore.makeSelectedAgentLanguageModelContext(
+                    resolutionContext: codingAgentResolutionContext(
+                        for: selectedTool,
+                        generationMode: selectedTool == nil ? .create : .edit,
+                        requiresAttachmentSupport: !submittedAttachments.isEmpty
+                    )
                 )
-            )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
             guard
                 submittedAttachments.isEmpty
@@ -505,6 +544,10 @@ final class ToolLibraryStore {
                 throw ToolLibraryAttachmentError.unsupportedSelection
             }
             if let selectedTool {
+                setStoreRemixGenerationActive(
+                    isFirstEditOfDownloadedApp(selectedTool),
+                    for: selectedTool
+                )
                 setActiveCodingAgent(activeCodingAgent, for: selectedTool)
                 markToolGenerating(
                     selectedTool,
@@ -539,7 +582,10 @@ final class ToolLibraryStore {
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
                     attachments: submittedAttachments,
-                    lifecycle: lifecycle
+                    lifecycle: lifecycle,
+                    storeAssistedGenerationEnabled: selectedTool == nil
+                        && inferenceStore.generationPreferences.autoRemixEnabled
+                        && storeAssistedGenerationAvailable
                 )
             )
 
@@ -579,7 +625,8 @@ final class ToolLibraryStore {
                     markToolFailed(activeTool, error: error)
                     try? modelContext.save()
                     if shouldNotifyGenerationTerminalEvent {
-                        await notifyGenerationStopped(activeTool, detail: generationErrorMessage(for: error))
+                        await notifyGenerationStopped(
+                            activeTool, detail: generationErrorMessage(for: error))
                     }
                 } else {
                     modelContext.rollback()
@@ -626,7 +673,8 @@ final class ToolLibraryStore {
 
     private func generationErrorAction(for error: Error) -> ToolLibraryPresentedErrorAction? {
         if let inferenceStoreError = error as? InferenceStoreError,
-           case .insufficientIronsmithCredits = inferenceStoreError {
+            case .insufficientIronsmithCredits = inferenceStoreError
+        {
             return .buyIronsmithCredits
         }
 
@@ -640,7 +688,8 @@ final class ToolLibraryStore {
         }
 
         if error.localizedDescription.contains("AnyLanguageModel")
-            || String(reflecting: error).contains("AnyLanguageModel") {
+            || String(reflecting: error).contains("AnyLanguageModel")
+        {
             return true
         }
 
@@ -671,9 +720,9 @@ final class ToolLibraryStore {
 
     func run(_ tool: Tool) async {
         guard tool.isGenerationReady,
-              launchingToolID == nil,
-              rebuildingToolID == nil,
-              restoringToolID == nil
+            launchingToolID == nil,
+            rebuildingToolID == nil,
+            restoringToolID == nil
         else { return }
         launchingToolID = tool.id
         defer { launchingToolID = nil }
@@ -688,9 +737,9 @@ final class ToolLibraryStore {
 
     func quit(_ tool: Tool) async {
         guard launchingToolID == nil,
-              rebuildingToolID == nil,
-              restoringToolID == nil,
-              runningToolIDs.contains(tool.id)
+            rebuildingToolID == nil,
+            restoringToolID == nil,
+            runningToolIDs.contains(tool.id)
         else { return }
 
         do {
@@ -725,10 +774,10 @@ final class ToolLibraryStore {
 
     func export(_ tool: Tool) async {
         guard tool.isGenerationReady,
-              exportingToolID == nil,
-              rebuildingToolID == nil,
-              restoringToolID == nil,
-              !isGenerating
+            exportingToolID == nil,
+            rebuildingToolID == nil,
+            restoringToolID == nil,
+            !isGenerating
         else { return }
         exportingToolID = tool.id
         defer {
@@ -791,11 +840,15 @@ final class ToolLibraryStore {
         resourcePermissions = settings.resourcePermissions
     }
 
-    private func submittedGenerationSettings(defaultSettings: ToolGenerationSettings) -> ToolGenerationSettings {
-        let defaultBackedSandboxPermissions = !hasSelectedTool && nextGenerationSettings == nil
+    private func submittedGenerationSettings(defaultSettings: ToolGenerationSettings)
+        -> ToolGenerationSettings
+    {
+        let defaultBackedSandboxPermissions =
+            !hasSelectedTool && nextGenerationSettings == nil
             ? defaultSettings.sandboxPermissions
             : sandboxPermissions
-        let defaultBackedResourcePermissions = !hasSelectedTool && nextGenerationSettings == nil
+        let defaultBackedResourcePermissions =
+            !hasSelectedTool && nextGenerationSettings == nil
             ? defaultSettings.resourcePermissions
             : resourcePermissions
         return ToolGenerationSettings(
@@ -820,7 +873,9 @@ final class ToolLibraryStore {
         )
     }
 
-    static func defaultGenerationSettings(from preferences: GenerationPreferencesStore) -> ToolGenerationSettings {
+    static func defaultGenerationSettings(from preferences: GenerationPreferencesStore)
+        -> ToolGenerationSettings
+    {
         ToolGenerationSettings(
             sandboxEnabled: true,
             sandboxPermissions: preferences.generatedAppSandboxPermissions,
@@ -851,13 +906,17 @@ final class ToolLibraryStore {
         let resumePrompt = (tool.pendingPrompt ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !resumePrompt.isEmpty else {
-            presentError("Ironsmith does not have enough saved prompt context to continue this generation.")
+            presentError(
+                "Ironsmith does not have enough saved prompt context to continue this generation.")
             return
         }
 
         isGenerating = true
         generationStopWasRequested = false
         clearPresentedErrorState()
+        if hasPendingStoreRemixContext(for: tool) {
+            setStoreRemixGenerationActive(true, for: tool)
+        }
         let activeToolBox = BindingBox<Tool?>(tool)
         let lifecycle = generationLifecycle(
             modelContext: modelContext,
@@ -869,13 +928,14 @@ final class ToolLibraryStore {
             let requiresAttachmentSupport = try !dependencies.attachmentStorage.currentRun(
                 tool.packageLayout
             ).isEmpty
-            let languageModelContext = try await inferenceStore.makeSelectedAgentLanguageModelContext(
-                resolutionContext: codingAgentResolutionContext(
-                    for: tool,
-                    generationMode: tool.generationMode ?? .create,
-                    requiresAttachmentSupport: requiresAttachmentSupport
+            let languageModelContext =
+                try await inferenceStore.makeSelectedAgentLanguageModelContext(
+                    resolutionContext: codingAgentResolutionContext(
+                        for: tool,
+                        generationMode: tool.generationMode ?? .create,
+                        requiresAttachmentSupport: requiresAttachmentSupport
+                    )
                 )
-            )
             let activeCodingAgent = languageModelContext.pipelineConfiguration.codingAgent
             setActiveCodingAgent(activeCodingAgent, for: tool)
             let settings = tool.generationSettings(
@@ -900,7 +960,8 @@ final class ToolLibraryStore {
                     ),
                     languageModelContext: languageModelContext,
                     imageGenerationProvider: inferenceStore.effectiveImageGenerationProvider,
-                    lifecycle: lifecycle
+                    lifecycle: lifecycle,
+                    storeAssistedGenerationEnabled: hasPendingStoreRemixContext(for: tool)
                 )
             )
             applyCompletedGenerationResult(result, to: tool, prompt: resumePrompt)
@@ -1019,6 +1080,70 @@ final class ToolLibraryStore {
                     try modelContext.save()
                 }
             },
+            updateStoreGenerationContext: { snapshot in
+                try await MainActor.run {
+                    guard let tool = activeTool.value else { return }
+                    let plan = snapshot.plan
+                    let remixSource = plan.base.map {
+                        StoreVersionReference(
+                            versionId: $0.versionId,
+                            storeId: $0.storeId,
+                            appId: $0.appId,
+                            appName: $0.appName,
+                            versionNumber: $0.versionNumber,
+                            sourceSha256: $0.sourceSha256
+                        )
+                    }
+                    let inspirations = plan.inspirations.map { inspiration in
+                        return StoreVersionReference(
+                            versionId: inspiration.versionId,
+                            storeId: inspiration.storeId,
+                            appId: inspiration.appId,
+                            appName: inspiration.appName
+                        )
+                    }
+                    tool.replaceStoreProvenance(
+                        remixSource: remixSource,
+                        inspirations: inspirations
+                    )
+                    self.setStoreRemixGenerationActive(
+                        remixSource != nil || !inspirations.isEmpty,
+                        for: tool
+                    )
+                    let currentSettings = tool.generationSettings(defaults: .default)
+                    tool.applyGenerationSettings(
+                        ToolGenerationSettings(
+                            appKind: currentSettings.appKind,
+                            menuBarSystemImage: currentSettings.menuBarSystemImage,
+                            sandboxEnabled: currentSettings.sandboxEnabled,
+                            sandboxPermissions: GeneratedAppSandboxPermissions(
+                                rawValueList: plan.resolvedSandboxPermissions.joined(
+                                    separator: ","
+                                )
+                            ),
+                            resourcePermissions: GeneratedAppResourcePermissions(
+                                rawValueList: plan.resolvedResourcePermissions.joined(
+                                    separator: ","
+                                )
+                            )
+                        )
+                    )
+                    tool.updatedAt = .now
+                    try modelContext.save()
+                }
+            },
+            clearStoreGenerationContextForScratchFallback: {
+                refinedPrompt,
+                _ in
+                try await MainActor.run {
+                    guard let tool = activeTool.value else { return }
+                    tool.storeProvenance = nil
+                    self.setStoreRemixGenerationActive(false, for: tool)
+                    tool.pendingPrompt = refinedPrompt
+                    tool.updatedAt = .now
+                    try modelContext.save()
+                }
+            },
             updateRepairErrorCount: { count in
                 try await MainActor.run {
                     guard let tool = activeTool.value else { return }
@@ -1123,15 +1248,16 @@ final class ToolLibraryStore {
     }
 
     func isFirstEditOfDownloadedApp(_ tool: Tool) -> Bool {
-        guard tool.storeAppId != nil,
-              tool.storeVersionId != nil,
-              tool.isGenerationReady,
-              let storeSourceSha256 = tool.storeSourceSha256?.lowercased(),
-              let source = try? String(
-                  contentsOf: Self.contentViewURL(for: tool),
-                  encoding: .utf8
-              ),
-              IronsmithStoreClient.sha256Hex(for: source) == storeSourceSha256
+        guard tool.storePublication == nil,
+            let remixSource = tool.storeRemixSource,
+            remixSource.appId != nil,
+            tool.isGenerationReady,
+            let storeSourceSha256 = remixSource.sourceSha256?.lowercased(),
+            let source = try? String(
+                contentsOf: Self.contentViewURL(for: tool),
+                encoding: .utf8
+            ),
+            IronsmithStoreClient.sha256Hex(for: source) == storeSourceSha256
         else { return false }
         return true
     }
@@ -1152,12 +1278,20 @@ final class ToolLibraryStore {
     }
 
     private func clearPendingGeneration(on tool: Tool) {
+        do {
+            try dependencies.storeRemixStateClient.complete(tool.packageRootURL)
+        } catch {
+            AgentDiagnosticsLog.append(
+                "Store remix state cleanup failed: \(error.localizedDescription)"
+            )
+        }
         tool.generationState = .ready
         tool.generationPhase = .completed
         tool.generationMode = nil
         tool.pendingPrompt = nil
         tool.generationErrorSummary = nil
         tool.generationRepairErrorCount = nil
+        setStoreRemixGenerationActive(false, for: tool)
         removePendingDraft(for: tool)
         tool.updatedAt = .now
     }
@@ -1170,6 +1304,10 @@ final class ToolLibraryStore {
                 "Current-run attachment cleanup failed: \(error.localizedDescription)"
             )
         }
+    }
+
+    private func hasPendingStoreRemixContext(for tool: Tool) -> Bool {
+        (try? dependencies.storeRemixStateClient.pendingContext(tool.packageRootURL)) != nil
     }
 
     private func requirePreparedTool(_ tool: Tool?) throws -> Tool {
@@ -1205,7 +1343,7 @@ final class ToolLibraryStore {
         )
 
         guard oldURL.path != newURL.path,
-              FileManager.default.fileExists(atPath: oldURL.path)
+            FileManager.default.fileExists(atPath: oldURL.path)
         else {
             return nil
         }
@@ -1219,14 +1357,16 @@ final class ToolLibraryStore {
     }
 
     private static func shortSummary(for message: String) -> String {
-        let singleLine = message
+        let singleLine =
+            message
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return String(singleLine.prefix(240))
     }
 
     private static func contentViewURL(for tool: Tool) throws -> URL {
-        try ToolPackageLayout.packageFileURL(for: tool.contentViewSourcePath, packageRootURL: tool.packageRootURL)
+        try ToolPackageLayout.packageFileURL(
+            for: tool.contentViewSourcePath, packageRootURL: tool.packageRootURL)
     }
 
     func codingAgentResolutionContext(
@@ -1235,9 +1375,9 @@ final class ToolLibraryStore {
         requiresAttachmentSupport: Bool = false
     ) -> ToolCodingAgentResolutionContext {
         guard generationMode == .edit,
-              let tool,
-              let contentViewURL = try? Self.contentViewURL(for: tool),
-              let source = try? String(contentsOf: contentViewURL, encoding: .utf8)
+            let tool,
+            let contentViewURL = try? Self.contentViewURL(for: tool),
+            let source = try? String(contentsOf: contentViewURL, encoding: .utf8)
         else {
             return ToolCodingAgentResolutionContext(
                 generationMode: generationMode,
@@ -1273,11 +1413,11 @@ final class ToolLibraryStore {
     }
 
     private static var defaultPrompt: String {
-#if DEBUG
-        "Make a mortgage calculator"
-#else
-        ""
-#endif
+        #if DEBUG
+            "Make a mortgage calculator"
+        #else
+            ""
+        #endif
     }
 }
 
@@ -1287,6 +1427,7 @@ struct ToolLibraryDependencies {
     var exportClient: ToolExportClient = .live()
     var finderClient: ToolFinderClient = .live
     var versionBackupClient: ToolVersionBackupClient = .live
+    var storeRemixStateClient: ToolStoreRemixStateClient = .live
     var buildClient: ToolBuildClient = .live()
     var packageMaterializer: ToolPackageMaterializer = .live
     var attachmentStorage: ToolPromptAttachmentStorage = .live
@@ -1298,6 +1439,7 @@ struct ToolLibraryDependencies {
         exportClient: .live(),
         finderClient: .live,
         versionBackupClient: .live,
+        storeRemixStateClient: .live,
         buildClient: .live(),
         packageMaterializer: .live,
         attachmentStorage: .live,

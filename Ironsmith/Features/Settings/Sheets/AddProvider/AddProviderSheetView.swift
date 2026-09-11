@@ -76,7 +76,7 @@ struct AddProviderSheetView: View {
                 }
             }
         }
-        .frame(minWidth: 540, minHeight: 420)
+        .frame(minWidth: 580, minHeight: 420)
         .onAppear {
             selectedChoice = initialProviderChoice()
             configureFields(for: selectedChoice)
@@ -99,7 +99,7 @@ struct AddProviderSheetView: View {
             Spacer()
             Picker("Provider", selection: $selectedChoice) {
                 ForEach(inferenceStore.availableProviderChoices) { choice in
-                    Text(choice.title).tag(Optional(choice))
+                    Text(providerPickerTitle(for: choice)).tag(Optional(choice))
                 }
             }
             .pickerStyle(.segmented)
@@ -108,6 +108,10 @@ struct AddProviderSheetView: View {
             Spacer()
         }
         .padding(.top, 8)
+    }
+
+    private func providerPickerTitle(for choice: InferenceStore.ProviderChoice) -> String {
+        choice.kind == .customOpenAICompatible ? "Custom" : choice.title
     }
 
     private var providerConfigurationForm: some View {
@@ -131,7 +135,8 @@ struct AddProviderSheetView: View {
                     HStack {
                         LabeledContent("ChatGPT") {
                             Text(openAIChatGPTStatusText)
-                                .foregroundStyle(inferenceStore.hasOpenAICodexCredential ? .primary : .secondary)
+                                .foregroundStyle(
+                                    inferenceStore.hasOpenAICodexCredential ? .primary : .secondary)
                         }
 
                         Spacer()

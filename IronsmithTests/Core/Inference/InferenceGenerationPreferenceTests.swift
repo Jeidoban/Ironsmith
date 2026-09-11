@@ -399,6 +399,20 @@ extension InferenceTests {
 
     @MainActor
     @Test
+    func autoRemixDefaultsOffAndPersists() {
+        let suiteName = "IronsmithTests.AutoRemixPreference.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let preferences = GenerationPreferencesStore(userDefaults: userDefaults)
+        #expect(!preferences.autoRemixEnabled)
+
+        preferences.autoRemixEnabled = true
+        #expect(GenerationPreferencesStore(userDefaults: userDefaults).autoRemixEnabled)
+    }
+
+    @MainActor
+    @Test
     func generatedAppResourcePermissionPreferencesDefaultOffAndPersist() {
         let suiteName = "IronsmithTests.GeneratedAppResourcePermissions.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
@@ -780,7 +794,7 @@ extension InferenceTests {
 
         #expect(context.pipelineConfiguration.codingAgent == .codex)
         #expect(context.codingAgentModelFamily == .openAI)
-        #expect(context.codingAgentContextWindowTokens == nil)
+        #expect(context.codingAgentContextWindowTokens == 100_000)
         #expect(codexProvider.configurationIdentifier == "ironsmith_ollama")
         #expect(codexProvider.sessionProviderIdentifier == "ollama")
         #expect(codexProvider.baseURL.absoluteString == "http://localhost:11434/v1/")

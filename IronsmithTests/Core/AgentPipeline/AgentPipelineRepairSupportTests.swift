@@ -414,9 +414,9 @@ extension AgentPipelineTests {
 
     @Test
     func singleFileCodingInstructionsKeepGeneratedAppsSelfContainedAndNativeMacOS() {
-        let instructions = ToolGenerationPrompts.singleFileCodingInstructions
+        let instructions = ToolGenerationPrompts.flameSingleFileCodingInstructions
 
-        #expect(instructions.contains("self-contained"))
+        #expect(instructions.contains("self-contained client-side macOS app"))
         #expect(instructions.contains("direct internet requests allowed"))
         #expect(instructions.contains("Respect that app type when choosing scope, layout density, and sizing"))
         #expect(instructions.contains("Treat that as runtime context, not a reason to reduce useful scope"))
@@ -424,16 +424,73 @@ extension AgentPipelineTests {
         #expect(instructions.contains("use what is needed to complete the user's ask"))
         #expect(instructions.contains("Local persistence is welcome"))
         #expect(instructions.contains("local files, import/export, and open/save panels"))
-        #expect(instructions.contains("Do not add or imply a separate backend service"))
-        #expect(instructions.contains("backend"))
+        #expect(instructions.contains("existing hosted API or managed service"))
+        #expect(instructions.contains("requires no custom backend deployment"))
+        #expect(instructions.contains("prefer Supabase"))
+        #expect(instructions.contains("https://database.new"))
+        #expect(instructions.contains("clear in-app instructions"))
+        #expect(instructions.contains("schema or SQL"))
+        #expect(instructions.contains("client-safe endpoints"))
+        #expect(instructions.contains("Never embed server-side secrets"))
+        #expect(!instructions.contains("app-owned account system"))
+        #expect(!instructions.contains("This is a local-only app."))
         #expect(instructions.contains("iCloud/CloudKit"))
         #expect(instructions.contains("Make the app feel native to macOS"))
         #expect(instructions.contains("Games, drawing canvases, and highly visual toys"))
         #expect(instructions.contains("Define ContentView as the root View"))
         #expect(instructions.contains("same-file helper View types are allowed"))
-        #expect(instructions.contains("helper models/classes are allowed"))
-        #expect(instructions.contains("Break complex SwiftUI bodies into small same-file helper views/properties"))
+        #expect(!instructions.contains("For numeric input"))
+        #expect(!instructions.contains("rounded(toPlaces:)"))
+        #expect(!instructions.contains("Avoid mutating let constants"))
+        #expect(!instructions.contains("Avoid checking isEmpty on numeric values"))
+        #expect(!instructions.contains("Don't make anything overly complex"))
+        #expect(!instructions.contains("type-checker timeouts"))
+        #expect(!instructions.contains("If what the user asks is too complicated"))
         #expect(!(instructions.contains("Define exactly one View-conforming type")))
+    }
+
+    @Test
+    func servicePolicyIsStrictOnlyForSpark() {
+        let spark = ToolGenerationPrompts.singleFileCodingInstructions(for: .ironsmithSpark)
+        let flame = ToolGenerationPrompts.singleFileCodingInstructions(for: .ironsmithFlame)
+
+        #expect(spark.contains("This is a local-only app."))
+        #expect(!spark.contains("existing hosted API or managed service"))
+        #expect(spark.contains("direct internet requests allowed when the user's request requires them"))
+        #expect(spark.contains("local-only state"))
+        #expect(!spark.contains("when they meaningfully support the user's request"))
+        #expect(spark.contains("For numeric input"))
+        #expect(spark.contains("rounded(toPlaces:)"))
+        #expect(spark.contains("Avoid mutating let constants"))
+        #expect(spark.contains("Avoid checking isEmpty on numeric values"))
+        #expect(spark.contains("Don't make anything overly complex"))
+        #expect(spark.contains("type-checker timeouts"))
+        #expect(spark.contains("If what the user asks is too complicated"))
+        #expect(flame.contains("existing hosted API or managed service"))
+        #expect(flame.contains("prefer Supabase"))
+        #expect(flame.contains("https://database.new"))
+        #expect(!flame.contains("app-owned account system"))
+        #expect(!flame.contains("This is a local-only app."))
+        #expect(flame.contains("when they meaningfully support the user's request"))
+        #expect(flame.contains("state appropriate to the requested experience"))
+
+    }
+
+    @Test
+    func patchEditAndRepairInstructionsDoNotIncludeCreationServicePolicy() {
+        let instructions = [
+            ToolGenerationPrompts.repairInstructions(for: .searchReplace),
+            ToolGenerationPrompts.repairInstructions(for: .unifiedDiff),
+            ToolGenerationPrompts.editInstructions(for: .searchReplace),
+            ToolGenerationPrompts.editInstructions(for: .unifiedDiff),
+        ]
+
+        for instructions in instructions {
+            #expect(!instructions.contains("This is a local-only app."))
+            #expect(!instructions.contains("existing hosted API or managed service"))
+            #expect(!instructions.contains("backend"))
+            #expect(!instructions.contains("server-side secrets"))
+        }
     }
 
     @Test

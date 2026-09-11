@@ -393,10 +393,14 @@ nonisolated enum CustomCodingAgentPrompt {
             - Do not modify Package.swift or Sources/\(executableName)/\(executableName).swift.
             - Do not add other source files or package dependencies.
             - Do not add previews, @main declarations, or App-conforming helper types.
-            - Keep working until ContentView.swift is complete and `swift build --disable-sandbox` succeeds.
+            - Keep working until ContentView.swift is complete and `xcrun swift build --disable-sandbox` succeeds.
             - Define ContentView as the root View. Helper types may live in the same file.
             - This is a macOS SwiftUI app. Do not use iOS-only modifiers.
-            - Keep the app local-only; do not add a backend, accounts, analytics, subscriptions, push notifications, or cloud sync.
+            - Keep the app self-contained and client-side. Do not assume or invent an undeployed backend, custom server, or placeholder server-dependent functionality.
+            - You may connect directly to an existing hosted API or managed service when it meaningfully supports the user's request and requires no custom backend deployment.
+            - If only a general-purpose backend is needed and the user did not name a specific service, prefer Supabase and direct the user to https://database.new to create their project.
+            - If external setup is required, include clear in-app instructions for configuring the service, applying any required schema or SQL, granting permissions, and entering client-safe endpoints, API keys, or tokens. Never embed server-side secrets.
+            - Do not add iCloud/CloudKit integration, push notifications, analytics, subscriptions, or cross-device sync unless the user requests them.
             - Make the app feel native to macOS and prefer Apple frameworks over custom or third-party solutions.
             - Use // MARK: - to separate sections of code.
             """

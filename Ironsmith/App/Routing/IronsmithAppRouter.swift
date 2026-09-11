@@ -75,7 +75,7 @@ enum IronsmithStoreRoute: Equatable {
     case root
     case published
     case publishedApp(String)
-    case app(storeID: String, appID: String)
+    case app(storeId: String, appId: String)
 
     var isDirectAppLink: Bool {
         if case .app = self { return true }
@@ -106,7 +106,7 @@ enum IronsmithStoreRoute: Equatable {
             else {
                 return nil
             }
-            self = .app(storeID: path[1], appID: path[2])
+            self = .app(storeId: path[1], appId: path[2])
         }
     }
 }

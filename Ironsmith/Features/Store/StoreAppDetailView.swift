@@ -7,9 +7,10 @@ struct StoreAppDetailView: View {
     let isWorking: Bool
     let workingVersionID: String?
     let installDisposition: StoreAppInstallDisposition
-    let versionInstallDisposition: (StoreAppDetail, StoreVersionMetadata) -> StoreAppInstallDisposition
+    let versionInstallDisposition:
+        (StoreAppDetail, StoreVersionMetadata) -> StoreAppInstallDisposition
     let onGet: (StoreAppDetail) -> Void
-    let onOpenRemix: (StoreRemixMetadata) -> Void
+    let onOpenStoreLink: (StoreVersionLinkMetadata) -> Void
     let onOpenCreator: (String, String) -> Void
     let loadSource: (StoreAppDetail, StoreVersionMetadata) async throws -> String
     let selectedModelName: String?
@@ -38,7 +39,7 @@ struct StoreAppDetailView: View {
                         StoreDetailMetadataStrip(
                             app: app,
                             onOpenCreator: onOpenCreator,
-                            onOpenRemix: onOpenRemix
+                            onOpenStoreLink: onOpenStoreLink
                         )
 
                         if let screenshot = app.screenshots.first {
@@ -273,10 +274,11 @@ private struct StoreSourceCodeSheet: View {
 
             Group {
                 if sourceStore.sourceVersionID == version.id,
-                   let sourceCode = sourceStore.sourceCode
+                    let sourceCode = sourceStore.sourceCode
                 {
                     StoreSourceCodeTextView(sourceCode: sourceCode)
-                    .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
+                        .background(
+                            .quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
                 } else if sourceStore.isLoading {
                     ProgressView("Loading source code…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -308,7 +310,8 @@ private struct StoreSourceCodeSheet: View {
                 Button("Open in Default Editor") {
                     sourceStore.openInDefaultEditor(for: app, version: version)
                 }
-                .disabled(sourceStore.sourceVersionID != version.id || sourceStore.sourceCode == nil)
+                .disabled(
+                    sourceStore.sourceVersionID != version.id || sourceStore.sourceCode == nil)
             }
         }
         .padding(24)
@@ -380,75 +383,92 @@ private struct StoreSourceCodeTextView: NSViewRepresentable {
 private struct StoreDetailMetadataStrip: View {
     let app: StoreAppDetail
     let onOpenCreator: (String, String) -> Void
-    let onOpenRemix: (StoreRemixMetadata) -> Void
-    @State private var isShowingLicense = false
+    let onOpenStoreLink: (StoreVersionLinkMetadata) -> Void
+    @State private var licenseSheetPresenter = StoreLicenseSheetPresenter()
 
     private var columns: [GridItem] {
-        if app.remix != nil {
+        if app.remix != nil || !app.inspirations.isEmpty {
             return [GridItem(.adaptive(minimum: 128), spacing: 12, alignment: .top)]
         }
         return [GridItem(.adaptive(minimum: 140), spacing: 16, alignment: .top)]
     }
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-            if let handle = app.authorHandle, !handle.isEmpty {
-                StoreDetailCreatorMetadataItem(
-                    displayName: app.authorDisplayName,
-                    handle: handle,
-                    action: { onOpenCreator(app.authorDisplayName, handle) }
-                )
-            } else {
-                StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
-            }
-            if let remix = app.remix {
-                if remix.isDeleted {
-                    StoreDetailMetadataItem(title: "Remixed From", value: "[Deleted]")
+        VStack(alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                if let handle = app.authorHandle, !handle.isEmpty {
+                    StoreDetailCreatorMetadataItem(
+                        displayName: app.authorDisplayName,
+                        handle: handle,
+                        action: { onOpenCreator(app.authorDisplayName, handle) }
+                    )
                 } else {
-                    StoreDetailLinkedMetadataItem(
-                        title: "Remixed From",
-                        value: remix.appName,
-                        action: { onOpenRemix(remix) }
+                    StoreDetailMetadataItem(title: "Creator", value: app.creatorDisplayText)
+                }
+                if let remix = app.remix {
+                    if remix.isDeleted {
+                        StoreDetailMetadataItem(title: "Remixed From", value: "[Deleted]")
+                    } else {
+                        StoreDetailLinkedMetadataItem(
+                            title: "Remixed From",
+                            value: remix.appName,
+                            action: { onOpenStoreLink(remix) }
+                        )
+                    }
+                }
+                if !app.inspirations.isEmpty {
+                    StoreDetailInspirationsMetadataItem(
+                        inspirations: app.inspirations,
+                        onOpen: onOpenStoreLink
                     )
                 }
+                StoreDetailMetadataItem(
+                    title: "Version",
+                    value: String(app.currentVersion.versionNumber)
+                )
+                StoreDetailMetadataItem(title: "Category", value: app.category.title)
+                StoreDetailLinkedMetadataItem(
+                    title: "License",
+                    value: app.currentVersion.license.title,
+                    action: {
+                        licenseSheetPresenter.present(
+                            license: app.currentVersion.license,
+                            documents: StoreLegalDocumentRenderer.render(
+                                appName: app.name,
+                                currentVersionId: app.currentVersion.id,
+                                primaryLicense: app.currentVersion.license,
+                                attributions: app.currentVersion.legalAttributions
+                            ),
+                            inheritedAttributions: app.currentVersion.legalAttributions.filter {
+                                $0.versionId != app.currentVersion.id
+                            }
+                        )
+                    }
+                )
             }
-            StoreDetailMetadataItem(
-                title: "Version",
-                value: String(app.currentVersion.versionNumber)
-            )
-            StoreDetailMetadataItem(title: "Category", value: app.category.title)
-            StoreDetailLinkedMetadataItem(
-                title: "License",
-                value: app.currentVersion.license.title,
-                action: { isShowingLicense = true }
-            )
         }
         .padding(.vertical, 16)
         .overlay(alignment: .top) { Divider() }
         .overlay(alignment: .bottom) { Divider() }
-        .sheet(isPresented: $isShowingLicense) {
-            StoreLicenseDetailSheet(
-                license: app.currentVersion.license,
-                documents: StoreLegalDocumentRenderer.render(
-                    appName: app.name,
-                    currentVersionId: app.currentVersion.id,
-                    primaryLicense: app.currentVersion.license,
-                    attributions: app.currentVersion.legalAttributions
-                ),
-                inheritedAttributions: app.currentVersion.legalAttributions.filter {
-                    $0.versionId != app.currentVersion.id
-                }
-            )
+        .background {
+            StoreLicenseSheetAnchor(presenter: licenseSheetPresenter)
         }
     }
 
 }
 
 struct StoreLicenseDetailSheet: View {
+    private enum Document: Hashable {
+        case license
+        case notice
+        case attributions
+    }
+
     let license: StoreLicenseIdentifier
     let documents: StoreLegalDocuments
     let inheritedAttributions: [StoreLegalAttribution]
-    @Environment(\.dismiss) private var dismiss
+    let onDismiss: () -> Void
+    @State private var selectedDocument = Document.license
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -460,7 +480,7 @@ struct StoreLicenseDetailSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Done") { dismiss() }
+                Button("Done", action: onDismiss)
                     .keyboardShortcut(.defaultAction)
             }
 
@@ -477,14 +497,18 @@ struct StoreLicenseDetailSheet: View {
                 }
             }
 
-            TabView {
-                legalText(documents.license)
-                    .tabItem { Text("License") }
-                legalText(documents.notice)
-                    .tabItem { Text("Notice") }
-                legalText(documents.attributions)
-                    .tabItem { Text("Attributions") }
+            TabView(selection: $selectedDocument) {
+                Tab("License", systemImage: "doc.text", value: Document.license) {
+                    legalText(documents.license)
+                }
+                Tab("Notice", systemImage: "info.circle", value: Document.notice) {
+                    legalText(documents.notice)
+                }
+                Tab("Attributions", systemImage: "person.2", value: Document.attributions) {
+                    legalText(documents.attributions)
+                }
             }
+            .tabViewStyle(.automatic)
         }
         .padding(20)
         .frame(width: 680, height: 620)
@@ -497,6 +521,70 @@ struct StoreLicenseDetailSheet: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
+        }
+    }
+
+}
+
+private struct StoreDetailInspirationsMetadataItem: View {
+    let inspirations: [StoreVersionLinkMetadata]
+    let onOpen: (StoreVersionLinkMetadata) -> Void
+
+    @State private var isShowingPopover = false
+
+    var body: some View {
+        if let inspiration = inspirations.first, inspirations.count == 1 {
+            if inspiration.isDeleted {
+                StoreDetailMetadataItem(title: "Using Ideas From", value: "[Deleted]")
+            } else {
+                StoreDetailLinkedMetadataItem(
+                    title: "Using Ideas From",
+                    value: inspiration.appName,
+                    action: { onOpen(inspiration) }
+                )
+            }
+        } else {
+            StoreDetailLinkedMetadataItem(
+                title: "Using Ideas From",
+                value: "\(inspirations.count) apps",
+                action: { isShowingPopover = true }
+            )
+            .popover(isPresented: $isShowingPopover) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Using Ideas From")
+                        .font(.headline)
+
+                    ForEach(inspirations) { inspiration in
+                        if inspiration.isDeleted {
+                            Text("[Deleted]")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                        } else {
+                            Button {
+                                isShowingPopover = false
+                                onOpen(inspiration)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(inspiration.appName)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 12)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(12)
+                .frame(minWidth: 220, alignment: .leading)
+            }
         }
     }
 }
@@ -654,10 +742,12 @@ private struct StorePermissionsSection: View {
                             .foregroundStyle(.blue)
                         Text("No Additional Permissions")
                             .font(.headline)
-                        Text("This version does not request additional sandbox or system resources.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
+                        Text(
+                            "This version does not request additional sandbox or system resources."
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -708,7 +798,8 @@ nonisolated struct StorePermissionPresentation: Identifiable, Equatable, Sendabl
     }
 
     static func items(for settings: ToolGenerationSettings) -> [Self] {
-        let sandbox: [Self] = settings.sandboxEnabled
+        let sandbox: [Self] =
+            settings.sandboxEnabled
             ? settings.sandboxPermissions.enabledPermissions.map { permission in
                 switch permission {
                 case .incomingConnections:

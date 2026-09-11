@@ -652,11 +652,13 @@ struct ToolPromptRefinementClient: Sendable {
         - For window apps, describe a normal native macOS window app layout when appropriate.
         - Prefer one polished primary workflow over many secondary workflows while preserving all requested features.
         - If a requested feature can be implemented with a native Apple framework such as Vision for OCR, PDFKit for PDFs, or AVFoundation for media, explicitly call it out.
-        - Must describe a self-contained Mac app unless the user explicitly requests external services.
+        - Must describe a self-contained client-side Mac app that does not depend on custom backend deployment.
         - May include local persistence, local files, import/export, and open/save flows when they make sense.
-        - Must not add or imply a separate backend service, custom server component, account system, iCloud, CloudKit, push notifications, analytics, subscriptions, or cross-device sync unless explicitly requested.
+        - May connect directly to an existing hosted API or managed service when it meaningfully supports the request and requires no custom backend deployment. It must not invent an undeployed backend or placeholder server-dependent functionality.
+        - If only a general-purpose backend is needed and the user did not name a specific service, prefer Supabase and direct the user to https://database.new to create their project.
+        - Must not add iCloud, CloudKit, push notifications, analytics, subscriptions, or cross-device sync unless explicitly requested.
         - Should emphasize a native macOS feel using appropriate SwiftUI macOS patterns and system controls.
-        - For games, drawing canvases, and highly visual toys, the refined prompt may describe custom graphics and game-like UI, but it should keep the app local-only unless the user requests network features and remain sensible for macOS pointer, keyboard, and window behavior.
+        - For games, drawing canvases, and highly visual toys, the refined prompt may describe custom graphics and game-like UI, but it should remain self-contained and sensible for macOS pointer, keyboard, and window behavior.
         """
 
     nonisolated private static let sparkPromptRefinementInstructions = """

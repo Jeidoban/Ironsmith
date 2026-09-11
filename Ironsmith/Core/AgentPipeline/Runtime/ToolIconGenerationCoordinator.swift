@@ -11,6 +11,7 @@ nonisolated struct ToolIconGenerationHandle: Sendable {
 private actor ToolIconGenerationCompletion {
     private var result: Result<Void, any Error>?
     private var waiters: [UUID: CheckedContinuation<Void, any Error>] = [:]
+    private var cancelledWaiterIDs: Set<UUID> = []
 
     func wait() async throws {
         let waiterID = UUID()
@@ -21,8 +22,11 @@ private actor ToolIconGenerationCompletion {
                 return try result.get()
             }
 
-            try await withCheckedThrowingContinuation { continuation in
-                if let result {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, any Error>) in
+                if cancelledWaiterIDs.remove(waiterID) != nil {
+                    continuation.resume(throwing: CancellationError())
+                } else if let result {
                     continuation.resume(with: result)
                 } else {
                     waiters[waiterID] = continuation
@@ -46,7 +50,11 @@ private actor ToolIconGenerationCompletion {
     }
 
     private func cancelWaiter(_ waiterID: UUID) {
-        waiters.removeValue(forKey: waiterID)?.resume(throwing: CancellationError())
+        if let waiter = waiters.removeValue(forKey: waiterID) {
+            waiter.resume(throwing: CancellationError())
+        } else if result == nil {
+            cancelledWaiterIDs.insert(waiterID)
+        }
     }
 }
 

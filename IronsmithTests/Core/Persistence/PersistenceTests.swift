@@ -1,8 +1,10 @@
 import Foundation
 import SwiftData
 import Testing
+
 @testable import Ironsmith
 
+@Suite(.serialized)
 struct PersistenceTests {
     @MainActor
     @Test
@@ -67,7 +69,34 @@ struct PersistenceTests {
                     generationState: .stopped,
                     generationPhase: .generatingSource,
                     generationMode: .create,
-                    pendingPrompt: "Build a resumable app"
+                    pendingPrompt: "Build a resumable app",
+                    storeMetadata: ToolStoreMetadata(
+                        publication: StorePublication(
+                            storeId: IronsmithStoreConstants.communityStoreId,
+                            appId: "published-app",
+                            versionId: "published-version",
+                            versionNumber: 2,
+                            sourceSha256: "published-hash",
+                            ownerUserId: "owner-user",
+                            publishedAt: Date(timeIntervalSince1970: 1_750_000_000)
+                        ),
+                        provenance: StoreProvenance(
+                            remixSource: StoreVersionReference(
+                                versionId: "remix-version",
+                                storeId: IronsmithStoreConstants.communityStoreId,
+                                appId: "remix-app",
+                                appName: "Remix App"
+                            ),
+                            inspirations: [
+                                StoreVersionReference(
+                                    versionId: "inspiration-version",
+                                    storeId: IronsmithStoreConstants.communityStoreId,
+                                    appId: "inspiration-app",
+                                    appName: "Inspiration App"
+                                )
+                            ]
+                        )
+                    )
                 )
             )
             try context.save()
@@ -82,7 +111,10 @@ struct PersistenceTests {
             #expect(tool.generationMode == ToolGenerationMode.create)
             #expect(tool.pendingPrompt == "Build a resumable app")
             #expect(tool.category == .music)
-            #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
+            #expect(tool.storePublication?.ownerUserId == "owner-user")
+            #expect(tool.storeRemixSource?.appName == "Remix App")
+            #expect(tool.storeInspirations.map(\.appName) == ["Inspiration App"])
+            #expect(container.schema.version == IronsmithSchemaV9.versionIdentifier)
             #expect(container.migrationPlan != nil)
         }
     }
@@ -157,8 +189,174 @@ struct PersistenceTests {
             try context.fetch(FetchDescriptor<ModelConfig>()).first { $0.id == modelID }
         )
 
-        #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV9.versionIdentifier)
         #expect(model.contextWindowTokens == nil)
+    }
+
+    @MainActor
+    @Test
+    func v8StoreRemixContextMigratesToPendingSidecarAndDurableProvenance() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = ModelConfiguration(
+            url: root.appendingPathComponent("ironsmith.sqlite")
+        )
+        let packageRoot = root.appendingPathComponent("Timer", isDirectory: true)
+        let toolID = UUID()
+        let legacyOnlyInspirationID = "version-legacy-only"
+        let snapshot = StoreRemixTestFixture.snapshot()
+        let snapshotData = try JSONEncoder().encode(snapshot)
+
+        do {
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: IronsmithSchemaV8.self),
+                configurations: config
+            )
+            let context = ModelContext(container)
+            context.insert(
+                IronsmithSchemaV8.Tool(
+                    id: toolID,
+                    name: "Auto Remix Timer",
+                    packageRootPath: packageRoot.path,
+                    generationState: .stopped,
+                    generationPhase: .generatingSource,
+                    generationMode: .create,
+                    pendingPrompt: snapshot.originalPrompt,
+                    storeGenerationContextPlanId: "plan-1",
+                    storeGenerationContextMode: snapshot.plan.mode.rawValue,
+                    storeGenerationContextPayloadJSON: String(
+                        decoding: snapshotData,
+                        as: UTF8.self
+                    ),
+                    storeGenerationBaseStoreId: snapshot.plan.base?.storeId,
+                    storeGenerationBaseAppId: snapshot.plan.base?.appId,
+                    storeGenerationBaseVersionId: snapshot.plan.base?.versionId,
+                    storeInspiredByVersionIdsRawValue:
+                        (snapshot.plan.inspirations.map(\.versionId) + [legacyOnlyInspirationID])
+                        .joined(separator: ",")
+                )
+            )
+            try context.save()
+        }
+
+        let container = try IronsmithModelContainerFactory.make(configuration: config)
+        let context = ModelContext(container)
+        let tool = try #require(
+            try context.fetch(FetchDescriptor<Tool>()).first { $0.id == toolID }
+        )
+
+        #expect(tool.storePublication == nil)
+        #expect(tool.storeRemixSource?.storeId == snapshot.plan.base?.storeId)
+        #expect(tool.storeRemixSource?.appId == snapshot.plan.base?.appId)
+        #expect(tool.storeRemixSource?.versionId == snapshot.plan.base?.versionId)
+        #expect(
+            tool.storeAttributionVersionIds
+                == snapshot.plan.inspirations.map(\.versionId) + [legacyOnlyInspirationID]
+        )
+        #expect(
+            tool.storeInspirationLinks.compactMap(\.appName)
+                == ["Preset Timer", "Sound Timer"]
+        )
+        let stagedContext = try ToolStoreRemixStateClient.live.pendingContext(packageRoot)
+        let pending = try #require(stagedContext)
+        #expect(pending.originalPrompt == snapshot.originalPrompt)
+        #expect(pending.promptContext == snapshot.plan.promptContext)
+        #expect(pending.baseSourceCode == snapshot.plan.base?.sourceCode)
+    }
+
+    @MainActor
+    @Test
+    func v8PublishedStoreLinkMigratesAsRemixSourceWithoutPublicationOwnership() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = ModelConfiguration(
+            url: root.appendingPathComponent("ironsmith.sqlite")
+        )
+        let toolID = UUID()
+        let versionID = "00000000-0000-4000-8000-000000000201"
+
+        do {
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: IronsmithSchemaV8.self),
+                configurations: config
+            )
+            let context = ModelContext(container)
+            context.insert(
+                IronsmithSchemaV8.Tool(
+                    id: toolID,
+                    name: "Legacy Published Tool",
+                    packageRootPath: root.appendingPathComponent("Legacy").path,
+                    storeId: IronsmithStoreConstants.communityStoreId,
+                    storeAppId: "00000000-0000-4000-8000-000000000101",
+                    storeVersionId: versionID,
+                    storeVersionNumber: 3,
+                    storeSourceSha256: "legacy-source-hash"
+                )
+            )
+            try context.save()
+        }
+
+        let container = try IronsmithModelContainerFactory.make(configuration: config)
+        let context = ModelContext(container)
+        let tool = try #require(
+            try context.fetch(FetchDescriptor<Tool>()).first { $0.id == toolID }
+        )
+
+        #expect(tool.storePublication == nil)
+        #expect(tool.storeRemixSource?.versionId == versionID)
+        #expect(tool.storeRemixSource?.storeId == IronsmithStoreConstants.communityStoreId)
+        #expect(tool.storeRemixSource?.versionNumber == 3)
+        #expect(tool.storeRemixSource?.sourceSha256 == "legacy-source-hash")
+    }
+
+    @MainActor
+    @Test
+    func v8StoppedStoreRemixMigrationContinuesWhenResumeSidecarCannotBeWritten() throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = ModelConfiguration(
+            url: root.appendingPathComponent("ironsmith.sqlite")
+        )
+        let blockedPackageRoot = root.appendingPathComponent("not-a-directory")
+        try Data("blocked".utf8).write(to: blockedPackageRoot)
+        let snapshot = StoreRemixTestFixture.snapshot()
+
+        do {
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: IronsmithSchemaV8.self),
+                configurations: config
+            )
+            let context = ModelContext(container)
+            context.insert(
+                IronsmithSchemaV8.Tool(
+                    name: "Blocked Auto Remix",
+                    packageRootPath: blockedPackageRoot.path,
+                    generationState: .stopped,
+                    generationPhase: .generatingSource,
+                    generationMode: .create,
+                    pendingPrompt: snapshot.originalPrompt,
+                    storeGenerationContextPayloadJSON: String(
+                        decoding: try JSONEncoder().encode(snapshot),
+                        as: UTF8.self
+                    )
+                )
+            )
+            try context.save()
+        }
+
+        let container = try IronsmithModelContainerFactory.make(configuration: config)
+        let context = ModelContext(container)
+        let migratedTool = try #require(try context.fetch(FetchDescriptor<Tool>()).first)
+
+        #expect(migratedTool.generationState == .stopped)
+        #expect(migratedTool.storeRemixSource?.versionId == snapshot.plan.base?.versionId)
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: ToolPackageLayout.storeRemixStateURL(
+                    for: blockedPackageRoot
+                ).path
+            )
+        )
     }
 
     @MainActor
@@ -217,7 +415,7 @@ struct PersistenceTests {
         let tool = try #require(try context.fetch(FetchDescriptor<Tool>()).first)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV9.versionIdentifier)
         #expect(tool.id == toolID)
         #expect(tool.appKind == .menuBar)
         #expect(tool.generationState == .stopped)
@@ -226,13 +424,7 @@ struct PersistenceTests {
         #expect(tool.pendingPrompt == "Make it better")
         #expect(tool.storedSandboxPermissions?.enabled == [.outgoingConnections])
         #expect(tool.storedResourcePermissions?.enabled == [.camera, .microphone])
-        #expect(tool.storeId == nil)
-        #expect(tool.storeAppId == nil)
-        #expect(tool.storeVersionId == nil)
-        #expect(tool.storeVersionNumber == nil)
-        #expect(tool.storeSourceSha256 == nil)
-        #expect(tool.storeImportedAt == nil)
-        #expect(tool.storeRemixedFromVersionId == nil)
+        #expect(tool.storeMetadata == nil)
         #expect(tool.category == .utilities)
         #expect(!(models.contains { $0.id == modelID }))
     }
@@ -286,7 +478,7 @@ struct PersistenceTests {
         let context = ModelContext(container)
         let models = try context.fetch(FetchDescriptor<ModelConfig>())
 
-        #expect(container.schema.version == IronsmithSchemaV7.versionIdentifier)
+        #expect(container.schema.version == IronsmithSchemaV9.versionIdentifier)
         #expect(!(models.contains { $0.id == legacyModelID }))
         #expect(models.contains { $0.id == foundationModelID })
     }
@@ -349,7 +541,8 @@ struct PersistenceTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let legacyDirectoryURL = root.appendingPathComponent("legacy", isDirectory: true)
-        try FileManager.default.createDirectory(at: legacyDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: legacyDirectoryURL, withIntermediateDirectories: true)
         let legacyStoreURL = legacyDirectoryURL.appendingPathComponent("default.store")
 
         do {
@@ -365,7 +558,8 @@ struct PersistenceTests {
         }
 
         let locations = IronsmithPersistentStoreLocations(
-            databaseDirectoryURL: root
+            databaseDirectoryURL:
+                root
                 .appendingPathComponent(".ironsmith", isDirectory: true)
                 .appendingPathComponent("db", isDirectory: true),
             legacyStoreURL: legacyStoreURL
@@ -379,7 +573,8 @@ struct PersistenceTests {
         let backupDirectoryURL = try #require(
             try Self.startupBackupDirectories(in: locations).first
         )
-        let backupStoreURL = backupDirectoryURL.appendingPathComponent(IronsmithPaths.databaseFileName)
+        let backupStoreURL = backupDirectoryURL.appendingPathComponent(
+            IronsmithPaths.databaseFileName)
         #expect(FileManager.default.fileExists(atPath: backupStoreURL.path))
 
         do {
@@ -463,9 +658,10 @@ struct PersistenceTests {
             includingPropertiesForKeys: nil
         ).filter { $0.lastPathComponent.hasPrefix("rejected-legacy-import-") }
         let quarantine = try #require(quarantines.first)
-        #expect(FileManager.default.fileExists(
-            atPath: quarantine.appendingPathComponent(IronsmithPaths.databaseFileName).path
-        ))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: quarantine.appendingPathComponent(IronsmithPaths.databaseFileName).path
+            ))
         #expect(FileManager.default.fileExists(atPath: legacyStoreURL.path))
 
         let container = try IronsmithModelContainerFactory.make(
@@ -489,7 +685,8 @@ struct PersistenceTests {
         try Data("legacy".utf8).write(to: legacyStoreURL)
 
         let locations = IronsmithPersistentStoreLocations(
-            databaseDirectoryURL: root
+            databaseDirectoryURL:
+                root
                 .appendingPathComponent(".ironsmith", isDirectory: true)
                 .appendingPathComponent("db", isDirectory: true),
             legacyStoreURL: legacyStoreURL
@@ -509,7 +706,8 @@ struct PersistenceTests {
         let backupDirectoryURL = try #require(
             try Self.startupBackupDirectories(in: locations).first
         )
-        let backupStoreURL = backupDirectoryURL.appendingPathComponent(IronsmithPaths.databaseFileName)
+        let backupStoreURL = backupDirectoryURL.appendingPathComponent(
+            IronsmithPaths.databaseFileName)
         #expect(try Data(contentsOf: backupStoreURL) == Data("current".utf8))
     }
 
@@ -519,7 +717,8 @@ struct PersistenceTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let locations = IronsmithPersistentStoreLocations(
-            databaseDirectoryURL: root
+            databaseDirectoryURL:
+                root
                 .appendingPathComponent(".ironsmith", isDirectory: true)
                 .appendingPathComponent("db", isDirectory: true),
             legacyStoreURL: root.appendingPathComponent("legacy/default.store")
@@ -541,11 +740,12 @@ struct PersistenceTests {
             .map(\.lastPathComponent)
             .sorted()
 
-        #expect(backupNames == [
-            "20250615-150642-000",
-            "20250615-150643-000",
-            "20250615-150644-000",
-        ])
+        #expect(
+            backupNames == [
+                "20250615-150642-000",
+                "20250615-150643-000",
+                "20250615-150644-000",
+            ])
     }
 
     @Test
@@ -570,7 +770,9 @@ struct PersistenceTests {
         let bundleIdentifier = ToolBundleIdentifier.make(executableName: "Résumé Helper 東京", id: id)
         let allowedCharacters = Set("abcdefghijklmnopqrstuvwxyz0123456789-.")
 
-        #expect(bundleIdentifier == "com.ironsmith.generated.resume-helper.11111111-2222-3333-4444-555555555555")
+        #expect(
+            bundleIdentifier
+                == "com.ironsmith.generated.resume-helper.11111111-2222-3333-4444-555555555555")
         #expect(bundleIdentifier.allSatisfy { allowedCharacters.contains($0) })
     }
 
@@ -603,7 +805,8 @@ struct PersistenceTests {
 
     private static func makeTemporaryDirectory() throws -> URL {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ironsmith-persistence-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(
+                "ironsmith-persistence-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
@@ -613,7 +816,8 @@ struct PersistenceTests {
         legacyStoreURL: URL
     ) -> IronsmithPersistentStoreLocations {
         IronsmithPersistentStoreLocations(
-            databaseDirectoryURL: root
+            databaseDirectoryURL:
+                root
                 .appendingPathComponent(".ironsmith", isDirectory: true)
                 .appendingPathComponent("db", isDirectory: true),
             legacyStoreURL: legacyStoreURL

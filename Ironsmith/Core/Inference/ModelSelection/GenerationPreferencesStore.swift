@@ -9,6 +9,7 @@ final class GenerationPreferencesStore {
         static let codingAgentPreference = "generation.agentPipelineProfile"
         static let reasoningEffort = "generation.reasoningEffort"
         static let imageGenerationProvider = "generation.imageGenerationProvider"
+        static let autoRemixEnabled = "generation.autoRemixEnabled"
         static let automaticallySelectGeneratedAppPermissions =
             "generation.automaticallySelectGeneratedAppPermissions"
     }
@@ -31,6 +32,11 @@ final class GenerationPreferencesStore {
     var imageGenerationProvider: ToolImageGenerationProvider {
         didSet {
             userDefaults.set(imageGenerationProvider.rawValue, forKey: Key.imageGenerationProvider)
+        }
+    }
+    var autoRemixEnabled: Bool {
+        didSet {
+            userDefaults.set(autoRemixEnabled, forKey: Key.autoRemixEnabled)
         }
     }
     var automaticallySelectGeneratedAppPermissions: Bool {
@@ -184,6 +190,7 @@ final class GenerationPreferencesStore {
         self.imageGenerationProvider = userDefaults
             .string(forKey: Key.imageGenerationProvider)
             .flatMap(ToolImageGenerationProvider.init(rawValue:)) ?? .automatic
+        self.autoRemixEnabled = userDefaults.bool(forKey: Key.autoRemixEnabled)
         self.automaticallySelectGeneratedAppPermissions = userDefaults.object(
             forKey: Key.automaticallySelectGeneratedAppPermissions
         ) == nil

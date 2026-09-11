@@ -1,6 +1,16 @@
 import AnyLanguageModel
 import Foundation
 
+nonisolated enum GeneratedToolRequirements {
+    static let swiftMajorVersion = 6
+    static let swiftMinorVersion = 2
+    static let sdkMajorVersion = 26
+
+    static var swiftVersion: String {
+        "\(swiftMajorVersion).\(swiftMinorVersion)"
+    }
+}
+
 nonisolated struct AgentLanguageModelContext {
     let codingAgent: ToolGenerationStageConfiguration
     let promptRefinement: ToolGenerationStageConfiguration
@@ -395,6 +405,7 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
     nonisolated static let previousBuildSettingsVersionFilename = "previous-build-settings.json"
     nonisolated static let pendingGenerationSettingsFilename =
         "pending-generation-settings.json"
+    nonisolated static let storeRemixStateFilename = "pending-store-generation-context.json"
 
     let packageRootURL: URL
     let executableName: String
@@ -447,6 +458,10 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated var pendingGenerationSettingsURL: URL {
         Self.pendingGenerationSettingsURL(for: packageRootURL)
+    }
+
+    nonisolated var storeRemixStateURL: URL {
+        Self.storeRemixStateURL(for: packageRootURL)
     }
 
     nonisolated var sourceDirectoryURL: URL {
@@ -585,6 +600,11 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
             .appendingPathComponent(pendingGenerationSettingsFilename)
     }
 
+    nonisolated static func storeRemixStateURL(for packageRootURL: URL) -> URL {
+        packageMetadataDirectoryURL(for: packageRootURL)
+            .appendingPathComponent(storeRemixStateFilename)
+    }
+
     nonisolated static func sandboxEntitlementsURL(for packageRootURL: URL) -> URL {
         packageMetadataDirectoryURL(for: packageRootURL)
             .appendingPathComponent("sandbox.entitlements")
@@ -592,13 +612,13 @@ nonisolated struct ToolPackageLayout: Equatable, Sendable {
 
     nonisolated func packageManifestContent() -> String {
         """
-        // swift-tools-version: 6.2
+        // swift-tools-version: \(GeneratedToolRequirements.swiftVersion)
 
         import PackageDescription
 
         let package = Package(
             name: "\(executableName)",
-            platforms: [.macOS(.v26)],
+            platforms: [.macOS("\(GeneratedToolRequirements.sdkMajorVersion).0")],
             targets: [
                 .executableTarget(
                     name: "\(executableName)"
