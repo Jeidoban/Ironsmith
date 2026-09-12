@@ -481,7 +481,7 @@ private struct StoreDiscoverHomeView: View {
                             .frame(maxWidth: .infinity, alignment: .trailing)
                             .padding(.horizontal, 28)
                     }
-                    ForEach(store.homeSections.filter { $0.category == nil }) { section in
+                    ForEach(store.homeSections) { section in
                         StoreHomeSectionView(
                             section: section,
                             tools: tools,
