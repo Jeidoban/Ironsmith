@@ -105,10 +105,8 @@ final class IronsmithApplicationController {
             openSettingsWindow: {
                 appKitSettingsWindowController?.show()
             },
-            openStoreWindow: { allowWhenFeatureDisabled in
-                appKitStoreWindowController?.show(
-                    allowWhenFeatureDisabled: allowWhenFeatureDisabled
-                )
+            openStoreWindow: {
+                appKitStoreWindowController?.show()
             },
             openToolLibraryPopover: {
                 appKitMenuBarController?.show()

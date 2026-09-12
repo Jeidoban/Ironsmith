@@ -144,7 +144,7 @@ struct AppRoutingTests {
             openSettingsWindow: {
                 settingsCapture.open()
             },
-            openStoreWindow: { _ in
+            openStoreWindow: {
                 storeCapture.open()
             },
             openToolLibraryPopover: {
@@ -171,9 +171,10 @@ struct AppRoutingTests {
         let storeCapture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(
             openSettingsWindow: {},
-            openStoreWindow: { _ in
+            openStoreWindow: {
                 storeCapture.open()
-            }
+            },
+            isStoreFeatureEnabled: { true }
         )
         let route = IronsmithStoreRoute.app(
             storeId: "00000000-0000-4000-8000-000000000011",
@@ -193,7 +194,7 @@ struct AppRoutingTests {
         let storeCapture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(
             openSettingsWindow: {},
-            openStoreWindow: { _ in
+            openStoreWindow: {
                 storeCapture.open()
             },
             isStoreFeatureEnabled: { false }
@@ -231,11 +232,11 @@ struct AppRoutingTests {
 
     @MainActor
     @Test
-    func routeStoreOpensDirectAppLinksWhenStoreFeatureIsDisabled() {
+    func routeStoreIgnoresDirectAppLinksWhenStoreFeatureIsDisabled() {
         let storeCapture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(
             openSettingsWindow: {},
-            openStoreWindow: { _ in
+            openStoreWindow: {
                 storeCapture.open()
             },
             isStoreFeatureEnabled: { false }
@@ -247,8 +248,8 @@ struct AppRoutingTests {
 
         store.open(.store(route))
 
-        #expect(storeCapture.openCount == 1)
-        #expect(store.consumeStoreRoute() == route)
+        #expect(storeCapture.openCount == 0)
+        #expect(store.pendingStoreRoute == nil)
     }
 
     @MainActor
@@ -257,7 +258,7 @@ struct AppRoutingTests {
         let storeCapture = SettingsWindowOpenCapture()
         let store = IronsmithRouteStore(
             openSettingsWindow: {},
-            openStoreWindow: { _ in
+            openStoreWindow: {
                 storeCapture.open()
             },
             isStoreFeatureEnabled: { false }

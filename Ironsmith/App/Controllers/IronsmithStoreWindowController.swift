@@ -69,8 +69,8 @@ final class IronsmithStoreWindowController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func show(allowWhenFeatureDisabled: Bool = false) {
-        guard isStoreFeatureEnabled() || allowWhenFeatureDisabled else { return }
+    func show() {
+        guard isStoreFeatureEnabled() else { return }
         loadStoreWindowIfNeeded()
         guard let window = storeWindow else { return }
         if !hasCenteredWindow {

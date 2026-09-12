@@ -20,23 +20,4 @@ struct StoreWindowControllerTests {
         #expect(!controller.hasCreatedWindow)
         #expect(rootViewBuildCount == 0)
     }
-
-    @MainActor
-    @Test
-    func directStoreLinkCanLoadStoreContentWhileFeatureIsDisabled() {
-        var rootViewBuildCount = 0
-        let controller = IronsmithStoreWindowController(
-            rootViewBuilder: {
-                rootViewBuildCount += 1
-                return AnyView(EmptyView())
-            },
-            isStoreFeatureEnabled: { false }
-        )
-
-        controller.show(allowWhenFeatureDisabled: true)
-
-        #expect(controller.hasCreatedWindow)
-        #expect(rootViewBuildCount == 1)
-        controller.close()
-    }
 }

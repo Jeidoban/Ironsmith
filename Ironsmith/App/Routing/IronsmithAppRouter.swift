@@ -77,11 +77,6 @@ enum IronsmithStoreRoute: Equatable {
     case publishedApp(String)
     case app(storeId: String, appId: String)
 
-    var isDirectAppLink: Bool {
-        if case .app = self { return true }
-        return false
-    }
-
     init?(url: URL) {
         guard url.scheme == IronsmithOAuthRedirect.appCallbackScheme else {
             return nil
@@ -121,7 +116,7 @@ enum IronsmithToolLibraryRoute: Equatable {
 final class IronsmithRouteStore {
     private let openAgentOutputWindow: @MainActor @Sendable (UUID) -> Void
     private let openSettingsWindow: @MainActor @Sendable () -> Void
-    private let openStoreWindow: @MainActor @Sendable (_ allowWhenFeatureDisabled: Bool) -> Void
+    private let openStoreWindow: @MainActor @Sendable () -> Void
     private let openToolLibraryPopover: @MainActor @Sendable () -> Void
     private let isStoreFeatureEnabled: @MainActor @Sendable () -> Bool
     private(set) var pendingSettingsRoute: IronsmithSettingsRoute?
@@ -131,7 +126,7 @@ final class IronsmithRouteStore {
     init(
         openAgentOutputWindow: @escaping @MainActor @Sendable (UUID) -> Void = { _ in },
         openSettingsWindow: @escaping @MainActor @Sendable () -> Void,
-        openStoreWindow: @escaping @MainActor @Sendable (_ allowWhenFeatureDisabled: Bool) -> Void = { _ in },
+        openStoreWindow: @escaping @MainActor @Sendable () -> Void = {},
         openToolLibraryPopover: @escaping @MainActor @Sendable () -> Void = {},
         isStoreFeatureEnabled: @escaping @MainActor @Sendable () -> Bool = {
             IronsmithFeatureFlags.isStoreEnabled()
@@ -152,9 +147,9 @@ final class IronsmithRouteStore {
             pendingSettingsRoute = settingsRoute
             openSettingsWindow()
         case .store(let storeRoute):
-            guard isStoreFeatureEnabled() || storeRoute.isDirectAppLink else { return }
+            guard isStoreFeatureEnabled() else { return }
             pendingStoreRoute = storeRoute
-            openStoreWindow(storeRoute.isDirectAppLink)
+            openStoreWindow()
         case .toolLibrary(let toolLibraryRoute):
             if case .publishTool = toolLibraryRoute {
                 guard isStoreFeatureEnabled() else { return }
