@@ -94,11 +94,14 @@ enum IronsmithStoreRoute: Equatable {
         case ["published"]:
             self = .published
         default:
-            if path.count == 3, path[0] == "app" {
-                self = .app(storeId: path[1], appId: path[2])
-            } else {
+            guard path.count == 3,
+                path[0] == "app",
+                UUID(uuidString: path[1]) != nil,
+                UUID(uuidString: path[2]) != nil
+            else {
                 return nil
             }
+            self = .app(storeId: path[1], appId: path[2])
         }
     }
 }

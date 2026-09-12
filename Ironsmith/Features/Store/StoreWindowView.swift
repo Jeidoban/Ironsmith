@@ -15,6 +15,7 @@ struct StoreWindowView: View {
     @State private var store = StoreWindowStore()
     @State private var path: [StoreNavigationDestination] = []
     @State private var sidebarSelection: StoreSidebarSelection? = .discover
+    @State private var navigationPathPolicy = StoreNavigationPathPolicy()
     @State private var categoryRefreshToken = 0
     @State private var searchTask: Task<Void, Never>?
     @State private var isSigningInToIronsmith = false
@@ -113,7 +114,9 @@ struct StoreWindowView: View {
             }
         }
         .onChange(of: sidebarSelection) { _, selection in
-            path = []
+            if navigationPathPolicy.shouldClearPathForSidebarChange() {
+                path = []
+            }
             if selection != .discover {
                 store.searchText = ""
             }
@@ -326,11 +329,30 @@ struct StoreWindowView: View {
                 }
             }
         case .app(let storeID, let appID):
+            navigationPathPolicy.preservePathForNextSidebarChange(
+                sidebarSelection != .discover
+            )
             sidebarSelection = .discover
-            path = []
+            store.searchText = ""
             store.select(storeID: storeID, appID: appID, forceReload: true)
-            path = [.app(StoreAppRoute(storeID: storeID, appID: appID))]
+            path = [.app(StoreAppRoute(appID: appID, storeID: storeID))]
         }
+    }
+}
+
+struct StoreNavigationPathPolicy {
+    private var preservesNextSidebarChange = false
+
+    mutating func preservePathForNextSidebarChange(_ selectionWillChange: Bool) {
+        if selectionWillChange {
+            preservesNextSidebarChange = true
+        }
+    }
+
+    mutating func shouldClearPathForSidebarChange() -> Bool {
+        guard preservesNextSidebarChange else { return true }
+        preservesNextSidebarChange = false
+        return false
     }
 }
 
@@ -346,11 +368,6 @@ private struct StoreAppRoute: Hashable {
     init(app: StoreAppSummary) {
         appID = app.id
         storeID = app.storeId
-    }
-
-    init(storeID: String, appID: String) {
-        self.appID = appID
-        self.storeID = storeID
     }
 
     init(appID: String, storeID: String) {
@@ -464,7 +481,7 @@ private struct StoreDiscoverHomeView: View {
                             .frame(maxWidth: .infinity, alignment: .trailing)
                             .padding(.horizontal, 28)
                     }
-                    ForEach(store.homeSections.filter { $0.category == nil }) { section in
+                    ForEach(store.homeSections) { section in
                         StoreHomeSectionView(
                             section: section,
                             tools: tools,
