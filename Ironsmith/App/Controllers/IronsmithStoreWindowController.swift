@@ -4,7 +4,7 @@ import SwiftUI
 
 @MainActor
 final class IronsmithStoreWindowController: NSWindowController {
-    private static let initialContentSize = NSSize(width: 1000, height: 660)
+    private static let initialContentSize = NSSize(width: 1066, height: 673)
     private static let minimumContentSize = NSSize(width: 600, height: 400)
 
     private let rootViewBuilder: @MainActor () -> AnyView

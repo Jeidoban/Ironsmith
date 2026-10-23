@@ -276,6 +276,8 @@ final class ToolLibraryStorePublisher {
                     StoreVersionPublicationRequest(
                         storeId: publication.storeId,
                         appId: publication.appId,
+                        name: publicationName,
+                        category: publishCategory,
                         license: publishLicense,
                         shortDescription: publishShortDescription.trimmingCharacters(
                             in: .whitespacesAndNewlines),

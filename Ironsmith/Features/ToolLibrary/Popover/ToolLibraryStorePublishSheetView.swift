@@ -23,6 +23,7 @@ struct ToolLibraryStorePublishSheetView: View {
     let onEditDetails: () -> Void
     let onPublish: () -> Void
     @State private var isChoosingScreenshot = false
+    @State private var isConfirmingPublication = false
     @State private var licenseSheetPresenter = StoreLicenseSheetPresenter()
 
     var body: some View {
@@ -71,15 +72,13 @@ struct ToolLibraryStorePublishSheetView: View {
                         .strokeBorder(.quaternary)
                 }
             }
-            if !isUpdatingPublishedListing {
-                field("Category") {
-                    Picker("Category", selection: $publishCategory) {
-                        ForEach(StoreAppCategory.allCases) { category in
-                            Text(category.title).tag(category)
-                        }
+            field("Category") {
+                Picker("Category", selection: $publishCategory) {
+                    ForEach(StoreAppCategory.allCases) { category in
+                        Text(category.title).tag(category)
                     }
-                    .labelsHidden()
                 }
+                .labelsHidden()
             }
 
             field("License") {
@@ -122,17 +121,23 @@ struct ToolLibraryStorePublishSheetView: View {
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel)
-                Button(isUpdatingPublishedListing ? "Update" : "Publish", action: onPublish)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canPublish || isPublishing)
+                Button(publishActionTitle) {
+                    isConfirmingPublication = true
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canPublish || isPublishing)
                 if isPublishing {
                     ProgressView()
                         .controlSize(.small)
+                    Text("Publishing…")
+                        .foregroundStyle(.secondary)
                 }
             }
         }
+        .disabled(isPublishing)
         .padding(18)
         .frame(width: 460)
+        .interactiveDismissDisabled(isPublishing)
         .fileImporter(
             isPresented: $isChoosingScreenshot,
             allowedContentTypes: [.image],
@@ -144,6 +149,15 @@ struct ToolLibraryStorePublishSheetView: View {
         }
         .background {
             StoreLicenseSheetAnchor(presenter: licenseSheetPresenter)
+        }
+        .confirmationDialog(
+            publishConfirmationTitle,
+            isPresented: $isConfirmingPublication
+        ) {
+            Button(publishActionTitle, action: onPublish)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(publishConfirmationMessage)
         }
         .alert(
             "Ironsmith Store",
@@ -255,9 +269,9 @@ struct ToolLibraryStorePublishSheetView: View {
                     }
                 }
             }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -293,6 +307,26 @@ struct ToolLibraryStorePublishSheetView: View {
         listingFieldsAreValid
             && !tool.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !publishNameMatchesOriginal
+    }
+
+    private var publishActionTitle: String {
+        isUpdatingPublishedListing ? "Update" : "Publish"
+    }
+
+    private var publishConfirmationTitle: String {
+        if isUpdatingPublishedListing {
+            return "Publish an update to \(tool.name)?"
+        }
+        return "Publish \(tool.name)?"
+    }
+
+    private var publishConfirmationMessage: String {
+        if isUpdatingPublishedListing {
+            return
+                "This will publish the current app and source code as a new version. Publishing can take several minutes to finish."
+        }
+        return
+            "This will make the app and its source code available in the Ironsmith Store. Publishing can take several minutes to finish."
     }
 
     private var listingFieldsAreValid: Bool {

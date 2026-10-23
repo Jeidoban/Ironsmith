@@ -6,6 +6,7 @@ struct StoreToolImportRequest: Sendable {
     let version: StoreVersionDownload
     var displayName: String? = nil
     var initialGenerationState: ToolGenerationState = .ready
+    var ownerUserID: String? = nil
 }
 
 struct StoreToolImportResult {
@@ -80,6 +81,11 @@ extension StoreToolImportClient {
                 request.initialGenerationState == .generating
                 ? .packaging
                 : .completed
+            let storeMetadata = storeMetadata(
+                app: request.app,
+                version: request.version,
+                ownerUserID: request.ownerUserID
+            )
             let tool = Tool(
                 name: displayName,
                 executableName: executableName,
@@ -92,19 +98,7 @@ extension StoreToolImportClient {
                 packageRootPath: packageRootURL.path,
                 generationState: request.initialGenerationState,
                 generationPhase: generationPhase,
-                storeMetadata: ToolStoreMetadata(
-                    provenance: StoreProvenance(
-                        remixSource: StoreVersionReference(
-                            versionId: request.version.id,
-                            storeId: request.app.storeId,
-                            appId: request.app.id,
-                            appName: request.app.name,
-                            versionNumber: request.version.versionNumber,
-                            sourceSha256: request.version.sourceSha256
-                        ),
-                        inspirations: []
-                    )
-                ),
+                storeMetadata: storeMetadata,
                 createdAt: now,
                 updatedAt: now
             )
@@ -119,6 +113,84 @@ extension StoreToolImportClient {
 
             return StoreToolImportResult(tool: tool)
         }
+    }
+
+    static func storeMetadata(
+        app: StoreAppDetail,
+        version: StoreVersionDownload,
+        ownerUserID: String?
+    ) -> ToolStoreMetadata {
+        guard version.isOwnedByCurrentUser == true, let ownerUserID else {
+            return ToolStoreMetadata(
+                provenance: StoreProvenance(
+                    remixSource: StoreVersionReference(
+                        versionId: version.id,
+                        storeId: app.storeId,
+                        appId: app.id,
+                        appName: app.name,
+                        versionNumber: version.versionNumber,
+                        sourceSha256: version.sourceSha256
+                    ),
+                    inspirations: []
+                )
+            )
+        }
+
+        return ToolStoreMetadata(
+            publication: StorePublication(
+                storeId: app.storeId,
+                appId: app.id,
+                versionId: version.id,
+                versionNumber: version.versionNumber,
+                sourceSha256: version.sourceSha256,
+                ownerUserId: ownerUserID,
+                publishedAt: publicationDate(version.publishedAt)
+            ),
+            provenance: publishedAppProvenance(app: app, version: version)
+        )
+    }
+
+    private static func publishedAppProvenance(
+        app: StoreAppDetail,
+        version: StoreVersionDownload
+    ) -> StoreProvenance? {
+        let remixSource = version.remixedFromVersionId.map { versionID in
+            versionReference(
+                versionID: versionID,
+                link: app.remix?.versionId == versionID ? app.remix : nil
+            )
+        }
+        let inspirations = (version.inspiredByVersionIds ?? []).map { versionID in
+            versionReference(
+                versionID: versionID,
+                link: app.inspirations.first { $0.versionId == versionID }
+            )
+        }
+        return StoreProvenance(
+            remixSource: remixSource,
+            inspirations: inspirations
+        ).normalized
+    }
+
+    private static func versionReference(
+        versionID: String,
+        link: StoreVersionLinkMetadata?
+    ) -> StoreVersionReference {
+        StoreVersionReference(
+            versionId: versionID,
+            storeId: link?.storeId,
+            appId: link?.appId,
+            appName: link?.appName,
+            versionNumber: link?.versionNumber
+        )
+    }
+
+    private static func publicationDate(_ value: String) -> Date {
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractionalFormatter.date(from: value)
+            ?? ISO8601DateFormatter().date(from: value)
+            ?? .now
     }
 
     static func cacheIconIfAvailable(

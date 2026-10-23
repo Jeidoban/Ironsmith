@@ -4,6 +4,15 @@ import Foundation
 nonisolated enum IronsmithStoreConstants {
     static let communityStoreId = "00000000-0000-4000-8000-000000000011"
     static let appListPageSize = 30
+    static let searchResultLimit = 50
+    static let websiteBaseURL = URL(string: "https://ironsmith.app")!
+
+    static func appWebsiteURL(appID: String) -> URL {
+        websiteBaseURL
+            .appendingPathComponent("store", isDirectory: true)
+            .appendingPathComponent("apps", isDirectory: true)
+            .appendingPathComponent(appID, isDirectory: false)
+    }
 
     static var runtimeVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
@@ -24,6 +33,26 @@ nonisolated enum StoreAppStatus: String, Codable, Equatable, Sendable {
     case unlisted
 }
 
+nonisolated enum StoreAppReportReason: String, Codable, CaseIterable, Identifiable, Sendable {
+    case securityPrivacy = "security_privacy"
+    case harmfulContent = "harmful_content"
+    case spamMisleading = "spam_misleading"
+    case copyright
+    case other
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .securityPrivacy: "Security or privacy issue"
+        case .harmfulContent: "Harmful content"
+        case .spamMisleading: "Spam or misleading"
+        case .copyright: "Copyright concern"
+        case .other: "Other"
+        }
+    }
+}
+
 nonisolated enum StoreAssetKind: String, Codable, Equatable, Sendable {
     case icon
     case iconMaster
@@ -33,6 +62,7 @@ nonisolated enum StoreAssetKind: String, Codable, Equatable, Sendable {
 nonisolated enum StoreAppListSort: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
     case recent
     case trending
+    case mostLiked
 
     var id: Self { self }
 
@@ -40,6 +70,7 @@ nonisolated enum StoreAppListSort: String, Codable, CaseIterable, Hashable, Iden
         switch self {
         case .recent: "Recent"
         case .trending: "Trending"
+        case .mostLiked: "Most Liked"
         }
     }
 }
@@ -129,6 +160,7 @@ nonisolated struct StoreVersionDownload: Decodable, Equatable, Sendable {
     let id: String
     let storeId: String
     let storeVisibility: String
+    var isOwnedByCurrentUser: Bool? = nil
     let appId: String
     let versionNumber: Int
     let sourceSha256: String
@@ -196,6 +228,8 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
     let publishedAt: String
     let updatedAt: String
     let icon: StoreAsset?
+    var downloadCount: Int
+    var likeCount: Int
 
     init(
         id: String,
@@ -209,7 +243,9 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
         latestVersionNumber: Int,
         publishedAt: String,
         updatedAt: String,
-        icon: StoreAsset?
+        icon: StoreAsset?,
+        downloadCount: Int = 0,
+        likeCount: Int = 0
     ) {
         self.id = id
         self.storeId = storeId
@@ -223,6 +259,8 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
         self.publishedAt = publishedAt
         self.updatedAt = updatedAt
         self.icon = icon
+        self.downloadCount = downloadCount
+        self.likeCount = likeCount
     }
 
     init(detail: StoreAppDetail) {
@@ -238,7 +276,9 @@ nonisolated struct StoreAppSummary: Decodable, Identifiable, Equatable, Sendable
             latestVersionNumber: detail.currentVersion.versionNumber,
             publishedAt: detail.publishedAt,
             updatedAt: detail.updatedAt,
-            icon: detail.icon
+            icon: detail.icon,
+            downloadCount: detail.downloadCount,
+            likeCount: detail.likeCount
         )
     }
 
@@ -265,6 +305,9 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
     let versions: [StoreVersionMetadata]
     let remix: StoreVersionLinkMetadata?
     let inspirations: [StoreVersionLinkMetadata]
+    var downloadCount: Int = 0
+    var likeCount: Int = 0
+    var isLikedByCurrentUser: Bool = false
 
     var iconAsset: StoreAsset? {
         icon
@@ -276,6 +319,12 @@ nonisolated struct StoreAppDetail: Decodable, Identifiable, Equatable, Sendable 
         }
         return "\(authorDisplayName) · @\(authorHandle)"
     }
+}
+
+nonisolated struct StoreAppEngagement: Decodable, Equatable, Sendable {
+    let downloadCount: Int
+    let likeCount: Int
+    let isLikedByCurrentUser: Bool
 }
 
 nonisolated struct StoreAppPage: Equatable, Sendable {
@@ -310,6 +359,8 @@ nonisolated struct StorePublicationRequest: Sendable {
 nonisolated struct StoreVersionPublicationRequest: Sendable {
     let storeId: String
     let appId: String
+    let name: String
+    let category: StoreAppCategory
     let license: StoreLicenseIdentifier
     let shortDescription: String
     let description: String
@@ -406,11 +457,25 @@ nonisolated struct StoreListingUpdateRequest: Encodable, Sendable {
     var status: StoreAppStatus?
 }
 
+nonisolated struct StoreAppReportRequest: Equatable, Sendable {
+    let storeId: String
+    let appId: String
+    let versionId: String
+    let reason: StoreAppReportReason
+    let details: String
+}
+
+nonisolated struct StoreAppReportReceipt: Decodable, Equatable, Sendable {
+    let id: String
+    let createdAt: String
+}
+
 nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
     case notConfigured
     case missingSession
     case invalidResponse
     case reviewRejected(reasons: [String])
+    case quotaExceeded(message: String, resetAt: Date?)
     case requestFailed(statusCode: Int, message: String)
     case sourceHashMismatch(expected: String, actual: String)
     case unsupportedLicense(String)
@@ -427,6 +492,14 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
         case .reviewRejected(let reasons):
             let explanation = reasons.map { "• \($0)" }.joined(separator: "\n")
             return "This app was not approved for the Ironsmith Store:\n\n\(explanation)"
+        case .quotaExceeded(let message, let resetAt):
+            guard let resetAt else { return message }
+            let localReset = DateFormatter.localizedString(
+                from: resetAt,
+                dateStyle: .medium,
+                timeStyle: .short
+            )
+            return "\(message) You can try again when this limit resets on \(localReset)."
         case .requestFailed(let statusCode, let message):
             return "The Ironsmith Store returned HTTP \(statusCode): \(message)"
         case .sourceHashMismatch:
@@ -442,7 +515,7 @@ nonisolated enum IronsmithStoreClientError: LocalizedError, Equatable {
 }
 
 nonisolated struct IronsmithStoreClient {
-    var listStores: @Sendable () async throws -> [AppStoreDescriptor]
+    var fetchStore: @Sendable (_ storeId: String) async throws -> AppStoreDescriptor
     var listHomeSections: @Sendable (_ storeId: String) async throws -> [StoreHomeSection]
     var listApps:
         @Sendable (
@@ -455,6 +528,9 @@ nonisolated struct IronsmithStoreClient {
             _ creatorHandle: String?
         ) async throws
             -> StoreAppPage
+    var searchAppsByFeature:
+        @Sendable (_ storeId: String, _ search: String) async throws
+            -> [StoreAppSummary]
     var fetchApp: @Sendable (_ storeId: String, _ appId: String) async throws -> StoreAppDetail
     var fetchVersion:
         @Sendable (_ storeId: String, _ appId: String, _ versionNumber: Int) async throws
@@ -470,6 +546,11 @@ nonisolated struct IronsmithStoreClient {
             async throws
             -> StoreAppDetail
     var deleteApp: @Sendable (_ storeId: String, _ appId: String) async throws -> Void
+    var reportApp: @Sendable (_ request: StoreAppReportRequest) async throws
+        -> StoreAppReportReceipt
+    var setAppLiked:
+        @Sendable (_ storeId: String, _ appId: String, _ liked: Bool) async throws
+            -> StoreAppEngagement
     var prepareGenerationContext:
         @Sendable (_ request: StoreGenerationContextRequest) async throws
             -> StoreGenerationContextPlan
@@ -485,19 +566,33 @@ extension IronsmithStoreClient {
         guard let configuration = IronsmithBackendConfiguration.live else {
             return .unconfigured
         }
-        let api = StoreHTTPClient(configuration: configuration, accountClient: accountClient)
+        return configured(configuration: configuration, accountClient: accountClient)
+    }
+
+    nonisolated static func configured(
+        configuration: IronsmithBackendConfiguration,
+        accountClient: IronsmithAccountClient,
+        session: URLSession = .shared,
+        publicationSession: URLSession? = nil
+    ) -> Self {
+        let api = StoreHTTPClient(
+            configuration: configuration,
+            accountClient: accountClient,
+            session: session
+        )
         let publicationSessionConfiguration = URLSessionConfiguration.default
         publicationSessionConfiguration.timeoutIntervalForRequest = 7 * 60
         publicationSessionConfiguration.timeoutIntervalForResource = 7 * 60
         let publicationAPI = StoreHTTPClient(
             configuration: configuration,
             accountClient: accountClient,
-            session: URLSession(configuration: publicationSessionConfiguration)
+            session: publicationSession
+                ?? URLSession(configuration: publicationSessionConfiguration)
         )
         return Self(
-            listStores: {
-                let response: StoreDataEnvelope<[AppStoreDescriptor]> = try await api.request(
-                    "api/v1/stores",
+            fetchStore: { storeId in
+                let response: StoreDataEnvelope<AppStoreDescriptor> = try await api.request(
+                    "api/v1/stores/\(storeId)",
                     method: "GET",
                     authentication: .optional
                 )
@@ -538,11 +633,29 @@ extension IronsmithStoreClient {
                 )
                 return StoreAppPage(apps: response.data, hasMore: response.hasMore)
             },
+            searchAppsByFeature: { storeId, search in
+                let response: StorePageEnvelope<StoreAppSummary> = try await api.request(
+                    "api/v1/stores/\(storeId)/apps",
+                    method: "GET",
+                    queryItems: [
+                        URLQueryItem(name: "scope", value: StoreAppListScope.discover.rawValue),
+                        URLQueryItem(name: "searchMode", value: "hybrid"),
+                        URLQueryItem(name: "q", value: search),
+                        URLQueryItem(name: "offset", value: "0"),
+                        URLQueryItem(
+                            name: "limit",
+                            value: String(IronsmithStoreConstants.searchResultLimit)
+                        ),
+                    ],
+                    authentication: .ifAvailable
+                )
+                return response.data
+            },
             fetchApp: { storeId, appId in
                 let response: StoreDataEnvelope<StoreAppDetail> = try await api.request(
                     "api/v1/stores/\(storeId)/apps/\(appId)",
                     method: "GET",
-                    authentication: .optional
+                    authentication: .ifAvailable
                 )
                 return response.data
             },
@@ -613,6 +726,8 @@ extension IronsmithStoreClient {
                     throw IronsmithStoreClientError.invalidResponse
                 }
                 let metadata = StoreVersionMetadataPayload(
+                    name: request.name,
+                    category: request.category,
                     license: request.license,
                     runtimeVersion: IronsmithStoreConstants.runtimeVersion,
                     generationSettings: StoreGenerationSettingsDTO(
@@ -674,6 +789,30 @@ extension IronsmithStoreClient {
                     authentication: .required
                 )
             },
+            reportApp: { request in
+                let response: StoreDataEnvelope<StoreAppReportReceipt> = try await api.request(
+                    "api/v1/stores/\(request.storeId)/apps/\(request.appId)/reports",
+                    method: "POST",
+                    body: try StoreJSON.encoder.encode(
+                        StoreAppReportPayload(
+                            versionId: request.versionId,
+                            reason: request.reason,
+                            details: request.details
+                        )
+                    ),
+                    contentType: "application/json",
+                    authentication: .required
+                )
+                return response.data
+            },
+            setAppLiked: { storeId, appId, liked in
+                let response: StoreDataEnvelope<StoreAppEngagement> = try await api.request(
+                    "api/v1/stores/\(storeId)/apps/\(appId)/like",
+                    method: liked ? "PUT" : "DELETE",
+                    authentication: .required
+                )
+                return response.data
+            },
             prepareGenerationContext: { request in
                 let response: StoreDataEnvelope<StoreGenerationContextPlan> = try await api.request(
                     "api/v1/stores/generation-context",
@@ -689,9 +828,10 @@ extension IronsmithStoreClient {
 
     nonisolated static var unconfigured: Self {
         Self(
-            listStores: { throw IronsmithStoreClientError.notConfigured },
+            fetchStore: { _ in throw IronsmithStoreClientError.notConfigured },
             listHomeSections: { _ in throw IronsmithStoreClientError.notConfigured },
             listApps: { _, _, _, _, _, _, _ in throw IronsmithStoreClientError.notConfigured },
+            searchAppsByFeature: { _, _ in throw IronsmithStoreClientError.notConfigured },
             fetchApp: { _, _ in throw IronsmithStoreClientError.notConfigured },
             fetchVersion: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
             fetchSource: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
@@ -699,6 +839,8 @@ extension IronsmithStoreClient {
             publishVersion: { _ in throw IronsmithStoreClientError.notConfigured },
             patchListing: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
             deleteApp: { _, _ in throw IronsmithStoreClientError.notConfigured },
+            reportApp: { _ in throw IronsmithStoreClientError.notConfigured },
+            setAppLiked: { _, _, _ in throw IronsmithStoreClientError.notConfigured },
             prepareGenerationContext: { _ in throw IronsmithStoreClientError.notConfigured }
         )
     }
@@ -750,6 +892,16 @@ extension IronsmithStoreClient {
                     : reasons
             )
         }
+        if statusCode == 429,
+            let backendError,
+            backendError.code == "store_app_limit_exceeded"
+                || backendError.code.hasSuffix("_quota_exceeded")
+        {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let resetAt = backendError.resetAt.flatMap(formatter.date(from:))
+            return .quotaExceeded(message: backendError.message, resetAt: resetAt)
+        }
         return .requestFailed(
             statusCode: statusCode,
             message: backendError?.message
@@ -760,6 +912,7 @@ extension IronsmithStoreClient {
 
 nonisolated private enum StoreAuthentication {
     case optional
+    case ifAvailable
     case required
 }
 
@@ -832,6 +985,10 @@ nonisolated private struct StoreHTTPClient {
         switch authentication {
         case .optional:
             token = nil
+        case .ifAvailable:
+            token = accountClient.currentSession() == nil
+                ? nil
+                : try? await accountClient.validAccessToken()
         case .required:
             token = try await accountClient.validAccessToken()
             guard token?.isEmpty == false else {
@@ -867,6 +1024,7 @@ nonisolated private struct StoreBackendErrorEnvelope: Decodable {
 nonisolated private struct StoreBackendError: Decodable {
     let code: String
     let message: String
+    let resetAt: String?
     let findings: [StoreBackendReviewFinding]?
 }
 
@@ -879,6 +1037,12 @@ nonisolated private struct StoreBackendReviewFinding: Decodable {
 
 nonisolated private struct StoreDeletionResponse: Decodable {
     let deleted: Bool
+}
+
+nonisolated private struct StoreAppReportPayload: Encodable {
+    let versionId: String
+    let reason: StoreAppReportReason
+    let details: String
 }
 
 nonisolated private struct StorePublicationMetadataPayload: Encodable {
@@ -894,6 +1058,8 @@ nonisolated private struct StorePublicationMetadataPayload: Encodable {
 }
 
 nonisolated private struct StoreVersionMetadataPayload: Encodable {
+    let name: String
+    let category: StoreAppCategory
     let license: StoreLicenseIdentifier
     let runtimeVersion: String
     let generationSettings: StoreGenerationSettingsDTO

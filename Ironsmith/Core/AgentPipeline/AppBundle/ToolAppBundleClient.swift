@@ -1,5 +1,22 @@
 import Foundation
 
+enum ToolAppBundleRenameError: LocalizedError {
+    case appBundleAlreadyExists(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .appBundleAlreadyExists(let name):
+            return "Could not rename this app because \(name) already exists."
+        }
+    }
+}
+
+struct ToolAppBundleRenameBackup {
+    let oldURL: URL
+    let newURL: URL
+    let backupURL: URL
+}
+
 struct ToolAppBundleClient {
     var buildInternalApp: (_ request: ToolAppBundleRequest) async throws -> URL
     var exportApp: (_ request: ToolAppBundleRequest, _ applicationsDirectoryURL: URL) async throws -> URL
@@ -28,6 +45,90 @@ struct ToolAppBundleClient {
     }
 
     static let applicationsDirectoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+
+    static func moveAppBundleForRename(
+        _ tool: Tool,
+        to newName: String,
+        fileManager: FileManager = .default
+    ) throws -> (oldURL: URL, newURL: URL)? {
+        let oldURL = tool.appBundleURL
+        let newURL = tool.packageRootURL.appendingPathComponent(
+            "\(ToolNameSanitizer.appBundleName(from: newName)).app",
+            isDirectory: true
+        )
+
+        guard oldURL.path != newURL.path,
+            fileManager.fileExists(atPath: oldURL.path)
+        else {
+            return nil
+        }
+
+        guard !fileManager.fileExists(atPath: newURL.path) else {
+            throw ToolAppBundleRenameError.appBundleAlreadyExists(newURL.lastPathComponent)
+        }
+
+        try fileManager.moveItem(at: oldURL, to: newURL)
+        return (oldURL, newURL)
+    }
+
+    static func stageAppBundleForRename(
+        _ tool: Tool,
+        to newName: String,
+        fileManager: FileManager = .default
+    ) throws -> ToolAppBundleRenameBackup? {
+        let oldURL = tool.appBundleURL
+        let newURL = tool.packageRootURL.appendingPathComponent(
+            "\(ToolNameSanitizer.appBundleName(from: newName)).app",
+            isDirectory: true
+        )
+
+        guard oldURL.path != newURL.path,
+            fileManager.fileExists(atPath: oldURL.path)
+        else {
+            return nil
+        }
+        guard !fileManager.fileExists(atPath: newURL.path) else {
+            throw ToolAppBundleRenameError.appBundleAlreadyExists(newURL.lastPathComponent)
+        }
+
+        let backupURL = tool.packageRootURL.appendingPathComponent(
+            ".ironsmith-app-rename-\(UUID().uuidString).backup",
+            isDirectory: true
+        )
+        try fileManager.copyItem(at: oldURL, to: backupURL)
+        do {
+            try fileManager.moveItem(at: oldURL, to: newURL)
+        } catch {
+            try? fileManager.removeItem(at: backupURL)
+            throw error
+        }
+        return ToolAppBundleRenameBackup(
+            oldURL: oldURL,
+            newURL: newURL,
+            backupURL: backupURL
+        )
+    }
+
+    static func completeStagedAppBundleRename(
+        _ backup: ToolAppBundleRenameBackup,
+        fileManager: FileManager = .default
+    ) {
+        try? fileManager.removeItem(at: backup.backupURL)
+    }
+
+    static func restoreStagedAppBundleRename(
+        _ backup: ToolAppBundleRenameBackup,
+        fileManager: FileManager = .default
+    ) {
+        guard fileManager.fileExists(atPath: backup.backupURL.path) else { return }
+        if fileManager.fileExists(atPath: backup.newURL.path) {
+            try? fileManager.removeItem(at: backup.newURL)
+        }
+        if fileManager.fileExists(atPath: backup.oldURL.path) {
+            try? fileManager.removeItem(at: backup.oldURL)
+        }
+        try? fileManager.moveItem(at: backup.backupURL, to: backup.oldURL)
+    }
 
     static func noOp() -> ToolAppBundleClient {
         ToolAppBundleClient(

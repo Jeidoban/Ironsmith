@@ -344,6 +344,8 @@ struct CustomCodingAgentTests {
         #expect(prompt.contains(attachmentURL.path))
         #expect(prompt.contains("strictly as read-only context"))
         #expect(prompt.contains("Create or edit only Sources/Example/ContentView.swift"))
+        #expect(prompt.contains(ToolGenerationPrompts.completeFeatureRequirement))
+        #expect(prompt.contains(ToolGenerationPrompts.backendServiceGuidance))
         #expect(prompt.contains("existing hosted API or managed service"))
         #expect(prompt.contains("prefer Supabase"))
         #expect(prompt.contains("https://database.new"))

@@ -90,13 +90,16 @@ struct SwiftPackageProcessClient: Sendable {
 
     nonisolated static let live = SwiftPackageProcessClient(
         build: { packageRootURL in
+            // TODO(CLTSwiftUIMacrosWorkaround): Remove this override with the CLT SDK fallback.
+            let environmentOverrides = await GeneratedAppSDKSelection.environmentOverrides()
             let result = try await runProcess(
                 executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
                 arguments: [
                     "swift", "build", "--no-color-diagnostics", "--package-path",
                     packageRootURL.path,
                 ],
-                currentDirectoryURL: packageRootURL
+                currentDirectoryURL: packageRootURL,
+                environmentOverrides: environmentOverrides
             )
             return SwiftPackageBuildResult(
                 succeeded: result.terminationStatus == 0,
@@ -106,13 +109,16 @@ struct SwiftPackageProcessClient: Sendable {
             )
         },
         buildRelease: { packageRootURL in
+            // TODO(CLTSwiftUIMacrosWorkaround): Remove this override with the CLT SDK fallback.
+            let environmentOverrides = await GeneratedAppSDKSelection.environmentOverrides()
             let result = try await runProcess(
                 executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
                 arguments: [
                     "swift", "build", "--no-color-diagnostics", "-c", "release",
                     "--package-path", packageRootURL.path,
                 ],
-                currentDirectoryURL: packageRootURL
+                currentDirectoryURL: packageRootURL,
+                environmentOverrides: environmentOverrides
             )
             return SwiftPackageBuildResult(
                 succeeded: result.terminationStatus == 0,
@@ -122,13 +128,16 @@ struct SwiftPackageProcessClient: Sendable {
             )
         },
         showBinPath: { packageRootURL in
+            // TODO(CLTSwiftUIMacrosWorkaround): Remove this override with the CLT SDK fallback.
+            let environmentOverrides = await GeneratedAppSDKSelection.environmentOverrides()
             let result = try await runProcess(
                 executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
                 arguments: [
                     "swift", "build", "--no-color-diagnostics", "--show-bin-path",
                     "--package-path", packageRootURL.path,
                 ],
-                currentDirectoryURL: packageRootURL
+                currentDirectoryURL: packageRootURL,
+                environmentOverrides: environmentOverrides
             )
 
             guard result.terminationStatus == 0 else {
@@ -148,13 +157,16 @@ struct SwiftPackageProcessClient: Sendable {
             return URL(fileURLWithPath: path, isDirectory: true)
         },
         showReleaseBinPath: { packageRootURL in
+            // TODO(CLTSwiftUIMacrosWorkaround): Remove this override with the CLT SDK fallback.
+            let environmentOverrides = await GeneratedAppSDKSelection.environmentOverrides()
             let result = try await runProcess(
                 executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
                 arguments: [
                     "swift", "build", "--no-color-diagnostics", "-c", "release",
                     "--show-bin-path", "--package-path", packageRootURL.path,
                 ],
-                currentDirectoryURL: packageRootURL
+                currentDirectoryURL: packageRootURL,
+                environmentOverrides: environmentOverrides
             )
 
             guard result.terminationStatus == 0 else {
@@ -438,7 +450,9 @@ struct SwiftPackageProcessClient: Sendable {
     private static func runProcess(
         executableURL: URL,
         arguments: [String],
-        currentDirectoryURL: URL?
+        currentDirectoryURL: URL?,
+        // TODO(CLTSwiftUIMacrosWorkaround): Remove this parameter with the CLT SDK fallback.
+        environmentOverrides: [String: String] = [:]
     ) async throws -> ProcessRunResult {
         let processReference = ProcessReference()
         return try await withTaskCancellationHandler {
@@ -450,6 +464,12 @@ struct SwiftPackageProcessClient: Sendable {
                 process.executableURL = executableURL
                 process.arguments = arguments
                 process.currentDirectoryURL = currentDirectoryURL
+                if !environmentOverrides.isEmpty {
+                    process.environment = ProcessInfo.processInfo.environment.merging(
+                        environmentOverrides,
+                        uniquingKeysWith: { _, override in override }
+                    )
+                }
                 process.standardOutput = outputPipe
                 process.standardError = errorPipe
 

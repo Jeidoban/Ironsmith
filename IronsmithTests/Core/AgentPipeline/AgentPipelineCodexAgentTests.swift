@@ -91,6 +91,8 @@ extension AgentPipelineTests {
         #expect(prompt.contains("for any temporary scratch files you deliberately create."))
         #expect(prompt.contains("Do not write deliberate scratch files directly in the top-level system temp directory."))
         #expect(prompt.contains("Ironsmith will clean up the temporary workspace after Codex exits."))
+        #expect(prompt.contains(ToolGenerationPrompts.completeFeatureRequirement))
+        #expect(prompt.contains(ToolGenerationPrompts.backendServiceGuidance))
         #expect(prompt.contains("Internet searches are encouraged"))
         #expect(prompt.contains("existing hosted API or managed service"))
         #expect(prompt.contains("prefer Supabase"))

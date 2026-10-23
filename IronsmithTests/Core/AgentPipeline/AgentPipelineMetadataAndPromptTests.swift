@@ -348,13 +348,18 @@ extension AgentPipelineTests {
             #expect(instructions.contains("For window apps, describe a normal native macOS window app layout"))
             #expect(instructions.contains("Prefer one polished primary workflow over many secondary workflows"))
             #expect(instructions.contains("native Apple framework such as Vision for OCR, PDFKit for PDFs, or AVFoundation"))
-            #expect(instructions.contains("self-contained client-side Mac app"))
+            #expect(instructions.contains("self-contained Mac app"))
+            #expect(instructions.contains("local in-process server"))
             #expect(instructions.contains("May include local persistence, local files, import/export"))
             #expect(instructions.contains("existing hosted API or managed service"))
             #expect(instructions.contains("prefer Supabase"))
             #expect(instructions.contains("https://database.new"))
             #expect(!instructions.contains("app-owned account system"))
-            #expect(!instructions.contains("Must not mention or imply a separate backend service"))
+            #expect(
+                !instructions.contains(
+                    "Must not mention or imply a separately deployed backend service"
+                )
+            )
             #expect(instructions.contains("Should emphasize a native macOS feel"))
             #expect(instructions.contains("games, drawing canvases, and highly visual toys"))
             #expect(!instructions.contains("Choose at most 3 core user-facing features."))

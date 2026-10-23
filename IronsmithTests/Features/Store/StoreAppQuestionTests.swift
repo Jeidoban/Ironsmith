@@ -25,7 +25,7 @@ struct StoreAppQuestionTests {
             }
         }
         """
-        let app = Self.app(sourceCode: source)
+        let app = Self.app(sourceCode: source, downloadCount: 49, likeCount: 1_249)
         let sourceStore = StoreAppSourceStore(
             exportClient: StoreSourceCodeExportClient(openSource: { _ in })
         )
@@ -47,6 +47,8 @@ struct StoreAppQuestionTests {
         let prompt = try #require(await promptCapture.prompts.first)
         #expect(prompt.contains(source))
         #expect(prompt.contains("What does this app show?"))
+        #expect(prompt.contains("Downloads: <50"))
+        #expect(prompt.contains("Likes: 1.2K"))
     }
 
     @MainActor
@@ -173,7 +175,9 @@ struct StoreAppQuestionTests {
     private static func app(
         sourceCode: String,
         legalAttributions: [StoreLegalAttribution] = [],
-        remix: StoreVersionLinkMetadata? = nil
+        remix: StoreVersionLinkMetadata? = nil,
+        downloadCount: Int = 0,
+        likeCount: Int = 0
     ) -> StoreAppDetail {
         let appID = "00000000-0000-4000-8000-000000000101"
         let version = StoreVersionMetadata(
@@ -208,7 +212,9 @@ struct StoreAppQuestionTests {
             currentVersion: version,
             versions: [version],
             remix: remix,
-            inspirations: []
+            inspirations: [],
+            downloadCount: downloadCount,
+            likeCount: likeCount
         )
     }
 

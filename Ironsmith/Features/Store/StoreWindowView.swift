@@ -19,7 +19,13 @@ struct StoreWindowView: View {
     @State private var categoryRefreshToken = 0
     @State private var searchTask: Task<Void, Never>?
     @State private var isSigningInToIronsmith = false
+    @State private var isFeatureSearchSignInRequired = false
     @State private var appPendingDeletion: StoreAppSummary?
+    @State private var reportSheetTarget: StoreAppReportTarget?
+    @State private var pendingReportAfterSignIn: StoreAppReportTarget?
+    @State private var isReportSignInRequired = false
+    @State private var pendingLikeAfterSignIn: StoreAppDetail?
+    @State private var isLikeSignInRequired = false
 
     var body: some View {
         @Bindable var store = store
@@ -41,7 +47,9 @@ struct StoreWindowView: View {
                             inferenceStore: inferenceStore,
                             onOpen: openApp,
                             onSeeAll: openSection,
-                            onGet: install
+                            onGet: install,
+                            onSearchByFeature: searchByFeature,
+                            onShowKeywordResults: showKeywordResults
                         )
                     case .category(let category):
                         StoreSectionAppsView(
@@ -79,7 +87,9 @@ struct StoreWindowView: View {
                             routeStore: routeStore,
                             inferenceStore: inferenceStore,
                             onOpenCreator: openCreator,
-                            onOpenStoreLink: openStoreLink
+                            onOpenStoreLink: openStoreLink,
+                            onReport: requestReport,
+                            onToggleLike: requestLike
                         )
                     case .section(let section):
                         StoreSectionAppsView(
@@ -99,8 +109,7 @@ struct StoreWindowView: View {
         .frame(minWidth: 600, minHeight: 400)
         .onChange(of: store.searchText) { _, _ in
             searchTask?.cancel()
-            store.searchResultsNextOffset = 0
-            store.searchResultsHasMore = false
+            store.prepareForKeywordSearchEditing()
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
@@ -120,7 +129,9 @@ struct StoreWindowView: View {
             if selection != .discover {
                 store.searchText = ""
             }
-            if selection == .discover {
+            if selection == .discover,
+                store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
                 Task { await store.refreshHome(showLoadingIndicator: false) }
             } else if selection == .published {
                 Task { await store.refreshPublished() }
@@ -157,6 +168,17 @@ struct StoreWindowView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(store.errorMessage ?? "")
+        }
+        .alert(
+            "Sign in to Search by Feature or Workflow",
+            isPresented: $isFeatureSearchSignInRequired
+        ) {
+            Button("Cancel", role: .cancel) {}
+            Button("Sign In") {
+                signInToIronsmith(resumeDownload: nil, resumeFeatureSearch: true)
+            }
+        } message: {
+            Text("Sign in with Ironsmith to search for apps by what they do.")
         }
         .alert(
             "Sign in to Download",
@@ -196,17 +218,37 @@ struct StoreWindowView: View {
         } message: {
             Text(inferenceStore.presentedErrorMessage ?? "")
         }
-        .confirmationDialog(
-            appPendingDeletion.map { "Delete \($0.name) from Store?" }
-                ?? "Delete from Store?",
-            isPresented: Binding(
-                get: { appPendingDeletion != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        appPendingDeletion = nil
-                    }
+        .alert(
+            "Sign in to Like",
+            isPresented: $isLikeSignInRequired
+        ) {
+            Button("Cancel", role: .cancel) {
+                pendingLikeAfterSignIn = nil
+            }
+            Button("Sign In") {
+                signInToIronsmith(
+                    resumeDownload: nil,
+                    resumeLike: pendingLikeAfterSignIn
+                )
+            }
+        } message: {
+            Text("Sign in with Ironsmith to like this app.")
+        }
+        .modifier(
+            StoreReportPresentationModifier(
+                reportSheetTarget: $reportSheetTarget,
+                pendingReportAfterSignIn: $pendingReportAfterSignIn,
+                isReportSignInRequired: $isReportSignInRequired,
+                isSigningInToIronsmith: isSigningInToIronsmith,
+                store: store,
+                onSignIn: { target in
+                    signInToIronsmith(resumeDownload: nil, resumeReport: target)
                 }
             )
+        )
+        .confirmationDialog(
+            deletionConfirmationTitle,
+            isPresented: deletionConfirmationPresented
         ) {
             Button("Delete from Store", role: .destructive) {
                 guard let app = appPendingDeletion else { return }
@@ -228,6 +270,22 @@ struct StoreWindowView: View {
     private func openApp(_ app: StoreAppSummary) {
         store.select(app)
         path.append(.app(StoreAppRoute(app: app)))
+    }
+
+    private var deletionConfirmationTitle: String {
+        appPendingDeletion.map { "Delete \($0.name) from Store?" }
+            ?? "Delete from Store?"
+    }
+
+    private var deletionConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { appPendingDeletion != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appPendingDeletion = nil
+                }
+            }
+        )
     }
 
     private func openSection(_ section: StoreHomeSection) {
@@ -259,8 +317,14 @@ struct StoreWindowView: View {
         }
     }
 
-    private func signInToIronsmith(resumeDownload request: StorePendingDownloadRequest?) {
+    private func signInToIronsmith(
+        resumeDownload request: StorePendingDownloadRequest?,
+        resumeFeatureSearch: Bool = false,
+        resumeReport: StoreAppReportTarget? = nil,
+        resumeLike: StoreAppDetail? = nil
+    ) {
         guard !isSigningInToIronsmith else { return }
+        pendingReportAfterSignIn = nil
         isSigningInToIronsmith = true
         Task {
             let didSignIn = await inferenceStore.signInToIronsmithWithAppleOAuth { @MainActor url in
@@ -270,10 +334,21 @@ struct StoreWindowView: View {
                 )
             }
             isSigningInToIronsmith = false
-            guard didSignIn,
-                inferenceStore.ironsmithSession != nil,
-                let request
-            else { return }
+            guard didSignIn, inferenceStore.ironsmithSession != nil else { return }
+            if resumeFeatureSearch {
+                await store.refreshFeatureSearch()
+                return
+            }
+            if let resumeReport {
+                reportSheetTarget = resumeReport
+                return
+            }
+            if let resumeLike {
+                pendingLikeAfterSignIn = nil
+                await store.toggleLike(resumeLike)
+                return
+            }
+            guard let request else { return }
             await store.resumeDownload(
                 request,
                 tools: tools,
@@ -296,13 +371,48 @@ struct StoreWindowView: View {
     private func refreshStoreContent() async {
         if store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await store.refreshHome(showLoadingIndicator: false)
-        } else {
+        } else if store.searchResultMode == .keyword {
             await store.refreshDiscover(showLoadingIndicator: false)
+        } else {
+            await store.refreshHome(showLoadingIndicator: false)
         }
         if inferenceStore.ironsmithSession != nil {
             await store.refreshPublished(showLoadingIndicator: false)
         }
         categoryRefreshToken += 1
+    }
+
+    private func searchByFeature() {
+        guard inferenceStore.ironsmithSession != nil else {
+            isFeatureSearchSignInRequired = true
+            return
+        }
+        searchTask?.cancel()
+        searchTask = Task { await store.refreshFeatureSearch() }
+    }
+
+    private func showKeywordResults() {
+        searchTask?.cancel()
+        searchTask = Task { await store.refreshDiscover() }
+    }
+
+    private func requestReport(_ app: StoreAppDetail, version: StoreVersionMetadata) {
+        let target = StoreAppReportTarget(app: app, version: version)
+        guard inferenceStore.ironsmithSession != nil else {
+            pendingReportAfterSignIn = target
+            isReportSignInRequired = true
+            return
+        }
+        reportSheetTarget = target
+    }
+
+    private func requestLike(_ app: StoreAppDetail) {
+        guard inferenceStore.ironsmithSession != nil else {
+            pendingLikeAfterSignIn = app
+            isLikeSignInRequired = true
+            return
+        }
+        Task { await store.toggleLike(app) }
     }
 
     @MainActor
@@ -359,6 +469,75 @@ struct StoreNavigationPathPolicy {
 private enum StoreNavigationDestination: Hashable {
     case app(StoreAppRoute)
     case section(StoreSectionRoute)
+}
+
+private struct StoreAppReportTarget: Identifiable {
+    let app: StoreAppDetail
+    let version: StoreVersionMetadata
+
+    var id: String { version.id }
+}
+
+private struct StoreReportPresentationModifier: ViewModifier {
+    @Binding var reportSheetTarget: StoreAppReportTarget?
+    @Binding var pendingReportAfterSignIn: StoreAppReportTarget?
+    @Binding var isReportSignInRequired: Bool
+    let isSigningInToIronsmith: Bool
+    @Bindable var store: StoreWindowStore
+    let onSignIn: (StoreAppReportTarget?) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .alert(
+                "Sign in to Report",
+                isPresented: reportSignInPresented
+            ) {
+                Button("Cancel", role: .cancel) {
+                    pendingReportAfterSignIn = nil
+                }
+                Button("Sign In") {
+                    onSignIn(pendingReportAfterSignIn)
+                }
+            } message: {
+                Text("Sign in with Ironsmith to submit a report about this app.")
+            }
+            .alert(
+                "Report Submitted",
+                isPresented: reportConfirmationPresented
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(store.reportConfirmationMessage ?? "")
+            }
+            .sheet(item: $reportSheetTarget) { target in
+                StoreAppReportSheet(app: target.app, version: target.version) { request in
+                    await store.submitReport(request)
+                }
+            }
+    }
+
+    private var reportSignInPresented: Binding<Bool> {
+        Binding(
+            get: { isReportSignInRequired },
+            set: { isPresented in
+                isReportSignInRequired = isPresented
+                if !isPresented, !isSigningInToIronsmith {
+                    pendingReportAfterSignIn = nil
+                }
+            }
+        )
+    }
+
+    private var reportConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { store.reportConfirmationMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    store.reportConfirmationMessage = nil
+                }
+            }
+        )
+    }
 }
 
 private struct StoreAppRoute: Hashable {
@@ -451,6 +630,8 @@ private struct StoreDiscoverHomeView: View {
     let onOpen: (StoreAppSummary) -> Void
     let onSeeAll: (StoreHomeSection) -> Void
     let onGet: (StoreAppSummary) -> Void
+    let onSearchByFeature: () -> Void
+    let onShowKeywordResults: () -> Void
 
     private var isSearching: Bool {
         !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -465,7 +646,9 @@ private struct StoreDiscoverHomeView: View {
                         tools: tools,
                         inferenceStore: inferenceStore,
                         onOpen: onOpen,
-                        onGet: onGet
+                        onGet: onGet,
+                        onSearchByFeature: onSearchByFeature,
+                        onShowKeywordResults: onShowKeywordResults
                     )
                 } else if store.isLoadingDiscover, store.homeSections.isEmpty {
                     ProgressView()
@@ -509,20 +692,50 @@ private struct StoreSearchResultsView: View {
     let inferenceStore: InferenceStore
     let onOpen: (StoreAppSummary) -> Void
     let onGet: (StoreAppSummary) -> Void
+    let onSearchByFeature: () -> Void
+    let onShowKeywordResults: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Search Results")
+            Text(store.searchResultMode == .feature ? "Feature Search Results" : "Search Results")
                 .font(.largeTitle.weight(.semibold))
                 .padding(.horizontal, 28)
+
+            if store.searchResultMode == .feature {
+                Text("Matches apps that contain features or workflows you describe")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 28)
+            }
+
+            Button(
+                store.searchResultMode == .feature
+                    ? "Back to Keyword Results"
+                    : "Search by Feature or Workflow",
+                action: store.searchResultMode == .feature
+                    ? onShowKeywordResults
+                    : onSearchByFeature
+            )
+            .buttonStyle(.plain)
+            .font(.title3.weight(.medium))
+            .foregroundStyle(.blue)
+            .disabled(store.isLoadingDiscover)
+            .padding(.horizontal, 28)
 
             if store.isLoadingDiscover, store.searchResults.isEmpty {
                 ProgressView()
                     .frame(maxWidth: .infinity)
                     .padding(.top, 80)
             } else if store.searchResults.isEmpty {
-                StoreEmptyStateView(title: "No search results", systemImage: "magnifyingglass")
-                    .frame(minHeight: 360)
+                StoreEmptyStateView(
+                    title: store.searchResultMode == .feature
+                        ? "No feature matches"
+                        : "No search results",
+                    systemImage: store.searchResultMode == .feature
+                        ? "sparkles"
+                        : "magnifyingglass"
+                )
+                .frame(minHeight: 360)
             } else {
                 StoreAppRowsView(
                     apps: store.searchResults,
@@ -538,7 +751,9 @@ private struct StoreSearchResultsView: View {
                 )
                 .padding(.horizontal, 28)
 
-                StorePaginationProgressView(isLoading: store.isLoadingMoreSearchResults)
+                if store.searchResultMode == .keyword {
+                    StorePaginationProgressView(isLoading: store.isLoadingMoreSearchResults)
+                }
             }
         }
     }
@@ -989,6 +1204,8 @@ private struct StoreAppDetailDestinationView: View {
     let inferenceStore: InferenceStore
     let onOpenCreator: (String, String) -> Void
     let onOpenStoreLink: (StoreVersionLinkMetadata) -> Void
+    let onReport: (StoreAppDetail, StoreVersionMetadata) -> Void
+    let onToggleLike: (StoreAppDetail) -> Void
 
     var body: some View {
         StoreAppDetailView(
@@ -1040,7 +1257,10 @@ private struct StoreAppDetailDestinationView: View {
                         inferenceStore: inferenceStore
                     )
                 }
-            }
+            },
+            onReport: onReport,
+            onToggleLike: onToggleLike,
+            isLikeWorking: store.likingAppID == appID
         )
         .navigationTitle(detail?.name ?? "App")
         .onAppear {
