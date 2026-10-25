@@ -118,7 +118,6 @@ final class IronsmithRouteStore {
     private let openSettingsWindow: @MainActor @Sendable () -> Void
     private let openStoreWindow: @MainActor @Sendable () -> Void
     private let openToolLibraryPopover: @MainActor @Sendable () -> Void
-    private let isStoreFeatureEnabled: @MainActor @Sendable () -> Bool
     private(set) var pendingSettingsRoute: IronsmithSettingsRoute?
     private(set) var pendingStoreRoute: IronsmithStoreRoute?
     private(set) var pendingToolLibraryRoute: IronsmithToolLibraryRoute?
@@ -127,16 +126,12 @@ final class IronsmithRouteStore {
         openAgentOutputWindow: @escaping @MainActor @Sendable (UUID) -> Void = { _ in },
         openSettingsWindow: @escaping @MainActor @Sendable () -> Void,
         openStoreWindow: @escaping @MainActor @Sendable () -> Void = {},
-        openToolLibraryPopover: @escaping @MainActor @Sendable () -> Void = {},
-        isStoreFeatureEnabled: @escaping @MainActor @Sendable () -> Bool = {
-            IronsmithFeatureFlags.isStoreEnabled()
-        }
+        openToolLibraryPopover: @escaping @MainActor @Sendable () -> Void = {}
     ) {
         self.openAgentOutputWindow = openAgentOutputWindow
         self.openSettingsWindow = openSettingsWindow
         self.openStoreWindow = openStoreWindow
         self.openToolLibraryPopover = openToolLibraryPopover
-        self.isStoreFeatureEnabled = isStoreFeatureEnabled
     }
 
     func open(_ route: IronsmithAppRoute) {
@@ -147,13 +142,9 @@ final class IronsmithRouteStore {
             pendingSettingsRoute = settingsRoute
             openSettingsWindow()
         case .store(let storeRoute):
-            guard isStoreFeatureEnabled() else { return }
             pendingStoreRoute = storeRoute
             openStoreWindow()
         case .toolLibrary(let toolLibraryRoute):
-            if case .publishTool = toolLibraryRoute {
-                guard isStoreFeatureEnabled() else { return }
-            }
             pendingToolLibraryRoute = toolLibraryRoute
             openToolLibraryPopover()
         }

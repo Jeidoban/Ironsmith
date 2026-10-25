@@ -110,9 +110,6 @@ final class IronsmithApplicationController {
             },
             openToolLibraryPopover: {
                 appKitMenuBarController?.show()
-            },
-            isStoreFeatureEnabled: {
-                IronsmithFeatureFlags.isStoreEnabled()
             }
         )
         let commandLineToolsGate = CommandLineToolsGate()

@@ -3,8 +3,6 @@ import SwiftUI
 struct ManageIronsmithAccountSheetView: View {
     @Environment(InferenceStore.self) private var inferenceStore
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled) private var isStoreFeatureEnabled =
-        false
     let onBuyCredits: () -> Void
 
     @State private var displayName = ""
@@ -21,37 +19,35 @@ struct ManageIronsmithAccountSheetView: View {
 
     var body: some View {
         Form {
-            if isStoreFeatureEnabled {
-                Section("Creator Profile") {
-                    TextField(
-                        "Display Name",
-                        text: $displayName,
-                        prompt: Text("Your public creator name")
-                    )
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 12) {
-                            Text("Handle")
-                            Spacer(minLength: 12)
-                            if existingHandle != nil {
-                                Text("@\(normalizedHandle)")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                TextField(
-                                    "",
-                                    text: handleText,
-                                    prompt: Text("@your_handle")
-                                )
-                                .labelsHidden()
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 220)
-                            }
-                        }
-                        if let handleSupportingText {
-                            Text(handleSupportingText)
-                                .font(.caption)
+            Section("Creator Profile") {
+                TextField(
+                    "Display Name",
+                    text: $displayName,
+                    prompt: Text("Your public creator name")
+                )
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 12) {
+                        Text("Handle")
+                        Spacer(minLength: 12)
+                        if existingHandle != nil {
+                            Text("@\(normalizedHandle)")
                                 .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            TextField(
+                                "",
+                                text: handleText,
+                                prompt: Text("@your_handle")
+                            )
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 220)
                         }
+                    }
+                    if let handleSupportingText {
+                        Text(handleSupportingText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -80,12 +76,10 @@ struct ManageIronsmithAccountSheetView: View {
                 .disabled(isSigningOut || isDeleting)
 
                 Spacer()
-                Button(isStoreFeatureEnabled ? "Cancel" : "Done") { dismiss() }
-                if isStoreFeatureEnabled {
-                    Button(isSaving ? "Saving…" : "Save") { save() }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!canSave || isSaving)
-                }
+                Button("Cancel") { dismiss() }
+                Button(isSaving ? "Saving…" : "Save") { save() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canSave || isSaving)
             }
             .padding(20)
             .background(.bar)
@@ -95,11 +89,9 @@ struct ManageIronsmithAccountSheetView: View {
             await loadThenRefreshProfile()
         }
         .task(id: normalizedHandle) {
-            guard isStoreFeatureEnabled else { return }
             await refreshHandleAvailability()
         }
         .task(id: handle) {
-            guard isStoreFeatureEnabled else { return }
             await refreshHandleRequirementsVisibility()
         }
         .confirmationDialog("Delete Ironsmith Account?", isPresented: $isConfirmingDeletion) {
@@ -253,7 +245,6 @@ struct ManageIronsmithAccountSheetView: View {
     }
 
     private func save() {
-        guard isStoreFeatureEnabled else { return }
         guard canSave else { return }
         if existingHandle == nil {
             isConfirmingHandleClaim = true
@@ -263,7 +254,6 @@ struct ManageIronsmithAccountSheetView: View {
     }
 
     private func saveProfile() {
-        guard isStoreFeatureEnabled else { return }
         isSaving = true
         Task {
             do {

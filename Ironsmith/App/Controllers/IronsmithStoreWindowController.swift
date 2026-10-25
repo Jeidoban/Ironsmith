@@ -8,7 +8,6 @@ final class IronsmithStoreWindowController: NSWindowController {
     private static let minimumContentSize = NSSize(width: 600, height: 400)
 
     private let rootViewBuilder: @MainActor () -> AnyView
-    private let isStoreFeatureEnabled: @MainActor () -> Bool
     private var storeWindow: NSWindow?
     private var hasCenteredWindow = false
 
@@ -29,14 +28,8 @@ final class IronsmithStoreWindowController: NSWindowController {
         }
     }
 
-    init(
-        rootViewBuilder: @escaping @MainActor () -> AnyView,
-        isStoreFeatureEnabled: @escaping @MainActor () -> Bool = {
-            IronsmithFeatureFlags.isStoreEnabled()
-        }
-    ) {
+    init(rootViewBuilder: @escaping @MainActor () -> AnyView) {
         self.rootViewBuilder = rootViewBuilder
-        self.isStoreFeatureEnabled = isStoreFeatureEnabled
         super.init(window: nil)
     }
 
@@ -70,7 +63,6 @@ final class IronsmithStoreWindowController: NSWindowController {
     }
 
     func show() {
-        guard isStoreFeatureEnabled() else { return }
         loadStoreWindowIfNeeded()
         guard let window = storeWindow else { return }
         if !hasCenteredWindow {

@@ -18,8 +18,6 @@
             .rawValue
         @AppStorage(IronsmithPreferenceKeys.debugCommandLineToolsState)
         private var commandLineToolsStateRawValue = CommandLineToolsDebugState.automatic.rawValue
-        @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled)
-        private var storeFeatureEnabled = false
         @AppStorage(IronsmithPreferenceKeys.featureDiagnosticWholeFileRewriteEnabled)
         private var diagnosticWholeFileRewriteEnabled = false
         @State private var iconLabPrompt = ""
@@ -81,9 +79,6 @@
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Feature Flags")
                         .font(.headline)
-
-                    Toggle("Ironsmith Store", isOn: $storeFeatureEnabled)
-                        .toggleStyle(.switch)
 
                     Toggle(
                         "Spark diagnostic whole-file recovery",
