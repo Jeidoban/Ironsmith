@@ -19,8 +19,6 @@ struct ToolLibraryPopoverView: View {
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @Query(sort: \Tool.updatedAt, order: .reverse) private var tools: [Tool]
     @AppStorage(IronsmithPreferenceKeys.showSandboxOverride) private var showSandboxOverride = false
-    @AppStorage(IronsmithPreferenceKeys.featureStoreEnabled) private var isStoreFeatureEnabled =
-        false
     @AppStorage(IronsmithPreferenceKeys.toolLibraryViewMode) private var viewModeRawValue =
         ToolLibraryViewMode.list.rawValue
     @AppStorage(IronsmithPreferenceKeys.toolLibrarySortOrder) private var sortOrderRawValue =
@@ -112,7 +110,6 @@ struct ToolLibraryPopoverView: View {
                 await toolLibraryStore.refreshRestoreAvailability(for: tools)
             }
             .task(id: storeSourceChangesRefreshID) {
-                guard isStoreFeatureEnabled else { return }
                 await storePublisher.refreshStoreSourceChanges(for: tools)
             }
             .onAppear {
@@ -275,7 +272,6 @@ struct ToolLibraryPopoverView: View {
                         storePublisher.pendingCreatorProfileToolID = nil
                     },
                     onSave: {
-                        guard isStoreFeatureEnabled else { return }
                         Task {
                             await storePublisher.saveCreatorProfile(
                                 inferenceStore: inferenceStore,
@@ -316,7 +312,6 @@ struct ToolLibraryPopoverView: View {
                 isLoadingModels: !inferenceStore.hasLoadedModels && !shouldForceNoModels,
                 selectedModelStatusText: selectedModelStatusText,
                 selectedIronsmithCreditWarningText: selectedIronsmithCreditWarningText,
-                isStoreEnabled: isStoreFeatureEnabled,
                 onOpenStore: {
                     routeStore.open(.store(.root))
                 },
@@ -352,8 +347,7 @@ struct ToolLibraryPopoverView: View {
                 showsSandboxControl: showSandboxOverride,
                 showsPermissionControls: !inferenceStore.generationPreferences
                     .automaticallySelectGeneratedAppPermissions,
-                showsAutoRemixControl: !toolLibraryStore.hasSelectedTool
-                    && isStoreFeatureEnabled,
+                showsAutoRemixControl: !toolLibraryStore.hasSelectedTool,
                 isAutoRemixAvailable: inferenceStore.ironsmithSession != nil,
                 modelPickerTitle: composerModelPickerTitle,
                 isModelPickerEnabled: isComposerModelPickerEnabled,
@@ -503,7 +497,6 @@ struct ToolLibraryPopoverView: View {
             isEditingDetails: detailsEditor.isWorking && detailsEditor.editingToolID == tool.id,
             isPreparingGeneration: remixIdentityGeneratingToolID == tool.id,
             canRevert: toolLibraryStore.canRestorePreviousVersion(tool),
-            showsStoreActions: isStoreFeatureEnabled,
             canUpdateStoreVersion: canUpdateStoreVersion(for: tool),
             hasStoreSourceChanges: storePublisher.hasStoreSourceChanges(
                 for: tool,
@@ -710,7 +703,6 @@ struct ToolLibraryPopoverView: View {
                     storePublisher.isShowingPublishSheet = false
                 },
                 onPublish: {
-                    guard isStoreFeatureEnabled else { return }
                     Task {
                         await storePublisher.publish(
                             tool,
@@ -787,10 +779,9 @@ struct ToolLibraryPopoverView: View {
     }
 
     private var storeSourceChangesRefreshID: [String] {
-        [isStoreFeatureEnabled ? "store-on" : "store-off"]
-            + tools.map {
-                "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)-\($0.storeBaselineSourceSha256 ?? "")"
-            }
+        tools.map {
+            "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)-\($0.storeBaselineSourceSha256 ?? "")"
+        }
     }
 
     private func canUpdateStoreVersion(for tool: Tool) -> Bool {
@@ -999,7 +990,6 @@ struct ToolLibraryPopoverView: View {
                 inferenceStore.selectPreferredIronsmithModel()
             }
             guard let resumePublishingToolID,
-                isStoreFeatureEnabled,
                 inferenceStore.ironsmithSession != nil,
                 let tool = tools.first(where: { $0.id == resumePublishingToolID })
             else { return }
@@ -1039,7 +1029,6 @@ struct ToolLibraryPopoverView: View {
         }
         switch toolLibraryStore.remixIdentitySubmissionAction(
             for: tool,
-            isStoreFeatureEnabled: isStoreFeatureEnabled,
             generatesIdentity: generatesIdentityForNewRemixes,
             hasPresentedNotice: hasPresentedRemixIdentityNotice,
             isConfirmedDownloadedFromAnotherUser:
@@ -1055,7 +1044,7 @@ struct ToolLibraryPopoverView: View {
     }
 
     private func startRemixIdentityGeneration(for tool: Tool) {
-        guard isStoreFeatureEnabled, remixIdentityGenerationTask == nil else { return }
+        guard remixIdentityGenerationTask == nil else { return }
         let operationID = UUID()
         remixIdentityGeneratingToolID = tool.id
         remixIdentityGenerationOperationID = operationID
@@ -1090,8 +1079,7 @@ struct ToolLibraryPopoverView: View {
         toolLibraryStore.startPromptSubmission(
             modelContext: modelContext,
             inferenceStore: inferenceStore,
-            storeAssistedGenerationAvailable: isStoreFeatureEnabled
-                && inferenceStore.ironsmithSession != nil
+            storeAssistedGenerationAvailable: inferenceStore.ironsmithSession != nil
         )
     }
 
@@ -1184,7 +1172,6 @@ struct ToolLibraryPopoverView: View {
             toolLibraryStore.selectForEditing(tool, defaultSettings: defaultGenerationSettings)
             isPromptFocused = focusPrompt
         case .publishTool(let id):
-            guard isStoreFeatureEnabled else { return }
             guard let tool = tools.first(where: { $0.id == id }) else { return }
             Task {
                 await storePublisher.beginPublishing(

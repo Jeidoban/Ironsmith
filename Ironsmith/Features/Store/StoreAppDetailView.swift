@@ -16,6 +16,9 @@ struct StoreAppDetailView: View {
     let selectedModelName: String?
     let onAsk: (StoreAppDetail, StoreAppSourceStore, StoreAppQuestionStore) -> Void
     let onInstallVersion: (StoreAppDetail, StoreVersionMetadata) -> Void
+    let onReport: (StoreAppDetail, StoreVersionMetadata) -> Void
+    let onToggleLike: (StoreAppDetail) -> Void
+    let isLikeWorking: Bool
 
     @State private var expandedVersionID: String?
     @State private var sourceVersion: StoreVersionMetadata?
@@ -33,7 +36,9 @@ struct StoreAppDetailView: View {
                             isWorking: isWorking,
                             installDisposition: installDisposition,
                             onGet: { onGet(app) },
-                            onViewSource: { showSource(for: app.currentVersion) }
+                            onViewSource: { showSource(for: app.currentVersion) },
+                            onToggleLike: { onToggleLike(app) },
+                            isLikeWorking: isLikeWorking
                         )
 
                         StoreDetailMetadataStrip(
@@ -69,7 +74,8 @@ struct StoreAppDetailView: View {
                             workingVersionID: workingVersionID,
                             installDisposition: versionInstallDisposition,
                             onViewSource: showSource,
-                            onInstall: onInstallVersion
+                            onInstall: onInstallVersion,
+                            onReport: onReport
                         )
                     }
                     .padding(.horizontal, 28)
@@ -101,6 +107,34 @@ struct StoreAppDetailView: View {
                 StoreEmptyStateView(title: "App not found", systemImage: "square.grid.2x2")
             }
         }
+        .toolbar {
+            if let app {
+                ToolbarSpacer(.flexible)
+                ToolbarItem {
+                    Menu {
+                        Button("Report This App…") {
+                            onReport(app, app.currentVersion)
+                        }
+                    } label: {
+                        Label("More actions for \(app.name)", systemImage: "ellipsis")
+                            .labelStyle(.iconOnly)
+                    }
+                    .menuIndicator(.hidden)
+                    .help("More actions for \(app.name)")
+                }
+                ToolbarItem {
+                    ShareLink(
+                        item: IronsmithStoreConstants.appWebsiteURL(appID: app.id),
+                        subject: Text(app.name),
+                        message: Text(app.shortDescription)
+                    ) {
+                        Label("Share \(app.name)", systemImage: "square.and.arrow.up")
+                            .labelStyle(.iconOnly)
+                    }
+                    .help("Share \(app.name)")
+                }
+            }
+        }
     }
 
     private func showSource(for version: StoreVersionMetadata) {
@@ -114,6 +148,8 @@ private struct StoreDetailHeroView: View {
     let installDisposition: StoreAppInstallDisposition
     let onGet: () -> Void
     let onViewSource: () -> Void
+    let onToggleLike: () -> Void
+    let isLikeWorking: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 18) {
@@ -135,6 +171,24 @@ private struct StoreDetailHeroView: View {
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
                         .controlSize(.small)
+
+                    if app.status == .published {
+                        Button(action: onToggleLike) {
+                            Label(
+                                StoreCountPresentation.count(app.likeCount),
+                                systemImage: app.isLikedByCurrentUser
+                                    ? "hand.thumbsup.fill" : "hand.thumbsup"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+                        .help(app.isLikedByCurrentUser ? "Unlike this app" : "Like this app")
+                        .accessibilityLabel(
+                            app.isLikedByCurrentUser ? "Unlike this app" : "Like this app"
+                        )
+                        .disabled(isLikeWorking)
+                    }
 
                     if isWorking {
                         ProgressView()
@@ -388,14 +442,14 @@ private struct StoreDetailMetadataStrip: View {
 
     private var columns: [GridItem] {
         if app.remix != nil || !app.inspirations.isEmpty {
-            return [GridItem(.adaptive(minimum: 128), spacing: 12, alignment: .top)]
+            return [GridItem(.adaptive(minimum: 120), spacing: 10, alignment: .topLeading)]
         }
-        return [GridItem(.adaptive(minimum: 140), spacing: 16, alignment: .top)]
+        return [GridItem(.adaptive(minimum: 132), spacing: 10, alignment: .topLeading)]
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
                 if let handle = app.authorHandle, !handle.isEmpty {
                     StoreDetailCreatorMetadataItem(
                         displayName: app.authorDisplayName,
@@ -423,6 +477,10 @@ private struct StoreDetailMetadataStrip: View {
                     )
                 }
                 StoreDetailMetadataItem(
+                    title: "Downloads",
+                    value: StoreCountPresentation.downloads(app.downloadCount)
+                )
+                StoreDetailMetadataItem(
                     title: "Version",
                     value: String(app.currentVersion.versionNumber)
                 )
@@ -447,7 +505,7 @@ private struct StoreDetailMetadataStrip: View {
                 )
             }
         }
-        .padding(.vertical, 16)
+        .padding(.vertical, 12)
         .overlay(alignment: .top) { Divider() }
         .overlay(alignment: .bottom) { Divider() }
         .background {
@@ -455,6 +513,26 @@ private struct StoreDetailMetadataStrip: View {
         }
     }
 
+}
+
+nonisolated enum StoreCountPresentation {
+    static func downloads(_ count: Int) -> String {
+        count < 50 ? "<50" : self.count(count)
+    }
+
+    static func count(_ count: Int) -> String {
+        if count < 1_000 { return String(count) }
+        if count < 1_000_000 { return compact(count, divisor: 1_000, suffix: "K") }
+        return compact(count, divisor: 1_000_000, suffix: "M")
+    }
+
+    private static func compact(_ count: Int, divisor: Int, suffix: String) -> String {
+        let value = floor(Double(count) / (Double(divisor) / 10)) / 10
+        let formatted = value.rounded(.towardZero) == value
+            ? String(Int(value))
+            : String(format: "%.1f", value)
+        return "\(formatted)\(suffix)"
+    }
 }
 
 struct StoreLicenseDetailSheet: View {
@@ -898,6 +976,7 @@ private struct StoreVersionsCard: View {
     let installDisposition: (StoreAppDetail, StoreVersionMetadata) -> StoreAppInstallDisposition
     let onViewSource: (StoreVersionMetadata) -> Void
     let onInstall: (StoreAppDetail, StoreVersionMetadata) -> Void
+    let onReport: (StoreAppDetail, StoreVersionMetadata) -> Void
 
     private var versions: [StoreVersionMetadata] {
         StoreVersionPresentation.newestFirst(app.versions)
@@ -921,7 +1000,8 @@ private struct StoreVersionsCard: View {
                         isThisVersionWorking: workingVersionID == version.id,
                         installDisposition: installDisposition(app, version),
                         onViewSource: { onViewSource(version) },
-                        onInstall: { onInstall(app, version) }
+                        onInstall: { onInstall(app, version) },
+                        onReport: { onReport(app, version) }
                     )
                     if index < versions.count - 1 {
                         Divider()
@@ -943,6 +1023,7 @@ private struct StoreVersionAccordionRow: View {
     let installDisposition: StoreAppInstallDisposition
     let onViewSource: () -> Void
     let onInstall: () -> Void
+    let onReport: () -> Void
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
@@ -985,6 +1066,13 @@ private struct StoreVersionAccordionRow: View {
                         .background(.blue.opacity(0.12), in: Capsule())
                 }
                 Spacer()
+                Menu {
+                    Button("Report This Version…", action: onReport)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("More actions for version \(version.versionNumber)")
             }
             .padding(.vertical, 14)
             .contentShape(Rectangle())

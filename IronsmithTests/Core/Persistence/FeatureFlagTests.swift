@@ -4,25 +4,6 @@ import Testing
 
 struct FeatureFlagTests {
     @Test
-    func storeFeatureFlagDefaultsOff() throws {
-        let userDefaults = try Self.makeIsolatedUserDefaults()
-
-        #expect(!IronsmithFeatureFlags.isStoreEnabled(userDefaults: userDefaults))
-    }
-
-    @Test
-    func storeFeatureFlagReadsAndWritesPreferenceKey() throws {
-        let userDefaults = try Self.makeIsolatedUserDefaults()
-
-        IronsmithFeatureFlags.setStoreEnabled(true, userDefaults: userDefaults)
-        #expect(IronsmithFeatureFlags.isStoreEnabled(userDefaults: userDefaults))
-        #expect(userDefaults.bool(forKey: IronsmithPreferenceKeys.featureStoreEnabled))
-
-        IronsmithFeatureFlags.setStoreEnabled(false, userDefaults: userDefaults)
-        #expect(!IronsmithFeatureFlags.isStoreEnabled(userDefaults: userDefaults))
-    }
-
-    @Test
     func diagnosticWholeFileRewriteFeatureFlagDefaultsOff() throws {
         let userDefaults = try Self.makeIsolatedUserDefaults()
 

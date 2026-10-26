@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Auth
 import SwiftData
 
 enum StoreAppInstallDisposition {
@@ -30,10 +31,15 @@ enum StorePendingDownloadRequest {
     case version(StoreVersionMetadata, app: StoreAppDetail)
 }
 
+enum StoreSearchResultMode {
+    case keyword
+    case feature
+}
+
 @MainActor
 @Observable
 final class StoreWindowStore {
-    var stores: [AppStoreDescriptor] = []
+    var selectedStore: AppStoreDescriptor?
     var selectedStoreId = IronsmithStoreConstants.communityStoreId
     var homeSections: [StoreHomeSection] = []
     var searchResults: [StoreAppSummary] = []
@@ -45,6 +51,7 @@ final class StoreWindowStore {
     var selectedAppID: String?
     var selectedAppDetail: StoreAppDetail?
     var searchText = ""
+    private(set) var searchResultMode = StoreSearchResultMode.keyword
     var isLoadingStores = false
     var isLoadingDiscover = false
     var isLoadingMoreSearchResults = false
@@ -53,14 +60,18 @@ final class StoreWindowStore {
     var isLoadingDetail = false
     var workingAppID: String?
     var workingVersionID: String?
+    var reportingAppID: String?
+    var likingAppID: String?
     var contentRevision = 0
     var errorMessage: String?
+    var reportConfirmationMessage: String?
     var isStoreSignInRequired = false
     var pendingDownloadRequest: StorePendingDownloadRequest?
 
     @ObservationIgnored private let client: IronsmithStoreClient
     @ObservationIgnored private let importClient: StoreToolImportClient
     @ObservationIgnored private let buildClient: ToolBuildClient
+    @ObservationIgnored private let runnerClient: ToolRunnerClient
     @ObservationIgnored private let packageMaterializer: ToolPackageMaterializer
     @ObservationIgnored private let saveModelContext: (ModelContext) throws -> Void
     @ObservationIgnored private var searchPaginationRevision = 0
@@ -70,6 +81,7 @@ final class StoreWindowStore {
         self.client = .live
         self.importClient = .live
         self.buildClient = .live()
+        self.runnerClient = .live()
         self.packageMaterializer = .live
         self.saveModelContext = { try $0.save() }
     }
@@ -78,12 +90,14 @@ final class StoreWindowStore {
         client: IronsmithStoreClient,
         importClient: StoreToolImportClient,
         buildClient: ToolBuildClient,
+        runnerClient: ToolRunnerClient? = nil,
         packageMaterializer: ToolPackageMaterializer = .live,
         saveModelContext: @escaping (ModelContext) throws -> Void = { try $0.save() }
     ) {
         self.client = client
         self.importClient = importClient
         self.buildClient = buildClient
+        self.runnerClient = runnerClient ?? ToolRunnerClient({ _ in })
         self.packageMaterializer = packageMaterializer
         self.saveModelContext = saveModelContext
     }
@@ -103,24 +117,19 @@ final class StoreWindowStore {
     }
 
     func loadInitial(inferenceStore: InferenceStore) async {
-        guard stores.isEmpty else { return }
-        await loadStores()
+        guard selectedStore == nil else { return }
+        await loadStore()
         await refreshHome()
         if inferenceStore.ironsmithSession != nil {
             await refreshPublished()
         }
     }
 
-    func loadStores() async {
+    func loadStore() async {
         isLoadingStores = true
         defer { isLoadingStores = false }
         do {
-            stores = try await client.listStores()
-            if !stores.contains(where: { $0.id == selectedStoreId }),
-                let firstStore = stores.first
-            {
-                selectedStoreId = firstStore.id
-            }
+            selectedStore = try await client.fetchStore(selectedStoreId)
         } catch {
             present(error)
         }
@@ -141,9 +150,8 @@ final class StoreWindowStore {
         do {
             homeSections = try await client.listHomeSections(selectedStoreId)
             if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                searchResultMode = .keyword
                 searchResults = []
-                searchResultsNextOffset = 0
-                searchResultsHasMore = false
             }
             reconcileSelection()
         } catch {
@@ -160,13 +168,17 @@ final class StoreWindowStore {
         searchPaginationRevision += 1
         let revision = searchPaginationRevision
         let storeId = selectedStoreId
+        if searchResultMode != .keyword {
+            searchResults = []
+        }
+        searchResultMode = .keyword
         if showLoadingIndicator {
             isLoadingDiscover = true
         }
         searchResultsNextOffset = 0
         searchResultsHasMore = false
         defer {
-            if showLoadingIndicator {
+            if showLoadingIndicator, searchPaginationRevision == revision {
                 isLoadingDiscover = false
             }
         }
@@ -182,6 +194,7 @@ final class StoreWindowStore {
             )
             guard searchPaginationRevision == revision,
                 selectedStoreId == storeId,
+                searchResultMode == .keyword,
                 searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch
             else {
                 return
@@ -191,13 +204,80 @@ final class StoreWindowStore {
             searchResultsHasMore = page.hasMore
             reconcileSelection()
         } catch {
+            guard searchPaginationRevision == revision,
+                searchResultMode == .keyword,
+                searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch,
+                !IronsmithErrorPresentation.isCancellation(error),
+                !Task.isCancelled
+            else {
+                return
+            }
             present(error)
         }
     }
 
+    func refreshFeatureSearch(showLoadingIndicator: Bool = true) async {
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearch.isEmpty else {
+            await refreshHome(showLoadingIndicator: showLoadingIndicator)
+            return
+        }
+        searchPaginationRevision += 1
+        let revision = searchPaginationRevision
+        let storeId = selectedStoreId
+        if searchResultMode != .feature {
+            searchResults = []
+        }
+        searchResultMode = .feature
+        searchResultsNextOffset = 0
+        searchResultsHasMore = false
+        if showLoadingIndicator {
+            isLoadingDiscover = true
+        }
+        defer {
+            if showLoadingIndicator, searchPaginationRevision == revision {
+                isLoadingDiscover = false
+            }
+        }
+        do {
+            let apps = try await client.searchAppsByFeature(storeId, trimmedSearch)
+            guard searchPaginationRevision == revision,
+                selectedStoreId == storeId,
+                searchResultMode == .feature,
+                searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch
+            else {
+                return
+            }
+            searchResults = apps
+            reconcileSelection()
+        } catch {
+            guard searchPaginationRevision == revision,
+                searchResultMode == .feature,
+                searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch,
+                !IronsmithErrorPresentation.isCancellation(error),
+                !Task.isCancelled
+            else {
+                return
+            }
+            present(error)
+        }
+    }
+
+    func prepareForKeywordSearchEditing() {
+        searchPaginationRevision += 1
+        isLoadingDiscover = false
+        if searchResultMode == .feature {
+            searchResults = []
+        }
+        searchResultMode = .keyword
+        searchResultsNextOffset = 0
+        searchResultsHasMore = false
+    }
+
     func loadMoreSearchResults() async {
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedSearch.isEmpty,
+        guard searchResultMode == .keyword,
+            !trimmedSearch.isEmpty,
             searchResultsHasMore,
             !isLoadingMoreSearchResults
         else {
@@ -221,11 +301,10 @@ final class StoreWindowStore {
             )
             guard searchPaginationRevision == revision,
                 selectedStoreId == storeId,
-                searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch
+                searchResultMode == .keyword,
+                searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSearch,
+                searchResultsNextOffset == offset
             else {
-                return
-            }
-            guard searchResultsNextOffset == offset else {
                 return
             }
             appendUnique(page.apps, to: &searchResults)
@@ -233,6 +312,9 @@ final class StoreWindowStore {
             searchResultsHasMore = page.hasMore
             reconcileSelection()
         } catch {
+            guard !IronsmithErrorPresentation.isCancellation(error), !Task.isCancelled else {
+                return
+            }
             present(error)
         }
     }
@@ -271,7 +353,7 @@ final class StoreWindowStore {
     ) async {
         selectedAppID = app.id
         if case .openExisting(let tool) = installDisposition(for: app, tools: tools) {
-            routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+            await open(tool)
             return
         }
         guard
@@ -463,7 +545,7 @@ final class StoreWindowStore {
     ) async {
         guard workingAppID == nil else { return }
         if case .openExisting(let tool) = installDisposition(for: app, tools: tools) {
-            routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+            await open(tool)
             return
         }
         guard
@@ -484,7 +566,7 @@ final class StoreWindowStore {
             }
             switch installDisposition(for: app, tools: tools) {
             case .openExisting(let tool):
-                routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+                await open(tool)
                 return
             case .updateExisting(let tool):
                 try await updateExistingTool(
@@ -508,6 +590,7 @@ final class StoreWindowStore {
                 version,
                 app: app,
                 displayName: nil,
+                ownerUserID: inferenceStore.ironsmithSession?.user.id.uuidString,
                 modelContext: modelContext,
                 routeStore: routeStore
             )
@@ -531,7 +614,7 @@ final class StoreWindowStore {
             of: app,
             tools: tools
         ) {
-            routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+            await open(tool)
             return
         }
         guard
@@ -555,7 +638,7 @@ final class StoreWindowStore {
                 of: app,
                 tools: tools
             ) {
-                routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
+                await open(tool)
                 return
             }
 
@@ -581,6 +664,7 @@ final class StoreWindowStore {
                 download,
                 app: app,
                 displayName: displayName,
+                ownerUserID: inferenceStore.ironsmithSession?.user.id.uuidString,
                 modelContext: modelContext,
                 routeStore: routeStore
             )
@@ -606,6 +690,52 @@ final class StoreWindowStore {
             }
             contentRevision += 1
         } catch {
+            present(error)
+        }
+    }
+
+    func submitReport(_ request: StoreAppReportRequest) async -> Bool {
+        guard reportingAppID == nil else { return false }
+        reportingAppID = request.appId
+        defer { reportingAppID = nil }
+        do {
+            _ = try await client.reportApp(request)
+            reportConfirmationMessage = "Thanks. Your report was submitted."
+            return true
+        } catch {
+            present(error)
+            return false
+        }
+    }
+
+    func toggleLike(_ app: StoreAppDetail) async {
+        guard likingAppID == nil else { return }
+        likingAppID = app.id
+        defer { likingAppID = nil }
+
+        let liked = !app.isLikedByCurrentUser
+        let optimisticCount = max(0, app.likeCount + (liked ? 1 : -1))
+        updateEngagement(
+            appID: app.id,
+            downloadCount: app.downloadCount,
+            likeCount: optimisticCount,
+            isLiked: liked
+        )
+        do {
+            let engagement = try await client.setAppLiked(app.storeId, app.id, liked)
+            updateEngagement(
+                appID: app.id,
+                downloadCount: engagement.downloadCount,
+                likeCount: engagement.likeCount,
+                isLiked: engagement.isLikedByCurrentUser
+            )
+        } catch {
+            updateEngagement(
+                appID: app.id,
+                downloadCount: app.downloadCount,
+                likeCount: app.likeCount,
+                isLiked: app.isLikedByCurrentUser
+            )
             present(error)
         }
     }
@@ -671,6 +801,11 @@ final class StoreWindowStore {
         let previousPhase = tool.generationPhase
         let previousError = tool.generationErrorSummary
         let previousLinkage = StoreToolLinkageSnapshot(tool: tool)
+        let previousName = tool.name
+        let previousCategory = tool.category
+        let previousStoreName = tool.storeRemixSource?.appName
+        let shouldSynchronizeName = previousStoreName == tool.name && tool.name != app.name
+        var appBundleRenameBackup: ToolAppBundleRenameBackup?
         let layout = tool.packageLayout
         let previousIcons = ToolIconAssetSnapshot(layout: layout)
         let backup = try ToolVersionBackupClient.live.stageCurrentVersion(
@@ -678,49 +813,71 @@ final class StoreWindowStore {
             tool.contentViewSourcePath,
             previousSettings
         )
+        let previousSource = try String(contentsOf: backup.pendingURL, encoding: .utf8)
 
         tool.generationState = .generating
         tool.generationPhase = .packaging
         tool.generationErrorSummary = nil
         tool.updatedAt = Date()
-        try modelContext.save()
+        try saveModelContext(modelContext)
         routeStore.open(.toolLibrary(.selectTool(id: tool.id, focusPrompt: false)))
 
         do {
+            if shouldSynchronizeName {
+                appBundleRenameBackup = try ToolAppBundleClient.stageAppBundleForRename(
+                    tool,
+                    to: app.name
+                )
+                tool.name = app.name
+            }
+            tool.category = app.category
             let version = try await client.fetchVersion(
                 app.storeId,
                 app.id,
                 app.currentVersion.versionNumber
             )
             try IronsmithStoreClient.verifySourceHash(version)
-            try writeStoreVersion(version, app: app, to: tool)
+            try writeStoreVersion(
+                version,
+                app: app,
+                ownerUserID: inferenceStore.ironsmithSession?.user.id.uuidString,
+                to: tool
+            )
             try await StoreToolImportClient.cacheIconIfAvailable(
                 app: app,
                 layout: tool.packageLayout
             )
-            try modelContext.save()
+            try saveModelContext(modelContext)
             try await buildClient.buildTool(tool)
-            try ToolVersionBackupClient.live.promoteStagedVersion(backup)
             tool.generationState = .ready
             tool.generationPhase = .completed
             tool.generationErrorSummary = nil
             tool.updatedAt = Date()
-            try modelContext.save()
+            try saveModelContext(modelContext)
+            try ToolVersionBackupClient.live.promoteStagedVersion(backup)
+            if let appBundleRenameBackup {
+                ToolAppBundleClient.completeStagedAppBundleRename(appBundleRenameBackup)
+            }
         } catch {
+            tool.name = previousName
+            tool.category = previousCategory
             try? restoreToolSource(
-                from: backup,
+                previousSource,
                 to: tool,
                 settings: previousSettings
             )
             try? ToolVersionBackupClient.live.discardStagedVersion(backup)
             previousIcons.restore()
+            if let appBundleRenameBackup {
+                ToolAppBundleClient.restoreStagedAppBundleRename(appBundleRenameBackup)
+            }
             previousLinkage.apply(to: tool)
             tool.applyGenerationSettings(previousSettings)
             tool.generationState = previousState
             tool.generationPhase = previousPhase
             tool.generationErrorSummary = previousError
             tool.updatedAt = Date()
-            try? modelContext.save()
+            try? saveModelContext(modelContext)
             throw error
         }
     }
@@ -807,6 +964,7 @@ final class StoreWindowStore {
         _ version: StoreVersionDownload,
         app: StoreAppDetail,
         displayName: String?,
+        ownerUserID: String?,
         modelContext: ModelContext,
         routeStore: IronsmithRouteStore
     ) async throws {
@@ -815,7 +973,8 @@ final class StoreWindowStore {
                 app: app,
                 version: version,
                 displayName: displayName,
-                initialGenerationState: .generating
+                initialGenerationState: .generating,
+                ownerUserID: ownerUserID
             ),
             modelContext
         )
@@ -837,9 +996,18 @@ final class StoreWindowStore {
         }
     }
 
+    private func open(_ tool: Tool) async {
+        do {
+            try await runnerClient.runTool(tool)
+        } catch {
+            present(error)
+        }
+    }
+
     private func writeStoreVersion(
         _ version: StoreVersionDownload,
         app: StoreAppDetail,
+        ownerUserID: String?,
         to tool: Tool
     ) throws {
         let layout = tool.packageLayout
@@ -852,16 +1020,20 @@ final class StoreWindowStore {
             settings: settings
         )
         tool.applyGenerationSettings(settings)
-        applyStoreLinkage(app, version: version, to: tool)
+        applyStoreLinkage(
+            app,
+            version: version,
+            ownerUserID: ownerUserID,
+            to: tool
+        )
     }
 
     private func restoreToolSource(
-        from backup: ToolContentVersionBackup,
+        _ previousSource: String,
         to tool: Tool,
         settings: ToolGenerationSettings
     ) throws {
         let layout = tool.packageLayout
-        let previousSource = try String(contentsOf: backup.pendingURL, encoding: .utf8)
         try packageMaterializer.preparePackageDirectories(layout)
         try packageMaterializer.writeContentView(previousSource, layout: layout)
         try packageMaterializer.writeAppEntry(
@@ -890,19 +1062,13 @@ final class StoreWindowStore {
     private func applyStoreLinkage(
         _ app: StoreAppDetail,
         version: StoreVersionDownload,
+        ownerUserID: String?,
         to tool: Tool
     ) {
-        tool.storePublication = nil
-        tool.replaceStoreProvenance(
-            remixSource: StoreVersionReference(
-                versionId: version.id,
-                storeId: app.storeId,
-                appId: app.id,
-                appName: app.name,
-                versionNumber: version.versionNumber,
-                sourceSha256: version.sourceSha256
-            ),
-            inspirations: []
+        tool.storeMetadata = StoreToolImportClient.storeMetadata(
+            app: app,
+            version: version,
+            ownerUserID: ownerUserID
         )
         tool.updatedAt = Date()
     }
@@ -965,6 +1131,58 @@ final class StoreWindowStore {
         if selectedAppID == app.id {
             selectedAppDetail = app
         }
+    }
+
+    private func updateEngagement(
+        appID: String,
+        downloadCount: Int,
+        likeCount: Int,
+        isLiked: Bool
+    ) {
+        if selectedAppDetail?.id == appID {
+            selectedAppDetail?.downloadCount = downloadCount
+            selectedAppDetail?.likeCount = likeCount
+            selectedAppDetail?.isLikedByCurrentUser = isLiked
+        }
+        updateEngagement(
+            appID: appID,
+            downloadCount: downloadCount,
+            likeCount: likeCount,
+            in: &searchResults
+        )
+        updateEngagement(
+            appID: appID,
+            downloadCount: downloadCount,
+            likeCount: likeCount,
+            in: &publishedApps
+        )
+        for sectionIndex in homeSections.indices {
+            var apps = homeSections[sectionIndex].apps
+            updateEngagement(
+                appID: appID,
+                downloadCount: downloadCount,
+                likeCount: likeCount,
+                in: &apps
+            )
+            homeSections[sectionIndex] = StoreHomeSection(
+                id: homeSections[sectionIndex].id,
+                title: homeSections[sectionIndex].title,
+                category: homeSections[sectionIndex].category,
+                sort: homeSections[sectionIndex].sort,
+                apps: apps
+            )
+        }
+    }
+
+    private func updateEngagement(
+        appID: String,
+        downloadCount: Int,
+        likeCount: Int,
+        in apps: inout [StoreAppSummary]
+    ) {
+        guard let index = apps.firstIndex(where: { $0.id == appID }) else { return }
+        apps[index].downloadCount = downloadCount
+        apps[index].likeCount = likeCount
     }
 
     private func reconcileSelection() {

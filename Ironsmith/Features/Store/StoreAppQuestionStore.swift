@@ -154,6 +154,8 @@ final class StoreAppQuestionStore {
         Description: \(app.description)
         Creator: \(app.creatorDisplayText)
         Category: \(app.category.title)
+        Downloads: \(StoreCountPresentation.downloads(app.downloadCount))
+        Likes: \(StoreCountPresentation.count(app.likeCount))
         Version: \(app.currentVersion.versionNumber)
         License: \(app.currentVersion.license.title)
         Permissions: \(permissions)

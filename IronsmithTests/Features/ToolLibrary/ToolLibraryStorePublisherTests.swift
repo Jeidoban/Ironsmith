@@ -722,6 +722,7 @@ extension ToolLibraryTests {
         )
         publisher.publishShortDescription = "Clean copied text"
         publisher.publishDescription = "Cleans and reformats text."
+        publisher.publishCategory = .finance
         publisher.publishLicense = .mit
         let tool = Tool(
             name: "Clipboard Cleaner",
@@ -769,6 +770,8 @@ extension ToolLibraryTests {
         #expect(await buildCapture.versionNumbers == [2])
         #expect(await versionCapture.lastRemixedFromVersionId == parentVersionId)
         #expect(await versionCapture.lastLicense == .mit)
+        #expect(await versionCapture.lastName == "Clipboard Cleaner")
+        #expect(await versionCapture.lastCategory == .finance)
         #expect(
             tool.storeRemixSource?.versionId == parentVersionId)
         #expect(publisher.errorMessage == nil)
@@ -1110,10 +1113,14 @@ private actor PublisherPublicationCapture {
 private actor PublisherVersionCapture {
     private(set) var lastRemixedFromVersionId: String?
     private(set) var lastLicense: StoreLicenseIdentifier?
+    private(set) var lastName: String?
+    private(set) var lastCategory: StoreAppCategory?
 
     func record(_ request: StoreVersionPublicationRequest) {
         lastRemixedFromVersionId = request.remixedFromVersionId
         lastLicense = request.license
+        lastName = request.name
+        lastCategory = request.category
     }
 }
 

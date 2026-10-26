@@ -10,7 +10,6 @@ struct ToolItemPresentationState {
     let isEditingDetails: Bool
     let isPreparingGeneration: Bool
     let canRevert: Bool
-    let showsStoreActions: Bool
     let canUpdateStoreVersion: Bool
     let hasStoreSourceChanges: Bool
     let activeCodingAgent: ToolCodingAgent?
@@ -105,31 +104,29 @@ struct ToolItemActionsMenu: View {
             .disabled(!tool.isGenerationReady || state.isBusy || isGenerating)
         Button("Rebuild App", action: actions.onRebuild)
             .disabled(!tool.isGenerationReady || state.isBusy)
-        if state.showsStoreActions {
-            if hasStoreLinks {
-                Menu("Open in Store") {
-                    if hasThisAppStoreLink {
-                        Button("This App", action: thisAppStoreAction)
-                    }
-                    if hasRemixSourceStoreLink {
-                        Button("Remix Source", action: actions.onOpenStoreSource)
-                    }
-                    if state.storeInspirations.contains(where: \.isRoutable) {
-                        Section("Using Ideas From") {
-                            ForEach(state.storeInspirations.filter(\.isRoutable)) { inspiration in
-                                Button(inspiration.appName ?? "Store App") {
-                                    actions.onOpenStoreInspiration(inspiration)
-                                }
+        if hasStoreLinks {
+            Menu("Open in Store") {
+                if hasThisAppStoreLink {
+                    Button("This App", action: thisAppStoreAction)
+                }
+                if hasRemixSourceStoreLink {
+                    Button("Remix Source", action: actions.onOpenStoreSource)
+                }
+                if state.storeInspirations.contains(where: \.isRoutable) {
+                    Section("Using Ideas From") {
+                        ForEach(state.storeInspirations.filter(\.isRoutable)) { inspiration in
+                            Button(inspiration.appName ?? "Store App") {
+                                actions.onOpenStoreInspiration(inspiration)
                             }
                         }
                     }
                 }
             }
-            Button(storePublishActionTitle, action: actions.onPublishToStore)
-                .disabled(
-                    !tool.isGenerationReady || state.isBusy || !state.hasStoreSourceChanges
-                )
         }
+        Button(storePublishActionTitle, action: actions.onPublishToStore)
+            .disabled(
+                !tool.isGenerationReady || state.isBusy || !state.hasStoreSourceChanges
+            )
         Button("Go Back to Previous Version", action: actions.onRevert)
             .disabled(!tool.isGenerationReady || !state.canRevert || state.isBusy)
         Button("Export App", action: actions.onExport)

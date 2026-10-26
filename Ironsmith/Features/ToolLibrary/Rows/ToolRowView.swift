@@ -26,8 +26,7 @@ struct ToolRowView: View {
                             .lineLimit(1)
 
                         if let generationStatusText {
-                            if state.showsStoreActions,
-                                tool.generationState == .generating,
+                            if tool.generationState == .generating,
                                 state.isActivelyRemixingFromStore,
                                 let baseAppName = tool.storeRemixSource?.appName
                             {
@@ -48,8 +47,7 @@ struct ToolRowView: View {
                                         .foregroundStyle(.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
-                            } else if state.showsStoreActions,
-                                tool.generationState == .generating,
+                            } else if tool.generationState == .generating,
                                 state.isActivelyRemixingFromStore,
                                 !tool.storeInspirationLinks.isEmpty
                             {
@@ -233,7 +231,6 @@ struct ToolRowView: View {
             isEditingDetails: false,
             isPreparingGeneration: false,
             canRevert: true,
-            showsStoreActions: true,
             canUpdateStoreVersion: false,
             hasStoreSourceChanges: true,
             activeCodingAgent: nil,

@@ -28,3 +28,4 @@ script/*.local.sh
 
 ironsmith-backend/
 .codex/environments/environment.toml
+Ironsmith.code-workspace

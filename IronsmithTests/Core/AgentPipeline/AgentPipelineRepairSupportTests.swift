@@ -416,7 +416,9 @@ extension AgentPipelineTests {
     func singleFileCodingInstructionsKeepGeneratedAppsSelfContainedAndNativeMacOS() {
         let instructions = ToolGenerationPrompts.flameSingleFileCodingInstructions
 
-        #expect(instructions.contains("self-contained client-side macOS app"))
+        #expect(instructions.contains(ToolGenerationPrompts.backendServiceGuidance))
+        #expect(instructions.contains("local in-process server"))
+        #expect(instructions.contains("separately deployed backend"))
         #expect(instructions.contains("direct internet requests allowed"))
         #expect(instructions.contains("Respect that app type when choosing scope, layout density, and sizing"))
         #expect(instructions.contains("Treat that as runtime context, not a reason to reduce useful scope"))
@@ -469,11 +471,92 @@ extension AgentPipelineTests {
         #expect(flame.contains("existing hosted API or managed service"))
         #expect(flame.contains("prefer Supabase"))
         #expect(flame.contains("https://database.new"))
+        #expect(flame.contains(ToolGenerationPrompts.backendServiceGuidance))
         #expect(!flame.contains("app-owned account system"))
         #expect(!flame.contains("This is a local-only app."))
         #expect(flame.contains("when they meaningfully support the user's request"))
         #expect(flame.contains("state appropriate to the requested experience"))
 
+    }
+
+    @Test
+    func dedicatedAgentInstructionsRequireCompleteUsableFeaturesWithoutPromptDuplication() {
+        let diagnostic = SwiftCompilerDiagnostic(
+            relativePath: "Sources/GeneratedTool/ContentView.swift",
+            line: 4,
+            column: 9,
+            severity: .error,
+            message: "cannot find 'title' in scope",
+            supportingLines: []
+        )
+        let source = "import SwiftUI\n\nstruct ContentView: View { var body: some View { Text(\"Hello\") } }"
+        let createAndEditInstructions = [
+            ToolGenerationPrompts.singleFileCodingInstructions(
+                for: .ironsmithFlame
+            ),
+            ToolGenerationPrompts.singleFileCodingInstructions(
+                for: .ironsmithSpark
+            ),
+            ToolGenerationPrompts.searchReplaceEditInstructions,
+            ToolGenerationPrompts.unifiedDiffEditInstructions,
+        ]
+        let createAndEditPrompts = [
+            ToolGenerationPrompts.singleFileCreatePrompt(
+                userPrompt: "Build a greeting app",
+                executableName: "GeneratedTool"
+            ),
+            ToolGenerationPrompts.singleFileEditPrompt(
+                userPrompt: "Change the greeting",
+                executableName: "GeneratedTool",
+                existingSource: source
+            ),
+            ToolGenerationPrompts.singleFileEditPatchPrompt(
+                userPrompt: "Change the greeting",
+                executableName: "GeneratedTool",
+                existingSource: source,
+                maximumPatchBlocks: 1
+            ),
+        ]
+        let repairPrompts = [
+            ToolGenerationPrompts.searchReplaceRepairInstructions,
+            ToolGenerationPrompts.unifiedDiffRepairInstructions,
+            ToolGenerationPrompts.diagnosticCreateWholeFileRewritePrompt(
+                userPrompt: "Build a greeting app",
+                generationPrompt: "Build a greeting app",
+                executableName: "GeneratedTool",
+                sandboxEnabled: true,
+                appKind: .window,
+                currentSource: source,
+                diagnostics: [diagnostic]
+            ),
+            ToolGenerationPrompts.diagnosticEditWholeFileRewritePrompt(
+                userPrompt: "Change the greeting",
+                executableName: "GeneratedTool",
+                currentSource: source,
+                diagnostics: [diagnostic]
+            ),
+            ToolGenerationPrompts.sourceContinuationPrompt(
+                originalPrompt: "Build a greeting app",
+                partialSource: source
+            ),
+            ToolGenerationPrompts.conversationalRepairPrompt(
+                diagnostics: [diagnostic],
+                source: source,
+                previousOutcome: nil,
+                compactionSummary: nil,
+                maximumPatchBlocks: 1
+            ),
+        ]
+
+        for instructions in createAndEditInstructions {
+            #expect(instructions.contains(ToolGenerationPrompts.completeFeatureRequirement))
+        }
+        for prompt in createAndEditPrompts {
+            #expect(!prompt.contains(ToolGenerationPrompts.completeFeatureRequirement))
+        }
+        for prompt in repairPrompts {
+            #expect(!prompt.contains(ToolGenerationPrompts.completeFeatureRequirement))
+        }
     }
 
     @Test

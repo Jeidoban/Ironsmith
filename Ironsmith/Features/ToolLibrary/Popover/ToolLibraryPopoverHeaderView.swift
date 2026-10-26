@@ -13,7 +13,6 @@ struct ToolLibraryPopoverHeaderView: View {
     let isLoadingModels: Bool
     let selectedModelStatusText: String?
     let selectedIronsmithCreditWarningText: String?
-    let isStoreEnabled: Bool
     let onOpenStore: () -> Void
     let onOpenSettings: () -> Void
     private static let issueReportURL = URL(
@@ -46,17 +45,15 @@ struct ToolLibraryPopoverHeaderView: View {
             .accessibilityLabel(isSearchPresented ? "Close app search" : "Search apps")
             .accessibilityIdentifier("tool-search-button")
 
-            if isStoreEnabled {
-                Button(action: onOpenStore) {
-                    Image(systemName: "storefront")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Ironsmith Store")
-                .accessibilityLabel("Ironsmith Store")
-                .accessibilityIdentifier("app-store-button")
+            Button(action: onOpenStore) {
+                Image(systemName: "storefront")
+                    .font(.system(size: 15, weight: .semibold))
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Ironsmith Store")
+            .accessibilityLabel("Ironsmith Store")
+            .accessibilityIdentifier("app-store-button")
 
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape")
@@ -101,10 +98,8 @@ struct ToolLibraryPopoverHeaderView: View {
 
                 Divider()
 
-                if isStoreEnabled {
-                    Button("Browse Ironsmith Store...") {
-                        onOpenStore()
-                    }
+                Button("Browse Ironsmith Store...") {
+                    onOpenStore()
                 }
 
                 Button("Open Settings…", action: onOpenSettings)

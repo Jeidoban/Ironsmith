@@ -61,6 +61,9 @@ final class CommandLineToolsGate {
 
         let availability = await client.detectAvailability()
         guard !Task.isCancelled else { return }
+        // TODO(CLTSwiftUIMacrosWorkaround): Remove this cache update with the CLT SDK fallback.
+        await GeneratedAppSDKSelection.update(for: availability)
+        guard !Task.isCancelled else { return }
         self.availability = availability
 
         switch availability {
