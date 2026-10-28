@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     name: Build and package release (${{ matrix.arch }})
+    # Releases are signed and published only from the public repository.
+    if: github.repository == 'Jeidoban/Ironsmith'
     runs-on: xcode-27
     strategy:
       fail-fast: false
