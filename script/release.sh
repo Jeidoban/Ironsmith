@@ -6,8 +6,24 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
 
+RELEASE_REPOSITORY="Jeidoban/Ironsmith"
+
 usage() {
     echo "Usage: $0 [major|minor|patch]" >&2
+    echo "Tags are pushed to the remote for $RELEASE_REPOSITORY." >&2
+    echo "Set IRONSMITH_RELEASE_REMOTE to choose a remote explicitly." >&2
+}
+
+release_remote_name() {
+    local remote url
+    for remote in $(git remote); do
+        url="$(git remote get-url "$remote")"
+        if [[ "$url" =~ [:/]${RELEASE_REPOSITORY}(\.git)?/?$ ]]; then
+            echo "$remote"
+            return 0
+        fi
+    done
+    return 1
 }
 
 release_type="${1:-}"
@@ -47,7 +63,22 @@ if [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 
-git fetch --tags --prune-tags origin
+release_remote="${IRONSMITH_RELEASE_REMOTE:-}"
+if [[ -z "$release_remote" ]] && ! release_remote="$(release_remote_name)"; then
+    echo "No git remote points at $RELEASE_REPOSITORY." >&2
+    echo "Add one or set IRONSMITH_RELEASE_REMOTE." >&2
+    exit 1
+fi
+
+git fetch --tags --prune-tags "$release_remote"
+git fetch "$release_remote" main
+
+if ! git merge-base --is-ancestor HEAD "$release_remote/main"; then
+    echo "HEAD is not on $release_remote/main; tagging it would publish unreleased commits." >&2
+    echo "Check out the commit to release from $release_remote/main, for example:" >&2
+    echo "  git switch --detach $release_remote/main" >&2
+    exit 1
+fi
 
 latest_tag="$(
     git tag --list "v*" --sort=-v:refname |
@@ -91,7 +122,8 @@ branch_name="$(git branch --show-current)"
 echo "Latest stable tag: ${latest_tag:-none}"
 echo "Next tag: $next_tag"
 echo "Commit: $short_sha${branch_name:+ on $branch_name}"
-read -r -p "Create and push $next_tag to origin? [y/N] " confirmation
+echo "Release remote: $release_remote ($(git remote get-url "$release_remote"))"
+read -r -p "Create and push $next_tag to $release_remote? [y/N] " confirmation
 
 case "$confirmation" in
     y | Y | yes | YES | Yes)
@@ -103,4 +135,4 @@ case "$confirmation" in
 esac
 
 git tag -a "$next_tag" -m "Release $next_tag"
-git push origin "$next_tag"
+git push "$release_remote" "$next_tag"
